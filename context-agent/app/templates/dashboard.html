@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="max-w-4xl mx-auto mt-6">
+  <h2 class="text-2xl font-bold mb-4">Generated contexts</h2>
+
+  <form method="get" action="{{ url_for('main.index') }}" class="mb-4 flex flex-wrap gap-4 items-end">
+    <div>
+      <label class="block text-sm font-medium">Filter by status:</label>
+      <select name="status" class="border rounded p-1">
+        <option value="">Tots</option>
+        <option value="pending" {% if status_filter == 'pending' %}selected{% endif %}>Pending</option>
+        <option value="complete" {% if status_filter == 'complete' %}selected{% endif %}>Complete</option>
+      </select>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium">Sort by date:</label>
+      <select name="sort" class="border rounded p-1">
+        <option value="desc" {% if sort_order == 'desc' %}selected{% endif %}>Newest first</option>
+        <option value="asc" {% if sort_order == 'asc' %}selected{% endif %}>Oldest first</option>
+      </select>
+    </div>
+    <button type="submit" class="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600">
+      Apply
+    </button>
+  </form>
+  <div class="space-y-4">
+    {% for c in contexts %}
+      <div class="bg-white p-4 shadow rounded">
+        <div class="text-sm text-gray-500 mb-2">
+          <form method="POST" action="{{ url_for('main.delete_context', context_id=(c._id | string)) }}"
+              onsubmit="return confirm('Segur que vols eliminar aquest context?');" 
+              class="inline">
+          {{ c.created_at }} — <strong>v{{ c.version }}</strong> — Status: {{ c.status }}
+          <button type="submit" class="py-2 px-4 bg-rose-500 text-white font-semibold rounded-lg shadow-md hover:bg-rose-700 focus:outline-none">
+            Delete
+          </button>
+          </form>
+          <form action="{{ url_for('main.continue_context', context_id=(c._id | string)) }}" method="post" class="inline">
+            <button type="submit" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">
+              Generate
+            </button>
+          </form>
+        </div>
+        <div class="text-sm text-gray-700 mb-2">
+          <strong>Country:</strong> {{ c.country | e }}<br>
+          <strong>Region:</strong> {{ c.region | e }}<br>
+          <strong>Sector:</strong> {{ c.sector | e }}
+        </div>
+        <pre class="text-gray-800 whitespace-pre-wrap">{{ c.need | e }}</pre>
+      </div>
+    {% else %}
+      <p>No context found.</p>
+    {% endfor %}
+  </div>
+
+  <!-- Paginació -->
+  {% set total_pages = (total_count // per_page) + (1 if total_count % per_page else 0) %}
+  {% if total_pages > 1 %}
+    <div class="mt-6 flex gap-2">
+      {% for p in range(1, total_pages + 1) %}
+        <a href="{{ url_for('main.index', page=p, status=status_filter, sort=sort_order) }}"
+          class="px-3 py-1 rounded border {% if p == page %}bg-blue-600 text-white{% else %}bg-white{% endif %}">
+          {{ p }}
+        </a>
+      {% endfor %}
+    </div>
+  {% endif %}
+  {% endblock %}
+</div>

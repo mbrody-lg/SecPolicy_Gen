@@ -1,0 +1,19 @@
+answers: 
+  - id: country 
+    answer: Spain 
+  - id: region 
+    answer: Andalusia 
+  - id: sector 
+    answer: Agri-food 
+  - id: important_assets 
+    answer: Traceability systems, production data, ERP. 
+  - id: critical_assets 
+    answer: Production and logistics database. 
+  - id: current_security_operations 
+    answer: Passwords, local backups. 
+  - id: methodology 
+    answer: ENISA's basic controls should be applied. 
+  - id: generic 
+    answer: Sectoral generics with logistical adaptation. 
+  - id: need 
+    answer: Reduce operational risk and avoid data loss.

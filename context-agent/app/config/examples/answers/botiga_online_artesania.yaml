@@ -1,0 +1,19 @@
+answers: 
+- id: country 
+  answer: France 
+- id: region 
+  answer: Western Europe 
+- id: sector 
+  answer: Craft e-commerce 
+- id: important_assets 
+  answer: Web platform, customer database, product images. 
+- id: critical_assets 
+  answer: Sales website and online payment system. 
+- id: current_security_operations 
+  answer: Hosting with HTTPS, user authentication, security plugins. 
+- id: methodology 
+  answer: Not defined; CIS Controls could be applied. 
+- id: generic 
+  answer: Generics adapted to e-commerce. 
+- id: need 
+  answer: Ensure business continuity in the event of a cyber incident.

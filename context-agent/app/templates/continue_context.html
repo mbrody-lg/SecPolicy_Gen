@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="text-xl font-bold mb-4">Continue context: {{ context._id }}</h2>
+
+<form method="POST" class="space-y-4">
+  <div>
+    <label class="block text-sm font-medium">Add Context</label>
+    <textarea name="prompt" rows="5"
+              class="w-full p-2 border rounded" required></textarea>
+  </div>
+
+  {% if error %}
+    <div class="text-red-600 text-sm">{{ error }}</div>
+  {% endif %}
+
+  <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded">Enviar</button>
+</form>
+
+<a href="{{ url_for('main.context_detail', context_id=context._id) }}"
+   class="text-blue-600 hover:underline mt-4 inline-block">
+   ← Back to context
+</a>
+{% endblock %}

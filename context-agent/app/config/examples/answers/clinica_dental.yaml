@@ -1,0 +1,19 @@
+answers:
+  - id: country
+    answer: Spain
+  - id: region
+    answer: Valencian Community
+  - id: sector
+    answer: Private healthcare
+  - id: important_assets
+    answer: Medical records, digital equipment, management application.
+  - id: critical_assets
+    answer: Medical data and backup systems.
+  - id: current_security_operations
+    answer: Antivirus protection, local copies, password access.
+  - id: methodology
+    answer: GDPR and ISO 27799 should be applied.
+  - id: generic
+    answer: Specific to the healthcare sector.
+  - id: need
+    answer: Comply with GDPR and protect patient data.

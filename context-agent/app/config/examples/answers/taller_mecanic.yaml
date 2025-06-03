@@ -1,0 +1,19 @@
+answers:
+  - id: country
+    answer: Spain
+  - id: region
+    answer: Catalonia
+  - id: sector
+    answer: Automotive and maintenance services
+  - id: important_assets
+    answer: Diagnostic computers, customer data, management software.
+  - id: critical_assets
+    answer: Customer database and billing systems.
+  - id: current_security_operations
+    answer: Basic antivirus, manual backups, passwords for access.
+  - id: methodology
+    answer: No clear methodology applied; basic ISO 27001 should be established.
+  - id: generic
+    answer: Specific to protect personal data and diagnostic equipment.
+  - id: need
+    answer: Data protection and systematization of digital security.

@@ -1,0 +1,46 @@
+agent:
+  name: validator-agent
+type: mock
+name: MockAgent
+instructions: |
+  You are an expert in information security and regulatory compliance for SMEs.
+model: simulador-llm
+tools: []
+prompt_template: |
+  { instructions }
+
+  ---
+
+  Policy text:
+  { prompt }
+
+  Respond only with the validation result, justification and recommendations.
+roles:
+  - AWC: Agent Worker Compliance
+    instructions: |
+      Valida si les referències legals i normatives son coherents.
+    model: simulador-llm
+    temperature: 0.3
+    max_tokens: 500
+  - AWL: Agent Worker Logic
+    instructions: |
+      Valida si l’estructura de la política es coherent amb el pla i segueix la plantilla base.
+    model: simulador-llm
+    temperature: 0.5
+    max_tokens: 1000
+  - AWT: Agent Worker Tone
+    instructions: |
+      Valida l'adequació del llenguatge, el to i la claredat.
+    model: simulador-llm
+    temperature: 0.3
+    max_tokens: 500
+  - EVA: Agent Evaluator
+    instructions: |
+      Recollides les validacions, analitza i determina si cal revisar la política.
+    model: simulador-llm
+    temperature: 0.5
+    max_tokens: 1000
+validation:
+  rounds: 3
+  consensus_threshold: 2
+  vote_strategy: majority

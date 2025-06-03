@@ -1,0 +1,41 @@
+type: mock
+name: MockPolicy
+instructions: |
+  You are an expert in information security and regulatory compliance for SMEs.
+model: simulador-llm
+tools: []
+roles:
+  - RAG: Retrieval-Augmented Generation
+    instructions: |
+      Give me a list of the technical requirements that must be met with respect to the applicable regulations in this context:
+    model: simulador-llm
+    temperature: 0.3
+    max_tokens: 500
+    tools: []
+    vector:
+      - chroma: Chroma Vector Database
+        collection: [normativa, sector, guia, metodologia]
+        model: intfloat/e5-base
+        chunk_size: 300
+        chunk_overlap: 50
+  - MPG: Multi-Path Plan Generator
+    instructions: |
+      Act as a Cybersecurity Consultant, expert in information security and regulatory compliance for SMEs. Respecting the described company context and the technical requirements received, give me 3 proposals for security policies for the company, using clear and understandable language.
+    model: simulador-llm
+    temperature: 0.7
+    max_tokens: 1000
+    tools: []
+  - SRFL: Self Reflection
+    instructions: |
+      Acts as a Cybersecurity Consultant, expert in information security and regulatory compliance for SMEs. Analyzes proposals and creates an improved version that combines strengths, uses clear and understandable language.
+    model: simulador-llm
+    temperature: 0.5
+    max_tokens: 800
+    tools: []
+  - IMQ: One or Incremental Model Query
+    instructions: |
+      He acts as a cybersecurity consultant, expert in information security and regulatory compliance for SMEs. Refine the final version in compliance with good practices: Security policies have [Title: Include the purpose in the title itself] [Context: Business context of application, established commitments.] [Scope: It is necessary to define what is considered within the scope of the policy and what is outside it.] [Regulation: Specification of the applicable regulations, both in the context of the company, in the domain of security to be protected, and in the type of information that is to be secured.] [Objectives: It is necessary to specify which business objectives are to be achieved with this policy, emphasizing its importance.] [Responsible: Responsibilities must be clearly defined to avoid problems in decision-making and in the initiative in taking actions.] [Actions: Set of actions necessary to ensure that the policy is complied with in line with the needs of the company, the applicable regulations and the defined scope.] [Procedures: Set of management and/or governance processes necessary to monitor and control compliance, as well as continuous improvement in its execution.] [Frequently Asked Questions (optional): Resolution of doubts, examples, application references.]
+    model: simulador-llm
+    temperature: 0.3
+    max_tokens: 1000
+    tools: []

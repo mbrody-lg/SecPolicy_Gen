@@ -1,0 +1,46 @@
+agent:
+  name: validator-agent
+type: mistralai
+name: MistralAI-Validator
+instructions: |
+  You are an expert in information security and regulatory compliance for SMEs.
+model: mistral-medium-latest
+tools: []
+prompt_template: |
+  { instructions }
+
+  ---
+
+  Policy text:
+  { prompt }
+
+  Respond only with the validation result, justification and recommendations.
+roles:
+  - AWC: Agent Worker Compliance
+    instructions: |
+      Validate whether legal and regulatory references are coherent. Respond only with these validation results. STATUS:(accepted|review|reject), REASON:(justification) and RECOMMENDATIONS:(List of recommendations to improve).
+    model: mistral-medium-latest
+    temperature: 0.3
+    max_tokens: 500
+  - AWL: Agent Worker Logic
+    instructions: |
+      Validate whether the policy structure is consistent with the plan and follows the base template. Respond only with these validation results. STATUS:(accepted|review|reject), REASON:(justification) and RECOMMENDATIONS:(List of recommendations to improve).
+    model: mistral-medium-latest
+    temperature: 0.5
+    max_tokens: 1000
+  - AWT: Agent Worker Tone
+    instructions: |
+      Validates the appropriateness of language, tone, and clarity. Respond only with these validation results. STATUS:(accepted|review|reject), REASON:(justification) and RECOMMENDATIONS:(List of recommendations to improve).
+    model: mistral-medium-latest
+    temperature: 0.3
+    max_tokens: 500
+  - EVA: Agent Evaluator
+    instructions: |
+      Once the validations have been collected, analyze and determine if the policy needs to be revised.
+    model: mistral-medium-latest
+    temperature: 0.5
+    max_tokens: 1000
+validation:
+  rounds: 3
+  consensus_threshold: 2
+  vote_strategy: majority

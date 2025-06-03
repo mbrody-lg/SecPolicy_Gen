@@ -1,0 +1,19 @@
+questions:
+- id: country
+  question: What country does the company belong to?
+- id: region
+  question: In which region(s) does the company operate?
+- id: sector
+  question: To which business sector does it belong?
+- id: important_assets
+  question: Which assets do you consider important for the company's operations?
+- id: critical_assets
+  question: Of these assets, which are critical for business continuity?
+- id: current_security_operations
+  question: Describe which security operations are currently being applied?
+- id: methodology
+  question: Is any security methodology being applied? Describe which one or if one should be proposed.
+- id: generic
+  question: Should the policies be generic or specific?
+- id: need
+  question: Describe what need is being covered.

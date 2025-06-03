@@ -1,0 +1,19 @@
+answers: 
+  - id: country 
+    answer: Netherlands 
+  - id: region 
+    answer: Europe and USA 
+  - id: sector 
+    answer: Technology and electronics 
+  - id: important_assets 
+    answer: Firmware, designs, test data, IP. 
+  - id: critical_assets 
+    answer: Source code and development data. 
+  - id: current_security_operations 
+    answer: Version control, GitHub with 2FA. 
+  - id: methodology 
+    answer: SSDF from NIST is recommended. 
+  - id: generic 
+    answer: Specific by development cycle. 
+  - id: need 
+    answer: Protect intellectual property and avoid espionage.

@@ -1,0 +1,11 @@
+Flask
+flask-pymongo
+python-dotenv
+openai>=1.3.9
+openai-agents
+PyYaml
+python-time
+requests
+pytest
+coverage
+markdown

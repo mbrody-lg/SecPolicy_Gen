@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="text-xl font-bold mb-4">Agent response</h2>
+
+<div class="bg-white p-4 shadow rounded space-y-4">
+  <div>
+    <strong>Previous prompt:</strong>
+    <pre class="bg-gray-100 p-2 rounded">{{ context.last_followup_prompt | e }}</pre>
+  </div>
+  <div>
+    <strong>Response generated:</strong>
+    <pre class="bg-gray-100 p-2 rounded whitespace-pre-wrap">{{ response | e }}</pre>
+  </div>
+</div>
+
+<a href="{{ url_for('main.context_detail', context_id=context._id) }}"
+   class="text-blue-600 hover:underline mt-4 inline-block">
+   ← Back to context
+</a>
+{% endblock %}

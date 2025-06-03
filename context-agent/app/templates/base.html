@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ca">
+  <head>
+    <meta charset="utf-8">
+    <title>Security Policy Generator</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.css') }}">
+  </head>
+  <body class="bg-gray-100 text-gray-800">
+    <nav class="bg-white shadow p-4 flex justify-between">
+      <a href="{{ url_for('main.index') }}" class="font-bold text-xl">Context Generator</a>
+      <a href="{{ url_for('main.create') }}" class="text-blue-600 hover:underline">+ New context</a>
+      <div class="text-sm opacity-75">
+        Agent: <span class="font-mono">{{ agent_type|capitalize }}</span>
+      </div>
+    </nav>
+
+    <main class="p-6 max-w-6xl mx-auto">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <div class="mt-4 space-y-2">
+            {% for category, message in messages %}
+              <div class="p-2 rounded bg-{{ 'green-100' if category == 'success' else 'red-100' }} text-sm">
+                {{ message }}
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}      
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>

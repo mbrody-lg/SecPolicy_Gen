@@ -1,0 +1,54 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto mt-6">
+  <h1 class="text-2xl font-bold mb-4">Context detail</h1>
+
+  <div class="bg-white rounded-lg shadow p-4 mb-6">
+    <h2 class="text-xl font-semibold mb-2">Conversation</h2>
+    <div class="space-y-4">
+      {% for item in interactions %}
+        {% if item.origin == 'agent' and item.answer == '' %}
+          <div class="flex justify-end">
+            <div class="bg-white border border-gray-300 p-3 rounded-lg max-w-xl shadow text-sm text-right">
+              {{ item.question_text }}
+            </div>
+          </div>
+        {% elif item.origin == 'user' %}
+          <div class="flex justify-start">
+            <div class="bg-gray-100 p-3 rounded-lg max-w-xl shadow text-sm">
+              {{ item.answer }}
+            </div>
+          </div>
+        {% elif item.origin == 'agent' %}
+          <div class="flex justify-end">
+            <div class="bg-green-100 p-3 rounded-lg max-w-3xl shadow text-sm prose prose-sm prose-green">
+              {{ item.rendered_answer | safe }}
+            </div>
+          </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="bg-white rounded-lg shadow p-4">
+    <h2 class="text-xl font-semibold mb-2">Add more context</h2>
+    <form method="post" action="{{ url_for('main.continue_context', context_id=context._id) }}">
+      <textarea name="prompt" placeholder="Add more information or questions..." rows="4"
+        class="w-full border rounded p-2 text-sm focus:outline-none focus:ring focus:border-blue-300 mb-4"></textarea>
+      <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+        Add
+      </button>
+    </form>
+  </div>
+
+  <div class="bg-white rounded-lg shadow p-4">
+    <h2 class="text-xl font-semibold mb-2">Generate policies</h2>
+    <form method="post" action="{{ url_for('main.trigger_policy_generation', context_id=context._id) }}">
+      <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">
+        Generate and validate
+      </button>
+    </form>
+  </div>
+</div>
+{% endblock %}

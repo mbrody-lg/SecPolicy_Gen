@@ -1,0 +1,7 @@
+agent: 
+name: context-agent
+type: mock
+instructions: | 
+  Simulates a response without calling any external API.
+model: simulator-llm
+tools: []

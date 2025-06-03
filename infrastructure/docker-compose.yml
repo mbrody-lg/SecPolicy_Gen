@@ -1,0 +1,84 @@
+services:
+  mongo:
+    image: mongo:5
+    container_name: context_mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - internal
+  chroma:
+    image: chromadb/chroma
+    volumes:
+      - chroma_data:/data
+    ports:
+      - "8000:8000"
+    networks:
+      - internal
+  context-agent:
+    build: ../context-agent
+    container_name: context_agent_web
+    ports:
+      - "5003:5000"
+    volumes:
+      - ../context-agent:/context-agent
+    working_dir: /context-agent
+    environment:
+      - FLASK_APP=run.py
+      - FLASK_ENV=development
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
+      - MONGO_URI=${MONGO_URI}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - POLICY_AGENT_URL=${POLICY_AGENT_URL}
+    depends_on:
+      - mongo
+    networks:
+      - internal
+  policy-agent:
+    build: ../policy-agent
+    container_name: policy_agent_service
+    ports:
+      - "5002:5000"
+    volumes:
+      - ../policy-agent:/policy-agent
+    working_dir: /policy-agent
+    environment:
+      - FLASK_APP=app
+      - FLASK_ENV=development
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
+      - MONGO_URI=${MONGO_URI}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - CHROMA_HOST=${CHROMA_HOST}
+      - CHROMA_PORT=${CHROMA_PORT}
+    depends_on:
+      - mongo
+      - chroma
+    networks:
+      - internal
+  validator-agent:
+    build:
+      context: ../validator-agent
+    container_name: validator_agent_service
+    ports:
+      - "5001:5000"
+    environment:
+      - FLASK_APP=app
+      - FLASK_ENV=development
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
+      - MONGO_URI=${MONGO_URI}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
+      - MISTRAL_API_URL=${MISTRAL_API_URL}
+      - POLICY_AGENT_URL=${POLICY_AGENT_URL}
+    volumes:
+      - ../validator-agent:/validator-agent
+    depends_on:
+      - mongo
+    networks:
+      - internal
+volumes:
+  mongo_data:
+  chroma_data:
+networks:
+  internal:

@@ -1,0 +1,8 @@
+CIS_Controls_v8.1.pdf
+ISO_27001_ES.pdf
+ISO_27002-ES.pdf
+Magerit_Book
+Magerit_Book-II-Catalogue-of-elements.pdf
+Magerit_Book-III-Techniques.pdf
+NIST.CSWP.29_CSF_v2.0_.pdf
+uk_CAF_cyber-assessment-framework-v3.2.pdf

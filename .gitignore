@@ -1,0 +1,71 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+
+# Virtual environments
+venv/
+env/
+.venv/
+.env/
+.idea/
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# VSCode
+*.code-workspace
+.vscode/
+.coverage
+
+# Pytest
+.pytest_cache/
+cache/
+
+# MongoDB / Flask
+*.db
+*.sqlite3
+
+# Environment / Secrets
+.env
+.env.*.local
+
+# MacOS
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# -----------------------
+# Miscellaneous
+# -----------------------
+*.bak
+*.orig
+*.tmp
+*.temp
+*~
+instance/
+htmlcov/
+*.pdf

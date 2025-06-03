@@ -1,0 +1,19 @@
+answers: 
+  - id: country 
+    answer: Spain 
+  - id: region 
+    answer: Madrid and Barcelona 
+  - id: sector 
+    answer: Professional services (HR) 
+  - id: important_assets 
+    answer: CVs, customer information, management software. 
+  - id: critical_assets 
+    answer: Candidate database and access to external portals. 
+  - id: current_security_operations 
+    answer: Secure sewers, antivirus  , restricted access. 
+  - id: methodology 
+    answer: ISO 27701 should be applie  d for privacy. 
+  - id: generic 
+    answer: Specific for the processin  g of personal data. 
+  - id: need 
+    answer: Protect sensitive candidat  e and client dat          a.

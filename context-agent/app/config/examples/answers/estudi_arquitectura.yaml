@@ -1,0 +1,19 @@
+answers: 
+  - id: country 
+    answer: Italy 
+  - id: region 
+    answer: Northern Italy 
+  - id: sector 
+    answer: Architecture and engineering 
+  - id: important_assets 
+    answer: Digital plans, CAD software, NAS servers. 
+  - id: critical_assets 
+    answer: Current projects and contractual documents. 
+  - id: current_security_operations 
+    answer: Protected internal network, remote encrypted access. 
+  - id: methodology 
+    answer: Not applied; ISO 27001 could be implemented. 
+  - id: generic 
+    answer: Specific adapted to collaborative projects. 
+  - id: need 
+    answer: Protect plans and communications with clients.

@@ -1,0 +1,19 @@
+answers:
+- id: country
+  answer: Spain
+- id: region
+  answer: Catalonia
+- id: sector
+  answer: Education
+- id: important_assets
+  answer: Student information, grades, class calendar.
+- id: critical_assets
+  answer: Student database and academic records.
+- id: current_security_operations
+  answer: Antivirus, password management, local copies.
+- id: methodology
+  answer: None used; ISO 27002 should be implemented.
+- id: generic
+  answer: Generics adapted to educational environments.
+- id: need
+  answer: Protect personal data and ensure secure access to teachers.

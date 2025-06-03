@@ -1,0 +1,19 @@
+answers:
+  - id: country
+    answer: Germany
+  - id: region
+    answer: Central Europe
+  - id: sector
+    answer: Audiovisual communication
+  - id: important_assets
+    answer: Multimedia files, video servers, editing tools.
+  - id: critical_assets
+    answer: Projects in editing and contracts with clients.
+  - id: current_security_operations
+    answer: Restricted access to servers, backups.
+  - id: methodology
+    answer: None; NIST controls should be considered.
+  - id: generic
+    answer: Specific for digital media.
+  - id: need
+    answer: Avoid loss of material and content leakage.
