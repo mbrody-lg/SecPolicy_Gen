@@ -83,9 +83,9 @@ class OpenAIAgent(Agent):
                 max_tokens=max_tokens
             )
         except Exception as e:
-            print({"error": str(e)})
+            print({"error": str(e) + response})
 
-        if current_app.config["DEBUG"]:
+        if current_app.config["DEBUG"] and response:
             print(f"response: {response}")
 
         return response.choices[0].message.content.strip()
