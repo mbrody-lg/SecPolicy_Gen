@@ -1,76 +1,76 @@
-# Directori de la infraestructura
+# Infrastructure directory
 INFRA_DIR=infrastructure
 
 COMPOSE=docker-compose -f $(INFRA_DIR)/docker-compose.yml --env-file $(INFRA_DIR)/.env
 
 .PHONY: all up down clean rebuild logs context-shell context-tests context-import policy-shell policy-tests policy-vectorize validator-shell validator-tests help
 
-## Arrenca tota la infraestructura
+## Start all infrastructure
 up:
 	$(COMPOSE) up --build -d
 
-## Para tota la infraestructura
+## Stop all infrastructure
 down:
 	$(COMPOSE) down
 
-## Para i elimina contenidors, xarxes i volums
+## Stop and remove containers, networks, and volumes
 clean:
 	$(COMPOSE) down -v --remove-orphans
 
-## Reconstrueix els contenidors
+## Rebuild containers
 rebuild:
 	$(COMPOSE) up --build -d --force-recreate
 
-## Mostra els logs de tots els serveis
+## Show logs for all services
 logs:
 	$(COMPOSE) logs -f
 
-## Entra dins el contenidor de context-agent
-context-shell:
+## Enter the container agent-context
+shell-context: 
 	docker exec -it context_agent_web bash
 
-## Executa testos per a context-agent
-context-tests:
+## Run tests for agent-context
+context-tests: 
 	docker exec -it context_agent_web pytest
 
-## Executa testos per a context-agent
-context-import:
+## Run tests for agent-context
+context-import: 
 	docker exec -it context_agent_web python generate_context_from_yaml.py
-	
-## Entra dins el contenidor de policy-agent
-policy-shell:
+
+## Enter the policy-agent container
+policy-shell: 
 	docker exec -it policy_agent_service bash
 
-## Executa testos per a policy-agent
-policy-tests:
+## Run tests for policy-agent
+policy-tests: 
 	docker exec -it policy_agent_service pytest
 
-## Executa testos per a policy-agent
-policy-vectorize:
+## Run tests for policy-agent
+policy-vectorize: 
 	docker exec -it policy_agent_service python scripts/index_pdfs_to_chroma.py
 
-## Entra dins el contenidor de validator-agent
-validator-shell:
+## Enter the validator-agent container
+validator-shell: 
 	docker exec -it validator_agent_service bash
 
-## Executa testos per a validator-agent
+## Execute testos for validator-agent
 validator-tests:
 	docker exec -it validator_agent_service pytest
 
-## Ajuda
+## Help
 help:
-	@echo "Makefile per al projecte multi-agent"
+	@echo "Makefile for multi-agent project"
 	@echo ""
-	@echo "make up              	-> Arrenca tota la infraestructura"
-	@echo "make down            	-> Para i elimina contenidors"
-	@echo "make clean           	-> Para + elimina volums"
-	@echo "make rebuild         	-> Reconstrueix els serveis"
-	@echo "make logs            	-> Mostra els logs en viu"
-	@echo "make context-shell   	-> Accedeix al shell de context-agent"
-	@echo "make context-tests   	-> Executa tests dins de context-agent"
-	@echo "make context-import  	-> Executa importacio de contingut d'exemple"
-	@echo "make policy-shell    	-> Accedeix al shell de policy-agent"
-	@echo "make policy-tests   		-> Executa tests dins de policy-agent"
-	@echo "make policy-vectorize   	-> Executa vectorització de dades dins de policy-agent"
-	@echo "make validator-shell    	-> Accedeix al shell de validator-agent"
-	@echo "make validator-tests    	-> Executa tests dins de validator-agent"
+	@echo "make up 			-> Start all infrastructure"
+	@echo "make down 		-> Stop and remove containers"
+	@echo "make clean 		-> Stop + remove volumes"
+	@echo "make rebuild 		-> Rebuild services"
+	@echo "make logs 		-> Show live logs"
+	@echo "make context-shell 	-> Access context-agent shell"
+	@echo "make context-tests 	-> Run tests inside context-agent"
+	@echo "make context-import 	-> Run sample content import"
+	@echo "make policy-shell 	-> Access policy-agent shell"
+	@echo "make policy-tests 	-> Run tests inside policy-agent"
+	@echo "make policy-vectorize 	-> Run data vectorization inside policy-agent"
+	@echo "make validator-shell 	-> Access validator-agent shell"
+	@echo "make validator-tests 	-> Run tests within validator-agent"
