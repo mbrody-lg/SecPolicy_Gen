@@ -1,8 +1,8 @@
-# Infraestructura del projecte multi-agent
+# Multi-agent project infrastructure
 
-Aquest directori conté la infraestructura comuna per executar i coordinar els diferents agents del sistema mitjançant Docker i Docker Compose.
+This directory contains the common infrastructure for running and coordinating the different agents in the system using Docker and Docker Compose.
 
-## Estructura general
+## General structure
 
 ```
 multi-agent/
@@ -56,34 +56,33 @@ multi-agent/
 
 ---
 
-## Execució ràpida
+## Quick Run
 
-### 1. Requisits previs
+### 1. Prerequisites
 
 - Docker
 - Docker Compose
-- Node.js (opcional per desenvolupament fora del contenidor)
+- Node.js (optional for out-of-container development)
 
-### 2. Configura `.env`
+### 2. Configure `.env`
 
-A `infrastructure/.env`, revisa els exemples, pots utilitzar-ne únicament un, o un per cada agent:
+In `infrastructure/.env`, review the examples, you can use only one, or one for each agent:
 
 ```env
-FLASK_SECRET_KEY=canvia-aixo-en-entorn-productiu
+FLASK_SECRET_KEY=change-in-pro-env
 OPENAI_API_KEY=sk-...
 MONGO_URI=mongodb://mongo:27017/contextdb
 ```
 
-### 3. Llançar la infraestructura
+### 3. Launch the infrastructure
 
-Des de la carpeta `/`:
+From the `/` folder:
 
 ```bash
 make up
 ```
 
-- Això arrencarà tots els serveis:
-
+- This will start all the services:
 
         [x] context-agent
         [x] policy-agent
@@ -97,7 +96,7 @@ make up
 
 ## Tests
 
-Per executar els tests dins del contenidor `context-agent`:
+To run the tests inside the `context-agent` container:
 
 ```bash
 make context-tests
@@ -105,54 +104,55 @@ make context-tests
 
 ---
 
-## Comandes útils
+## Useful commands
 
-| Comanda                | Descripció                                           |
+| Command                | Description                                          |
 |------------------------|------------------------------------------------------|
-| `make up`              | Arrenca tota la infraestructura                      |  
-| `make down`            | Para i elimina contenidors                           |
-| `make clean`           | Para + elimina volums                                |
-| `make rebuild`         | Reconstrueix els serveis                             |
-| `make logs`            | Mostra els logs en viu                               |
-| `make context-shell`   | Accedeix al shell de context-agent                   |
-| `make context-tests`   | Executa tests dins de context-agent                  |
-| `make context-import`  | Executa importacio de contingut d'exemple            |
-| `make policy-shell`    | Accedeix al shell de policy-agent                    |
-| `make policy-tests`    | Executa tests dins de policy-agent                   |
-| `make policy-vectorize`| Executa vectorització de dades dins de policy-agent  |
-| `make validator-shell` | Accedeix al shell de validator-agent                 |
-| `make validator-tests` | Executa tests dins de validator-agent                |
+| `make up`              | Start all infrastructure                             |  
+| `make down`            | Stop and remove containers                           |
+| `make clean`           | Stop + remove volumes                                |
+| `make rebuild`         | Rebuild services                                     |
+| `make logs`            | Show live logs                                       |
+| `make context-shell`   | Access context-agent shell                           |
+| `make context-tests`   | Run tests within context-agent                       |
+| `make context-import`  | Run sample content import                            |
+| `make policy-shell`    | Access policy-agent shell                            |
+| `make policy-tests`    | Run tests within policy-agent                        |
+| `make policy-vectorize`| Run data vectorization within policy-agent           |
+| `make validator-shell` | Access validator-agent shell                         |
+| `make validator-tests` | Run tests inside validator-agent                     |
 |------------------------|------------------------------------------------------|
 
-## Extensibilitat
+## Extensibility
 
-El sistema està dissenyat per afegir fàcilment nous tipus d’agents basats en diferents SDKs, mantenint una estructura modular i reutilitzable.
-Per afegir un nou backend com Claude, Mistral, ...:
+The system is designed to easily add new types of agents based on different SDKs, maintaining a modular and reusable structure.
+To add a new backend like Claude, Mistral, ...:
 
-1. Duplica la carpeta `openai/` dins `app/agents/` i anomena-la `claude/`, `mistral/`,...
-2. Implementa el teu `client.py` amb la lògica pròpia del SDK corresponent.
-3. Implementa `agent.py`, assegurant-te que:
-    - La classe hereti de `Agent` (de `base.py`)
-    - S’enregistri correctament via `__init_subclass__` per utilitzar el patro AGENT_REGISTRY
-4. Reutilitza o adapta els rols dins `roles/` (alguns patrons utilitzats son `ProactiveGoalCreator`, `PromptResponseOptimiser`, etc.) segons necessitat
-5. Crea el YAML de configuració amb el tipus corresponent (type: `claude`, `openai`, `mistralai`)
-6. No cal modificar `factory.py`: els nous agents es carreguen automàticament si segueixen l’estructura `app/agents/<type>/agent.py`.
-7. Cada agent ha de definir el seu `Dockerfile`, `run.py`, i estructura modular
-8. Afegir el servei nou a `docker-compose.yml`
+1. Duplicate the `openai/` folder inside `app/agents/` and name it `claude/`, `mistral/`,...
 
-## Consells
+2. Implement your `client.py` with the logic of the corresponding SDK.
+3. Implement `agent.py`, ensuring that:
+- The class inherits from `Agent` (from `base.py`)
+- It is correctly registered via `__init_subclass__` to use the AGENT_REGISTRY pattern
+4. Reuse or adapt the roles in `roles/` (some patterns used are `ProactiveGoalCreator`, `PromptResponseOptimiser`, etc.) as needed
+5. Create the configuration YAML with the corresponding type (type: `claude`, `openai`, `mistralai`)
+6. There is no need to modify `factory.py`: new agents are loaded automatically if they follow the structure `app/agents/<type>/agent.py`.
+7. Each agent must define its `Dockerfile`, `run.py`, and modular structure
+8. Add the new service to `docker-compose.yml`
 
-- El frontend utilitza Tailwind i es compila amb `npm run build` a la carpeta `frontend/`
-- El CSS generat es copia a `app/static/css/tailwind.css` automàticament en el `Dockerfile`
+## Tips
 
-### Contribució
+- The frontend uses Tailwind and is compiled with `npm run build` in the `frontend/` folder
+- The generated CSS is copied to `app/static/css/tailwind.css` automatically in the `Dockerfile`
 
-1. Crea un “fork” del projecte.
-2. Clona el teu fork localment.
-3. Crea una branca dedicada (p. ex. feat/new-role-evaluation).
-4. Fes els teus canvis i executa tots els tests, si crees noves funcions si us plau posa-li un mínim test:
-5. Obre un “Pull Request” explicant la funcionalitat o correcció proposada.
+### Contribution
 
-### Llicència
+1. Create a “fork” of the project.
+2. Clone your fork locally.
+3. Create a dedicated branch (e.g. feat/new-role-evaluation).
+4. Make your changes and run all tests, if you create new features please put a minimum test:
+5. Open a “Pull Request” explaining the proposed functionality or fix.
 
-Aquest projecte està publicat sota la llicència MIT. Consulta el fitxer LICENSE per a més detalls.
+### License
+
+This project is released under the MIT license. See the LICENSE file for more details.
