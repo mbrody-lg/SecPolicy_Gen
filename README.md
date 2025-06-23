@@ -1,26 +1,27 @@
-# Projecte Multiagent de Generació i Validació de Polítiques de Seguretat
+# Multi-agent Project for Generation and Validation of Security Policies
 
-## Descripció
+## Description
 
-Aquest projecte és un sistema modular de microserveis que utilitza Intel·ligència Artificial per:
-1. **Generar context** a partir de preguntes a l’usuari.
-2. **Crear polítiques de seguretat** basades en normes (ISO 27001, GDPR, etc.) i dades normatives.
-3. **Validar i revisar** les polítiques generades mitjançant consens entre agents especialitzats.
+This project is a modular microservices system that uses Artificial Intelligence to:
+1. **Generate context** from user questions.
+2. **Create security policies** based on standards (ISO 27001, GDPR, etc.) and regulatory data.
+3. **Validate and review** the policies generated through consensus between specialized agents.
 
-Està compost per tres agents principals:
-- **Context‐Agent**: Gestiona la interacció amb l’usuari per capturar informació contextual mitjançant formularis i wizard.
-- **Policy‐Agent**: Aplica patrons de Retrieval‐Augmented Generation (RAG) per elaborar una proposta de política de seguretat segons el context i els conjunts de dades normatives.
-- **Validator‐Agent**: Executa múltiples rodes de validació (consens) entre sub‐agents responsables de diferents aspectes (compliment, lògica, to, etc.) i, si cal, demana revisions fins a 3 rondes.
+It is composed of three main agents:
+- **Context‐Agent**: Manages the interaction with the user to capture contextual information through forms and wizards.
+- **Policy‐Agent**: Applies Retrieval‐Augmented Generation (RAG) patterns to develop a security policy proposal based on the context and regulatory data sets.
+- **Validator‐Agent**: Runs multiple rounds of validation (consensus) between sub‐agents responsible for different aspects (compliance, logic, tone, etc.) and, if necessary, requests revisions up to 3 rounds.
 
-Cada agent és un servei Flask que:
-- Llegeix una configuració YAML de rols (patterns de Liu et al. 2024: PassiveGoalCreator, ProactiveGoalCreator, PromptResponseOptimiser, RAG, etc.).
-- Interactua amb una base de dades (MongoDB) per persistir estats, contextos i resultats.
-- Utilitza un client HTTP per accedir a un servei Chroma (base de dades vectorial) en mode RAG.
-- Pot fer servir OpenAI (via SDK en beta) o MockAgent per a proves locals.
+Each agent is a Flask service that:
+
+- Reads a YAML configuration of roles (patterns from Liu et al. 2024: PassiveGoalCreator, ProactiveGoalCreator, PromptResponseOptimiser, RAG, etc.).
+- Interacts with a database (MongoDB) to persist states, contexts, and results.
+- Uses an HTTP client to access a Chroma service (vector database) in RAG mode.
+- Can use OpenAI (via SDK in beta) or MockAgent for local testing.
 
 ---
 
-## Enllaços als README dels Subprojectes
+## Links to the READMEs of the Subprojects
 
 - [infrastructure/README.md](infrastructure/README.md)  
 - [context-agent/README.md](context-agent/README.md)  
