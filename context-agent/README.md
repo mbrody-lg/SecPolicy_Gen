@@ -1,62 +1,59 @@
 # Context-Agent
 
-## Descripció del projecte
-**Context-Agent** és un microservei basat en Flask dissenyat per recollir informació estructurada (context empresarial) de l’usuari i generar un prompt de context per a posterior ús pels altres agents (Policy-Agent i Validator-Agent). Funciona com un “wizard” de preguntes que permet crear o continuar múltiples fils de context independents. Tota la informació de cada context es desa a MongoDB, incloent l’historial de preguntes i respostes, per tal de poder reprendre o referenciar contextos en qualsevol moment.
+## Project Description
+**Context-Agent** is a Flask-based microservice designed to collect structured information (business context) from the user and generate a context prompt for later use by the other agents (Policy-Agent and Validator-Agent). It works as a question “wizard” that allows creating or continuing multiple independent context threads. All information for each context is saved in MongoDB, including the history of questions and answers, in order to be able to resume or reference contexts at any time.
 
-### Objectius principals
-1. Oferir un flux interàctiu de preguntes per tal que l’usuari pugui descriure el seu context empresarial (país, regió, sector, actius, metodologies, necessitats, etc.).  
-2. Generar un prompt de context amb la informació recollida, aplicant patrons com `PassiveGoalCreator`, `ProactiveGoalCreator` i `PromptResponseOptimiser` (segons Liu et al. 2024).  
-3. Desar tot l’historial de preguntes i respostes a MongoDB, permetent múltiples fils de treball (cada un identificat per un `context_id`), en un futur per usuari.  
-4. Exposar endpoints per:
-   - Crear un nou context.  
-   - Continuar un context ja iniciat.  
-   - Obtenir el context i el prompt generat.  
-   - Llistar contextos existents amb filtres per estat o data.  
-   - (Opcional) Eliminar contextos en mode `TESTING`.  
-5. Integrar-se amb **Policy-Agent**: un cop el prompt de context està llest.
+### Main Objectives
+1. Provide an interactive flow of questions so that the user can describe their business context (country, region, sector, assets, methodologies, needs, etc.).
+2. Generate a context prompt with the collected information, applying patterns such as `PassiveGoalCreator`, `ProactiveGoalCreator` and `PromptResponseOptimiser` (according to Liu et al. 2024).
+3. Save all question and answer history to MongoDB, allowing multiple threads of work (each identified by a `context_id`), in the future per user.
+4. Expose endpoints to:
+- Create a new context.
+- Continue an already started context.
+- Get the context and the generated prompt.
+- List existing contexts with filters by status or date.
+- (Optional) Delete contexts in `TESTING` mode.
+5. Integrate with **Policy-Agent**: once the context prompt is ready.
 
+### Prerequisites
 
-
-### Requisits previs
-
-1. Docker & Docker Compose (recomanat).
-2. Python 3.9+ (si es vol executar sense Docker).
-3. Variables d’entorn (fora de Docker, si s’executa localment):
+1. Docker & Docker Compose (recommended).
+2. Python 3.9+ (if running without Docker).
+3. Environment variables (outside Docker, if running locally):
 
         OPENAI_API_KEY
-        MONGO_URI (per exemple, mongodb://localhost:27017/context-agent-db)
+        MONGO_URI (ex.: mongodb://mongodb:27017/context-agent-db)
         FLASK_SECRET_KEY
-        FLASK_ENV: Valor development o production.
-        CONFIG_PATH (ruta a context-agent.yaml)
+        FLASK_ENV: development or production.
+        CONFIG_PATH (path to context-agent.yaml)
 
-### Configuració
+### Configuration
 
-#### Fitxer YAML (context-agent.yaml)
-Revisa la carpeta config/exemples/ i utilitza el que et sembli millor, compte! amb CONFIG_PATH
+#### YAML file (context-agent.yaml)
+Review the config/examples/ folder and use what you think is best, be careful! with CONFIG_PATH
 
-- `questions`: Llista seqüencial de preguntes que es faran a l’usuari. Cada entrada té:
+- `questions`: Sequential list of questions to be asked to the user. Each entry has:
 
-        id: identificador únic de la pregunta (p. ex. country, sector).
-        question: text de la qüestió a mostrar.
+      id: unique identifier of the question (e.g. country, sector).
+      question: text of the question to display.
 
-- `roles`: Seqüència de rols que s’apliquen després de recollir totes les respostes:
- 
-        name: nom descriptiu (PassiveGoalCreator, etc.).
-        type: openai (o mock per a entorn de proves).
-        instructions: plantilla textual amb placeholders.
-        model: nom del model OpenAI (p. ex. gpt-4o).
-        temperature: float (0.0–1.0).
-        max_tokens: enter per limitar la resposta.
+- `roles`: Sequence of roles that are applied after collecting all the answers:
 
+      name: descriptive name (PassiveGoalCreator, etc.).
+      type: openai (or mock for testing environment).
+      instructions: textual template with placeholders.
+      model: name of the OpenAI model (e.g. gpt-4o).
+      temperature: float (0.0–1.0).
+      max_tokens: integer to limit the answer.
 
-### Contribució
+### Contribution
 
-1. Crea un “fork” del projecte.
-2. Clona el teu fork localment.
-3. Crea una branca dedicada (p. ex. feat/new-role-evaluation).
-4. Fes els teus canvis i executa tots els tests, si crees noves funcions si us plau posa-li un mínim test:
-5. Obre un “Pull Request” explicant la funcionalitat o correcció proposada.
+1. Create a “fork” of the project.
+2. Clone your fork locally.
+3. Create a dedicated branch (e.g. feat/new-role-evaluation).
+4. Commit your changes and run all tests, if you create new features please include at least one test:
+5. Open a “Pull Request” explaining the proposed feature or fix.
 
-### Llicència
+### License
 
-Aquest projecte està publicat sota la llicència MIT. Consulta el fitxer LICENSE per a més detalls.
+This project is released under the MIT license. See the LICENSE file for more details.
