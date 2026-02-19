@@ -1,31 +1,84 @@
-# Multi-agent Project for Generation and Validation of Security Policies
+# Security Policy Generation and Validation System
 
-## Description
+An AI-powered microservices platform that automatically generates and validates security policies based on regulatory standards and business context.
 
-This project is a modular microservices system that uses Artificial Intelligence to:
-1. **Generate context** from user questions.
-2. **Create security policies** based on standards (ISO 27001, GDPR, etc.) and regulatory data.
-3. **Validate and review** the policies generated through consensus between specialized agents.
+## Overview
 
-It is composed of three main agents:
-- **Context‐Agent**: Manages the interaction with the user to capture contextual information through forms and wizards.
-- **Policy‐Agent**: Applies Retrieval‐Augmented Generation (RAG) patterns to develop a security policy proposal based on the context and regulatory data sets.
-- **Validator‐Agent**: Runs multiple rounds of validation (consensus) between sub‐agents responsible for different aspects (compliance, logic, tone, etc.) and, if necessary, requests revisions up to 3 rounds.
+The system consists of three specialized agents that work together in a pipeline:
 
-Each agent is a Flask service that:
+1. **Context Agent** - Collects business information from users and generates context prompts
+2. **Policy Agent** - Generates security policies using AI and regulatory data
+3. **Validator Agent** - Reviews and refines policies through multiple validation rounds
 
-- Reads a YAML configuration of roles (patterns from Liu et al. 2024: PassiveGoalCreator, ProactiveGoalCreator, PromptResponseOptimiser, RAG, etc.).
-- Interacts with a database (MongoDB) to persist states, contexts, and results.
-- Uses an HTTP client to access a Chroma service (vector database) in RAG mode.
-- Can use OpenAI (via SDK in beta) or MockAgent for local testing.
+## System Architecture
 
----
+```
+User Input → Context Agent → Policy Agent → Validator Agent → Approved Policy
+                  ↓               ↓              ↓
+              MongoDB         MongoDB        MongoDB
+                              Chroma (RAG)
+```
 
-## Links to the READMEs of the Subprojects
+## Quick Start
 
-- [infrastructure/README.md](infrastructure/README.md)  
-- [context-agent/README.md](context-agent/README.md)  
-- [policy-agent/README.md](policy-agent/README.md)  
-- [validator-agent/README.md](validator-agent/README.md)  
+### Prerequisites
+- Docker & Docker Compose
+- Python 3.11+ (for local development)
 
----
+### Running the Full System
+```bash
+make up
+```
+
+### Stopping the System
+```bash
+make down
+```
+
+See [infrastructure/README.md](infrastructure/README.md) for detailed setup instructions.
+
+## Agent Documentation
+
+| Agent | Purpose | Documentation |
+|-------|---------|---|
+| Context Agent | Collect and structure user information | [context-agent/README.md](context-agent/README.md) |
+| Policy Agent | Generate security policies with AI | [policy-agent/README.md](policy-agent/README.md) |
+| Validator Agent | Validate and improve policies | [validator-agent/README.md](validator-agent/README.md) |
+| Infrastructure | Docker setup and configuration | [infrastructure/README.md](infrastructure/README.md) |
+
+## Useful Commands
+
+```bash
+make up              # Start all services
+make down            # Stop all services
+make clean           # Stop and remove all data
+make logs            # View live logs from all services
+make context-tests   # Run Context Agent tests
+make policy-tests    # Run Policy Agent tests
+make validator-tests # Run Validator Agent tests
+```
+
+See [infrastructure/README.md](infrastructure/README.md) for complete command reference.
+
+## Project Structure
+
+```
+SecPolicy_Gen/
+├── context-agent/      # User interaction & context generation
+├── policy-agent/       # Security policy generation
+├── validator-agent/    # Policy validation & refinement
+├── infrastructure/     # Docker & deployment configuration
+├── data/              # Regulatory and methodology documentation
+└── Makefile           # Common commands
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch (`feat/your-feature`)
+3. Make your changes and add tests
+4. Submit a pull request
+
+## License
+
+MIT License - see [LICENCE.txt](LICENCE.txt) for details

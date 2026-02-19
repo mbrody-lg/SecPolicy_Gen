@@ -1,59 +1,174 @@
-# Context-Agent
+# Context Agent
 
-## Project Description
-**Context-Agent** is a Flask-based microservice designed to collect structured information (business context) from the user and generate a context prompt for later use by the other agents (Policy-Agent and Validator-Agent). It works as a question “wizard” that allows creating or continuing multiple independent context threads. All information for each context is saved in MongoDB, including the history of questions and answers, in order to be able to resume or reference contexts at any time.
+A web service that gathers business information from users through an interactive questionnaire and generates context prompts for policy generation.
 
-### Main Objectives
-1. Provide an interactive flow of questions so that the user can describe their business context (country, region, sector, assets, methodologies, needs, etc.).
-2. Generate a context prompt with the collected information, applying patterns such as `PassiveGoalCreator`, `ProactiveGoalCreator` and `PromptResponseOptimiser` (according to Liu et al. 2024).
-3. Save all question and answer history to MongoDB, allowing multiple threads of work (each identified by a `context_id`), in the future per user.
-4. Expose endpoints to:
-- Create a new context.
-- Continue an already started context.
-- Get the context and the generated prompt.
-- List existing contexts with filters by status or date.
-- (Optional) Delete contexts in `TESTING` mode.
-5. Integrate with **Policy-Agent**: once the context prompt is ready.
+## What It Does
 
-### Prerequisites
+The Context Agent:
+- Presents users with a structured set of questions about their business
+- Collects and stores answers in MongoDB
+- Generates a formatted context prompt from the collected information
+- Allows users to resume previous conversations
 
-1. Docker & Docker Compose (recommended).
-2. Python 3.9+ (if running without Docker).
-3. Environment variables (outside Docker, if running locally):
+## Key Features
 
-        OPENAI_API_KEY
-        MONGO_URI (ex.: mongodb://mongodb:27017/context-agent-db)
-        FLASK_SECRET_KEY
-        FLASK_ENV: development or production.
-        CONFIG_PATH (path to context-agent.yaml)
+- **Interactive Questionnaire**: Questions guide users through business context (country, sector, compliance needs, etc.)
+- **Multiple Conversations**: Each user can maintain separate context threads
+- **Persistent Storage**: All Q&A history is saved in MongoDB for resuming or referencing
+- **Context Prompt Generation**: Automatically creates formatted prompts for the Policy Agent
 
-### Configuration
+## Prerequisites
 
-#### YAML file (context-agent.yaml)
-Review the config/examples/ folder and use what you think is best, be careful! with CONFIG_PATH
+- Docker (recommended)
+- Python 3.11+ (for local development)
+- MongoDB running and accessible
+- OpenAI API key
 
-- `questions`: Sequential list of questions to be asked to the user. Each entry has:
+## Environment Variables
 
-      id: unique identifier of the question (e.g. country, sector).
-      question: text of the question to display.
+Create a `.env` file in the `context-agent/` directory:
 
-- `roles`: Sequence of roles that are applied after collecting all the answers:
+```env
+OPENAI_API_KEY=sk-your-key-here
+MONGO_URI=mongodb://mongodb:27017/context-agent-db
+FLASK_SECRET_KEY=your-secret-key-here
+FLASK_ENV=development
+CONFIG_PATH=config/context-agent.yaml
+```
 
-      name: descriptive name (PassiveGoalCreator, etc.).
-      type: openai (or mock for testing environment).
-      instructions: textual template with placeholders.
-      model: name of the OpenAI model (e.g. gpt-4o).
-      temperature: float (0.0–1.0).
-      max_tokens: integer to limit the answer.
+## Running the Service
 
-### Contribution
+### With Docker
+```bash
+make up
+```
 
-1. Create a “fork” of the project.
-2. Clone your fork locally.
-3. Create a dedicated branch (e.g. feat/new-role-evaluation).
-4. Commit your changes and run all tests, if you create new features please include at least one test:
-5. Open a “Pull Request” explaining the proposed feature or fix.
+### Locally
+```bash
+pip install -r requirements.txt
+python run.py
+```
 
-### License
+The service runs on `http://localhost:5000`
 
-This project is released under the MIT license. See the LICENSE file for more details.
+## API Endpoints
+
+### Create a New Context
+```
+POST /context
+```
+
+Starts a new questionnaire session.
+
+**Response:**
+```json
+{
+  "context_id": "unique-id",
+  "status": "in_progress",
+  "current_question": {
+    "id": "country",
+    "text": "What country is your organization located in?"
+  }
+}
+```
+
+### Continue a Context
+```
+POST /context/<context_id>/answer
+Content-Type: application/json
+
+{
+  "answer": "Spain"
+}
+```
+
+Submit an answer and get the next question.
+
+### Get Context Details
+```
+GET /context/<context_id>
+```
+
+Retrieve the current state of a context and the generated prompt.
+
+**Response:**
+```json
+{
+  "context_id": "unique-id",
+  "status": "completed",
+  "answers": {
+    "country": "Spain",
+    "sector": "Banking"
+  },
+  "context_prompt": "Generated prompt text..."
+}
+```
+
+### List All Contexts
+```
+GET /contexts
+```
+
+Returns all saved contexts with filters (status, date, etc.)
+
+## Configuration
+
+The agent behavior is defined in `config/context-agent.yaml`:
+
+### Questions Section
+Lists the questions to ask users in order:
+```yaml
+questions:
+  - id: country
+    question: "What country is your organization located in?"
+  - id: sector
+    question: "What sector does your organization operate in?"
+```
+
+### Roles Section
+Defines how to process answers after collection:
+```yaml
+roles:
+  - name: PassiveGoalCreator
+    type: openai
+    model: gpt-4o-mini
+    temperature: 0.7
+    max_tokens: 1000
+    instructions: "Template text for processing..."
+```
+
+See `config/examples/` for complete configuration examples.
+
+## Testing
+
+Run the test suite:
+
+```bash
+make context-tests
+```
+
+## Development
+
+1. Create a feature branch: `git checkout -b feat/your-feature`
+2. Make your changes
+3. Add tests for new functionality
+4. Run tests: `make context-tests`
+5. Submit a pull request
+
+## Troubleshooting
+
+**MongoDB Connection Error**
+- Ensure MongoDB is running and accessible at the MONGO_URI
+- Check the connection string in `.env`
+
+**OpenAI API Errors**
+- Verify your `OPENAI_API_KEY` is correct
+- Check you have sufficient API credits
+
+**Configuration Issues**
+- Verify `CONFIG_PATH` points to a valid YAML file
+- Check YAML syntax with a YAML validator
+
+## License
+
+MIT License - see [LICENCE.txt](../LICENCE.txt) for details

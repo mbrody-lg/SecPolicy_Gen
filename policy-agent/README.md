@@ -1,147 +1,238 @@
-# Policy-Agent
+# Policy Agent
 
-## Project Description
-**Policy-Agent** is a Flask-based microservice designed to generate and update security policies based on a business context. It uses a Retrieval-Augmented Generation (RAG) approach to enrich prompts with relevant information obtained from a vector database (Chroma) and a language backend (OpenAI). The generated policies are stored in MongoDB, along with metadata (version, language, state, and timestamps).
+An AI service that generates security policies based on business context and regulatory data. Uses retrieval-augmented generation (RAG) to incorporate relevant regulations and guidelines into policy documents.
 
-### Main Goals
-1. Receive a context + (context_id) and generate a single policy using a multi-role strategy defined in a YAML configuration file (`policy-agent.yaml`).
-2. Allow updating of an existing policy, with mandatory field control and data validation.
-3. Integrate with other agents (Context-Agent, Validator-Agent) in a microservices architecture, using HTTP calls within an internal network (Docker).
+## What It Does
 
-### Prerequisites
+The Policy Agent:
+- Receives business context from the Context Agent
+- Searches a database of regulatory documents for relevant information
+- Generates comprehensive security policies using AI
+- Stores policies with version tracking and metadata
+- Accepts revision requests from the Validator Agent
 
-1. Docker & Docker Compose (preferred to simplify installation of MongoDB and Chroma).
-2. Python 3.9+ (if running locally without Docker).
-3. Environment variables review env.example):
+## Key Features
 
-        OPENAI_API_URL
-        OPENAI_API_KEY
-        MONGO_URI (ex.: mongodb://localhost:27017/policy-agent-db)
-        CHROMA_HOST (chroma hostname)
-        CHROMA_PORT (when using Chroma via HTTP)
-        CHROMA_COLLECTIONS_PATH on multicolection configuration
-        FLASK_SECRET_KEY
-        FLASK_ENV
-        CONFIG_PATH (path to file policy-agent.yaml, inside Docker container by default on /config/policy-agent.yaml)
+- **RAG-Powered Generation**: Incorporates relevant regulations (ISO 27001, GDPR, CIS Controls, etc.)
+- **Multi-Role Processing**: Applies different processing steps (RAG retrieval, policy generation, post-processing)
+- **Version Control**: Tracks policy versions and updates
+- **Integration Ready**: Works with Context Agent and Validator Agent in the system pipeline
 
-### Configuració
+## Prerequisites
 
-#### Fitxer YAML (policy-agent.yaml)
+- Docker (recommended)
+- Python 3.11+ (for local development)
+- MongoDB running and accessible
+- Chroma vector database (for RAG feature)
+- OpenAI API key
 
-- roles: Llista seqüencial de rols que l’agent executarà. Cada rol ha de contenir com a mínim:
+## Environment Variables
 
-        name: Nom descriptiu del rol (ex. “RAG”, “PostProcessing”).
-        type: vector (per a RAG) o openai (prompts simples).
-        instructions: Plantilla de text que l’agent farà servir per a cada rol. Pot incloure placeholders com {context_fragments}, {original_prompt}.
-        model: Nom del model OpenAI (ex. gpt-4o, gpt-4o-mini).
-        temperature: Valor float entre 0.0 i 1.0. a més valor més "improvització" de l'agent
-        max_tokens: Enter que limita la longitud de resposta.
+Create a `.env` file in the `policy-agent/` directory:
 
-- Si el Rol (p.ex. rol RAG) ha d'utilitzar RAG cal que defineixi quines BBDD vectorals utilitzarà
+```env
+OPENAI_API_KEY=sk-your-key-here
+MONGO_URI=mongodb://mongodb:27017/policy-agent-db
+CHROMA_HOST=chroma
+CHROMA_PORT=8000
+FLASK_SECRET_KEY=your-secret-key-here
+FLASK_ENV=development
+CONFIG_PATH=config/policy-agent.yaml
+```
 
-            vector:
-                Chroma:
-                    collection: Nom/s de la col·lecció dins Chroma. [normativa, guia, sector...]
-                    volume_name: Nom del volum (schema) per a Chroma.
-                    model: Model d’embeddings (ex. intfloat/e5-base, bge-base-en).
-                    chunk_size: Mida (caràcters) dels chunks que es generaran.
-                    chunk_overlap: Solapament (caràcters) entre chunks. 10%/20% de chunk-size (al gust)
+## Running the Service
 
-### Configuration
+### With Docker
+```bash
+make up
+```
 
-#### YAML file (policy-agent.yaml)
+### Locally
+```bash
+pip install -r requirements.txt
+python run.py
+```
 
-- roles: Sequential list of roles that the agent will execute. Each role must contain at least:
+The service runs on `http://localhost:5000`
 
-        name: Descriptive name of the role (e.g. “RAG”, “PostProcessing”).
-        type: vector (for RAG) or openai (simple prompts).
-        instructions: Text template that the agent will use for each role. Can include placeholders like {context_fragments}, {original_prompt}.
-        model: Name of the OpenAI model (e.g. gpt-4o, gpt-4o-mini).
-        temperature: Float value between 0.0 and 1.0. plus value plus "improvisation" of the agent
-        max_tokens: Integer that limits the length of the response.
+## Configuration
 
-- If the Role (e.g. RAG role) must use RAG it must define which vectorial DBDDs it will use 
+The agent behavior is defined in `config/policy-agent.yaml`:
 
-            vector: 
-                Chrome: 
-                    collection: Name/s of the collection/s in Chroma. Multiple config: [regulation, guide, sector...] 
-                    volume_name: Name of the volume (schema) for Chroma. 
-                    model: Model of embeddings (eg intfloat/e5-base, bge-base-en). 
-                    chunk_size: 
-                    chunk_overlap: Ususally 10%/20% chunk-size
+### Roles Section
+Each role represents a processing step in the policy generation pipeline:
 
-### RAG Role
-If you don't have RAG training files:
+```yaml
+roles:
+  - name: RAG                    # Retrieval-Augmented Generation
+    type: vector
+    model: gpt-4o
+    temperature: 0.5
+    max_tokens: 2000
+    instructions: "Search regulatory data and extract relevant information..."
+    vector:
+      Chroma:
+        collection: [normativa, guia, sector]
+        volume_name: chroma
+        model: intfloat/e5-base
+        chunk_size: 1000
+        chunk_overlap: 200
 
-1. Download the example files all agencies provide lots of documentation as a base for your Agent
-2. Place them in an accessible folder and update .env CHROMA_COLLECTIONS_PATH=/absolute/folder_path
-2. Run the script:
+  - name: PolicyGeneration       # Generate the policy text
+    type: openai
+    model: gpt-4o
+    temperature: 0.7
+    max_tokens: 3000
+    instructions: "Generate comprehensive security policy..."
+```
 
-        make policy-vectorize
+**Role Parameters:**
+- `name`: Descriptive identifier (e.g., "RAG", "PolicyGeneration")
+- `type`: Processing type (`vector` for RAG, `openai` for AI processing)
+- `model`: OpenAI model name (gpt-4o, gpt-4o-mini, etc.)
+- `temperature`: Float 0.0-1.0 (lower = more deterministic, higher = more creative)
+- `max_tokens`: Maximum response length
+- `instructions`: Processing template with placeholders like `{context}`, `{regulations}`
 
-3. Wait while the data is vectorized.
-4. Update the RAG role configuration to your liking.
+### RAG Collections
 
-### Generate a new policy
+To set up regulatory data for RAG:
 
-    POST /generate_policy/<context_id>
+1. **Prepare documents**: Gather PDF files (ISO 27001, GDPR guides, CIS Controls, etc.)
+2. **Set path**: Update `.env` with `CHROMA_COLLECTIONS_PATH=/path/to/documents`
+3. **Vectorize**: Run the indexing script
+   ```bash
+   make policy-vectorize
+   ```
+4. **Wait**: Processing takes time depending on file size
+5. **Configure**: Update `policy-agent.yaml` with collection names (normativa, guia, sector, etc.)
 
-- Path parameter: context_id
-- Request body: Optional. If the agent follows a multi-role flow, the body can include additional parameters such as language or extra metadata that can be used later.
-- Response:
+See `config/examples/` for complete configuration examples.
 
-        {
-            "context_id": "<context_id>",
-            "policy_id": "<ObjectId_assigned>",
-            "language": "es",
-            "policy_text": "The full text of the generated policy...",
-            "policy_agent_version": "v1.0.0",
-            "generated_at": "2025-06-02T18:00:00Z",
-            "status": "generated",
-            "roles_executed": [
-                {
-                "role": "RAG",
-                "model": "gpt-4o",
-                "duration_ms": 1500
-                },
-                {
-                "role": "MPG",
-                "model": "gpt-4o",
-                "duration_ms": 800
-                }
-            ]
-        }
+## API Endpoints
 
-### Update an existing policy (usually request sent by validator-agent returning status rejected/review )
+### Generate a New Policy
 
-    POST /generate_policy/<context_id>/update
+```
+POST /generate_policy/<context_id>
+```
 
-- Path parameter: context_id (ObjectId as string).
-- Request body (JSON) (all are required):
+Generates a security policy based on business context.
 
-        {
-            "context_id": "<context_id>",
-            "language": "en",
-            "policy_text": "Updated policy text...",
-            "policy_agent_version": "v1.0.1",
-            "generated_at": "2025-06-02T19:00:00Z",
-            "status": "rejected | review",
-            "reasons": ["New GDPR requirement detected."],
-            "recommendations": ["Add reference to consent record."]
-        }
+**Parameters:**
+- `context_id`: (path) The unique identifier from the Context Agent
 
-- Response:
-- 200 OK if updated successfully.
-- 400 Bad Request if required fields are missing.
-- 404 Not Found if no context exists with that context_id.
+**Request Body:** (optional)
+```json
+{
+  "language": "en",
+  "metadata": "additional information"
+}
+```
 
-### Contribution
+**Response:** (200 OK)
+```json
+{
+  "context_id": "648a2f3b9e1c0d2e3f4g5h6i",
+  "policy_id": "648a2f3b9e1c0d2e3f4g5h7j",
+  "language": "en",
+  "policy_text": "The full text of the generated policy...",
+  "policy_agent_version": "v1.0.0",
+  "generated_at": "2025-06-02T18:00:00Z",
+  "status": "generated",
+  "roles_executed": [
+    {
+      "role": "RAG",
+      "model": "gpt-4o",
+      "duration_ms": 1500
+    },
+    {
+      "role": "PolicyGeneration",
+      "model": "gpt-4o",
+      "duration_ms": 800
+    }
+  ]
+}
+```
 
-1. Create a “fork” of the project.
-2. Clone your fork locally.
-3. Create a branch dedicated to your feature (e.g. feat/add-some-role).
-4. Make your changes and run all tests locally.
-5. Open a “Pull Request” detailing the feature or fix you propose.
+### Update an Existing Policy
 
-### License
-This project is released under the MIT license. See the LICENSE file for more details.
+```
+POST /generate_policy/<context_id>/update
+```
+
+Updates a policy based on feedback from the Validator Agent. Called when policy needs revision.
+
+**Parameters:**
+- `context_id`: (path) The context identifier
+
+**Request Body:** (all fields required)
+```json
+{
+  "context_id": "648a2f3b9e1c0d2e3f4g5h6i",
+  "language": "en",
+  "policy_text": "Revised policy text with improvements...",
+  "policy_agent_version": "v1.0.1",
+  "generated_at": "2025-06-02T19:00:00Z",
+  "status": "rejected",
+  "reasons": ["GDPR compliance chapter missing"],
+  "recommendations": ["Add GDPR consent record procedures"]
+}
+```
+
+**Response:** (200 OK)
+```json
+{
+  "message": "Policy updated successfully",
+  "policy_id": "648a2f3b9e1c0d2e3f4g5h7j"
+}
+```
+
+**Error Responses:**
+- `400 Bad Request`: Missing required fields
+- `404 Not Found`: Context ID doesn't exist
+
+## Testing
+
+Run the test suite:
+
+```bash
+make policy-tests
+```
+
+## Development
+
+1. Create a feature branch: `git checkout -b feat/your-feature`
+2. Make your changes
+3. Add tests for new functionality
+4. Run tests: `make policy-tests`
+5. Submit a pull request
+
+## Troubleshooting
+
+**Chroma Connection Error**
+- Ensure Chroma is running and accessible at `CHROMA_HOST:CHROMA_PORT`
+- Check the Docker Compose configuration
+
+**MongoDB Connection Error**
+- Verify MongoDB is running
+- Check `MONGO_URI` in `.env`
+
+**OpenAI API Errors**
+- Verify `OPENAI_API_KEY` is correct
+- Check you have sufficient API credits
+- Confirm model names exist in your API plan
+
+**Vectorization Issues**
+- Ensure PDFs are valid and readable
+- Check file path is absolute
+- Review logs during processing with `make logs`
+
+**RAG Not Finding Relevant Data**
+- Verify collections are properly indexed with `make policy-vectorize`
+- Check collection names match in configuration
+- Review chunk_size and chunk_overlap settings (usually 10-20% overlap)
+
+## License
+
+MIT License - see [LICENCE.txt](../LICENCE.txt) for details
