@@ -37,6 +37,10 @@ jobs:
     - uses: actions/checkout@v4
     - name: Build a Docker image for ${{ matrix.agent }}
       run: docker build -t ${{ matrix.agent }}:test -f ${{ matrix.agent }}/Dockerfile ${{ matrix.agent }}/
+    - name: Snyk monitor
+      run: snyk test --debug --log-level=trace
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
     - name: Run Snyk to check Docker image for vulnerabilities
       continue-on-error: true
       uses: snyk/actions/docker@master
