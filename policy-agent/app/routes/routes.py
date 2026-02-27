@@ -46,6 +46,7 @@ def update_policy(context_id):
     data = request.get_json()
     required_fields = ["context_id", "language", "policy_text", "policy_agent_version", "generated_at", "status", "reasons", "recommendations"]
 
+    context = None
     if str(data.get("context_id")) == str(context_id):
         context = mongo.db.contexts.find_one({"context_id": ObjectId(context_id)})
     if not context:
