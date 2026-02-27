@@ -1,5 +1,4 @@
 from app.agents.factory import create_agent_from_config
-import os
 import yaml
 import traceback
 import requests
@@ -44,7 +43,7 @@ def run_with_agent(prompt: str, context_id: str = None) -> str:
 
 def generate_full_policy_pipeline(context_id: str) -> dict:
     try:
-        policy_response = trigger_policy_generation(context_id)
+        policy_data = trigger_policy_generation(context_id)
     
         # 2. Validació de la política
         validator_agent_url = current_app.config.get("VALIDATOR_AGENT_URL", "http://validator-agent:5000")

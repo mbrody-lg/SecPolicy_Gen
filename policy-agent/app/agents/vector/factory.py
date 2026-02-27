@@ -17,8 +17,6 @@ def import_all_vector_modules(module_name):
         raise ImportError(f"Could not import HttpClient from '{module_name}': {e}")
 
 def get_vector_clients(vector_config: list):
-    clients = []
-
     for entry in vector_config:
         if not isinstance(entry, dict):
             raise ValueError("Each entry within 'vector' must be a dictionary with a single key")
@@ -53,4 +51,3 @@ def get_vector_clients(vector_config: list):
             vector_clients.append(client)
             
     return vector_clients
-

@@ -54,7 +54,7 @@ def validate_policy():
 @routes.route("/validation/<context_id>", methods=["GET"])
 def get_validations_by_context(context_id):
     try:
-        object_id = ObjectId(context_id)
+        ObjectId(context_id)
     except Exception:
         print("EXCEPTION:")
         traceback.print_exc()
@@ -80,7 +80,7 @@ def delete_validations_by_context(context_id):
         abort(403, "This operation is only allowed in DEBUG mode.")
 
     try:
-        object_id = ObjectId(context_id)
+        ObjectId(context_id)
     except Exception:
         print("EXCEPTION:")
         traceback.print_exc()

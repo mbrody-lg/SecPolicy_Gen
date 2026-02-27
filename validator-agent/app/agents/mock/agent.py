@@ -11,7 +11,7 @@ class MockAgent(Agent):
     def run(self, prompt: str, context_id: str = None) -> list:
         results = []
         for role in self.roles:
-            role_id, role_config = next(iter(role.items()))
+            role_id, _role_config = next(iter(role.items()))
             simulated_result = self._simulate_result(role_id)
 
             result = {
@@ -58,7 +58,7 @@ class MockAgent(Agent):
             results.append(result)
         return results
 
-    def _simulate_result(self, role_id: str) -> str:
+    def _simulate_result(self, _role_id: str) -> str:
         # Distribució simulada: 50% acceptat, 30% review, 20% rebutjat
         outcomes = ["accepted", "review", "rejected"]
         weights = [0.5, 0.3, 0.2]

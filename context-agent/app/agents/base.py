@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-import re
 
 # Diccionari global per registrar automàticament totes les subclasses
 AGENT_REGISTRY = {}
