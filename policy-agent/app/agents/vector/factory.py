@@ -7,14 +7,18 @@ def import_all_vector_modules(module_name):
     # Importa dinàmicament el mòdul client del backend
     try:
         importlib.import_module(f"app.agents.vector.{module_name}.client")
-    except ImportError as e:
-        raise ImportError(f"Failed to import vector backend '{module_name}': {e}")
+    except ImportError as error:
+        raise ImportError(
+            f"Failed to import vector backend '{module_name}': {error}"
+        ) from error
     
     # Importa dinàmicament el mòdul client del backend
     try:
         importlib.import_module(f"app.agents.vector.{module_name}.http_client")
-    except ImportError as e:
-        raise ImportError(f"Could not import HttpClient from '{module_name}': {e}")
+    except ImportError as error:
+        raise ImportError(
+            f"Could not import HttpClient from '{module_name}': {error}"
+        ) from error
 
 def get_vector_clients(vector_config: list):
     for entry in vector_config:

@@ -9,7 +9,7 @@ def load_agent_config(config_path: str = None) -> dict:
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"Config file not found: {path}")
-    with path.open("r") as f:
+    with path.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 def create_agent_from_config(config: dict):
@@ -18,8 +18,10 @@ def create_agent_from_config(config: dict):
     
     try:
         importlib.import_module(module_path)
-    except ModuleNotFoundError as e:
-        raise ImportError(f"Agent backend '{agent_type}' not supported. Error: {e}")
+    except ModuleNotFoundError as error:
+        raise ImportError(
+            f"Agent backend '{agent_type}' not supported. Error: {error}"
+        ) from error
 
     agent_class = AGENT_REGISTRY.get(agent_type)
     if not agent_class:

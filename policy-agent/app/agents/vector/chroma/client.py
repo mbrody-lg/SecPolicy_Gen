@@ -17,7 +17,8 @@ class ChromaVectorClient(VectorClient):
             self.collection = self.client.get_collection(name)
             return self.collection
         except chromadb.errors.NotFoundError:
-            print(f"[WARNING] Collection not found:{name}.")        
+            print(f"[WARNING] Collection not found:{name}.")
+            return None
 
     def create_collection(self, name: str, metadata: str):
         self.collection = self.client.create_collection(name=name, embedding_function=self.embedding_fn, metadata=metadata)

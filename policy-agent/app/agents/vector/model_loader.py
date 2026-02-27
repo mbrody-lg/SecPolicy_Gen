@@ -20,8 +20,10 @@ def download_model_if_needed(model_id: str):
         try:
             snapshot_download(repo_id=model_id)
             print("Model downloaded successfully.")
-        except (RepositoryNotFoundError, RevisionNotFoundError) as e:
-            raise RuntimeError(f"Could not download model. '{model_id}': {str(e)}")
+        except (RepositoryNotFoundError, RevisionNotFoundError) as error:
+            raise RuntimeError(
+                f"Could not download model. '{model_id}': {error}"
+            ) from error
 
 def load_model(model_id: str) -> SentenceTransformer:
     if not model_id:

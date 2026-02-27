@@ -11,7 +11,7 @@ class MistralAIAgent(Agent):
         self.debug_mode = current_app.config.get("DEBUG", False)
 
         config_path = current_app.config.get("CONFIG_PATH", "/config/validator_agent.yaml")
-        with open(config_path, "r") as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
             self.prompt_template = config["agent"].get("prompt_template")
 

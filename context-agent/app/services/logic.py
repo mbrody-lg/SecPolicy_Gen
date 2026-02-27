@@ -10,7 +10,7 @@ from markdown import markdown
 
 
 def load_questions(config_path="app/config/context_questions.yaml"):
-    with open(config_path, "r") as f:
+    with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)["questions"]
 
 def generate_context_prompt(data: dict, question_config="app/config/context_questions.yaml") -> str:

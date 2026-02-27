@@ -12,7 +12,7 @@ class Evaluator:
         if not os.path.exists(self.config_path):
             raise FileNotFoundError(f"Config path not found: {self.config_path}")
 
-        with open(self.config_path, "r") as f:
+        with open(self.config_path, "r", encoding="utf-8") as f:
             self.config = yaml.safe_load(f)
 
         # Instancia l'agent segons la configuració YAML
