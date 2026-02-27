@@ -1,8 +1,10 @@
-from flask import Blueprint, request, jsonify, abort, current_app
+import traceback
+
 from bson import ObjectId
+from flask import Blueprint, request, jsonify, abort, current_app
+
 from app import mongo
 from app.agents.roles.coordinator import Coordinator
-import traceback
 
 routes = Blueprint("routes", __name__)
 

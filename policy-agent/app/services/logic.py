@@ -1,9 +1,11 @@
 import os
-import yaml
-from app.agents.factory import create_agent_from_config
 from datetime import datetime, timezone
-from app import mongo
+
+import yaml
 from flask import current_app
+
+from app import mongo
+from app.agents.factory import create_agent_from_config
 
 
 def load_policy_config() -> dict:

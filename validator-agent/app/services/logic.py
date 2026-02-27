@@ -1,6 +1,7 @@
 import os
-import requests
 from datetime import datetime
+
+import requests
 
 def send_policy_update_to_policy_agent(context_id: str, updated_text: str, reason: str, recommendations: list, version: str = "v1.0", language: str = "en"):
     """

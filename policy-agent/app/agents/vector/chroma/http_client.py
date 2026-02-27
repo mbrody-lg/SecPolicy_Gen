@@ -1,5 +1,6 @@
-import chromadb
 import os
+
+import chromadb
 
 # Singleton (es crea una sola vegada)
 _client_instance = None

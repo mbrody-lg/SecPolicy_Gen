@@ -1,14 +1,16 @@
-from app.agents.base import Agent
-from app.agents.openai.client import OpenAIClient
-from app.agents.openai.roles.proactive import ProactiveGoalCreator
-from app.agents.openai.roles.optimiser import PromptResponseOptimiser
-from app import mongo
-from bson import ObjectId
 import time
 
+from bson import ObjectId
+
+from app import mongo
+from app.agents.base import Agent
+from app.agents.openai.client import OpenAIClient
+from app.agents.openai.roles.optimiser import PromptResponseOptimiser
+from app.agents.openai.roles.proactive import ProactiveGoalCreator
+
 class OpenAIAgent(Agent):
-    def __init__(self, name, instructions, model, tools=[]):
-        Agent.__init__(self, name, instructions, model, tools)
+    def __init__(self, name, instructions, model, tools=None):
+        Agent.__init__(self, name, instructions, model, tools or [])
         self.client = OpenAIClient()
         self.assistant_id = None
 

@@ -1,8 +1,10 @@
+from typing import List, Dict, Optional
+
+import yaml
+from flask import current_app
+
 from app.agents.base import Agent
 from app.agents.mistralai.client import MistralClient
-from flask import current_app
-from typing import List, Dict, Optional
-import yaml 
 
 class MistralAIAgent(Agent):
     def __init__(self, name: str, instructions: str, model: str, tools: list = None, roles: list = None):

@@ -51,50 +51,50 @@ class Agent(ABC):
                 raise ValueError(f"Role '{role_key}' has an invalid 'max_tokens': {max_tokens}")
 
     def parse_response_content(self, content: str) -> Dict:
-            """
-            Intenta extreure status, raó i recomanacions del contingut generat.
-            Retorna un diccionari amb els camps esperats.
-            """
-            result = {
-                "status": "accepted",  # per defecte
-                "reason": "",
-                "recommendations": []
-            }
+        """
+        Intenta extreure status, raó i recomanacions del contingut generat.
+        Retorna un diccionari amb els camps esperats.
+        """
+        result = {
+            "status": "accepted",  # per defecte
+            "reason": "",
+            "recommendations": []
+        }
 
-            # STATUS
-            match = re.search(r"\*\*?STATUS:?[\*\s]*([a-zA-Z]+)", content, re.IGNORECASE)
-            if match:
-                result["status"] = match.group(1).lower()
+        # STATUS
+        match = re.search(r"\*\*?STATUS:?[\*\s]*([a-zA-Z]+)", content, re.IGNORECASE)
+        if match:
+            result["status"] = match.group(1).lower()
 
-            # REASON
-            match = re.search(r"\*\*?REASON:?[\*\s]*(.+?)(?=\n\*\*?RECOMMENDATIONS|\Z)", content, re.IGNORECASE | re.DOTALL)
-            if match:
-                reason_text = match.group(1).strip()
-                result["reason"] = reason_text
+        # REASON
+        match = re.search(r"\*\*?REASON:?[\*\s]*(.+?)(?=\n\*\*?RECOMMENDATIONS|\Z)", content, re.IGNORECASE | re.DOTALL)
+        if match:
+            reason_text = match.group(1).strip()
+            result["reason"] = reason_text
 
-            # RECOMMENDATIONS agafa fins al final del content
-            match = re.search(r"\*\*RECOMMENDATIONS:?\*\*\s*(.+)$", content, re.IGNORECASE | re.DOTALL)
-            if match:
-                recommendations_block = match.group(1).strip()
-                lines = recommendations_block.splitlines()
-                recs = []
+        # RECOMMENDATIONS agafa fins al final del content
+        match = re.search(r"\*\*RECOMMENDATIONS:?\*\*\s*(.+)$", content, re.IGNORECASE | re.DOTALL)
+        if match:
+            recommendations_block = match.group(1).strip()
+            lines = recommendations_block.splitlines()
+            recs = []
 
-                for line in lines:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    if re.match(r"^([-•]|\d+\.)\s+", line):
-                        rec = re.sub(r"^([-•]|\d+\.)\s*", "", line).strip()
-                        recs.append(rec)
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                if re.match(r"^([-•]|\d+\.)\s+", line):
+                    rec = re.sub(r"^([-•]|\d+\.)\s*", "", line).strip()
+                    recs.append(rec)
+                else:
+                    if recs:
+                        recs[-1] += " " + line
                     else:
-                        if recs:
-                            recs[-1] += " " + line
-                        else:
-                            recs.append(line)
+                        recs.append(line)
 
-                result["recommendations"] = recs
+            result["recommendations"] = recs
 
-            return result
+        return result
     
     def _render_prompt(self, instructions: str, prompt: str) -> str:
         return self.prompt_template.format(

@@ -1,8 +1,10 @@
+from typing import List, Dict, Optional
+
 import yaml
 from flask import current_app
+
 from app.agents.base import Agent
 from app.agents.openai.client import OpenAIClient
-from typing import List, Dict, Optional
 
 class OpenAIAgent(Agent):
     def __init__(self, name: str, instructions: str, model: str, tools: list = None, roles: list = None):

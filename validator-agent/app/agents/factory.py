@@ -1,7 +1,9 @@
 import importlib
-import yaml
 from pathlib import Path
+
+import yaml
 from flask import current_app
+
 from app.agents.base import AGENT_REGISTRY
 
 def load_agent_config(config_path: str = None) -> dict:

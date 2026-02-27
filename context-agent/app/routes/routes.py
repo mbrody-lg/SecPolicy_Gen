@@ -1,8 +1,10 @@
-from flask import Blueprint, render_template, request, redirect, url_for, abort, flash, jsonify
-from app.services.logic import generate_context_prompt, run_with_agent, load_questions, generate_full_policy_pipeline, render_markdown
-from app import mongo
 from datetime import datetime, timezone
+
 from bson import ObjectId
+from flask import Blueprint, render_template, request, redirect, url_for, abort, flash, jsonify
+
+from app import mongo
+from app.services.logic import generate_context_prompt, run_with_agent, load_questions, generate_full_policy_pipeline, render_markdown
 
 main = Blueprint("main", __name__)
 
@@ -90,7 +92,11 @@ def create():
             })
 
         # Enviem el prompt a l'agent per generar el context refinat
-        full_prompt = run_with_agent(initial_prompt, str(context_id))
+        full_prompt = run_with_agent(
+            initial_prompt,
+            str(context_id),
+            model_version="0.1.0",
+        )
 
         if not full_prompt or not full_prompt.strip():
             flash("An initial response could not be generated. Please try again.", "warning")
@@ -173,7 +179,11 @@ def continue_context(context_id):
     })
 
     # 2. Executa l'agent
-    response = run_with_agent(new_prompt, context_id)
+    response = run_with_agent(
+        new_prompt,
+        context_id,
+        model_version=context.get("version", "0.1.0"),
+    )
 
     # 3. Si no hi ha resposta vàlida → no es desa resposta i el context queda pendent
     if not response or not response.strip():

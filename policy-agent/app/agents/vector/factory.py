@@ -1,7 +1,7 @@
-from app.agents.vector.base import VECTOR_CLIENT_REGISTRY
-from app.agents.vector.model_loader import download_model_if_needed, load_model
 import importlib
 
+from app.agents.vector.base import VECTOR_CLIENT_REGISTRY
+from app.agents.vector.model_loader import download_model_if_needed, load_model
 def import_all_vector_modules(module_name):
 
     # Importa dinàmicament el mòdul client del backend

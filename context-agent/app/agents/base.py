@@ -4,11 +4,11 @@ from abc import ABC, abstractmethod
 AGENT_REGISTRY = {}
 
 class Agent(ABC):
-    def __init__(self, name: str, instructions: str, model: str, tools: list = []):
+    def __init__(self, name: str, instructions: str, model: str, tools=None):
         self.name = name
         self.instructions = instructions
         self.model = model
-        self.tools = tools
+        self.tools = tools or []
 
     # Registre automàtic de subclasses
     def __init_subclass__(cls, **kwargs):

@@ -1,8 +1,9 @@
 import os
 import sys
-import yaml
 from pathlib import Path
 from datetime import datetime, timezone
+
+import yaml
 
 from app import create_app, mongo
 from app.services.logic import generate_context_prompt, run_with_agent, load_questions
@@ -48,7 +49,7 @@ def recreate_context_from_answers(data):
             "origin": "user"
         })
 
-    full_prompt = run_with_agent(initial_prompt, str(context_id))
+    full_prompt = run_with_agent(initial_prompt, str(context_id), model_version="0.1.0")
     mongo.db.interactions.insert_one({
         "context_id": context_id,
         "question_id": "response_initial",

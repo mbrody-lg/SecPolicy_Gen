@@ -1,6 +1,7 @@
-from app.agents.base import Agent
-from app import mongo
 from bson import ObjectId
+
+from app import mongo
+from app.agents.base import Agent
 from app.agents.mock.roles.proactive import MockProactiveGoalCreator
 from app.agents.mock.roles.optimiser import MockPromptResponseOptimiser
 

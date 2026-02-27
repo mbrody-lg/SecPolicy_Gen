@@ -1,5 +1,6 @@
-from openai import OpenAI
 import os
+
+from openai import OpenAI
 
 class OpenAIClient:
     def __init__(self):

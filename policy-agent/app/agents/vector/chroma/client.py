@@ -1,8 +1,9 @@
 import chromadb
-from app.agents.vector.base import VectorClient
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
-from app.agents.vector.chroma.http_client import get_chroma_http_client
 from flask import current_app
+
+from app.agents.vector.base import VectorClient
+from app.agents.vector.chroma.http_client import get_chroma_http_client
         
 class ChromaVectorClient(VectorClient):
     def __init__(self, model):

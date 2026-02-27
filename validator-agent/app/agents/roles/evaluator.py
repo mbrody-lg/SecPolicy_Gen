@@ -1,6 +1,7 @@
 import os
-import yaml
 from typing import List, Dict
+
+import yaml
 from app.agents.factory import create_agent_from_config
 from flask import current_app
 
