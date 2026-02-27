@@ -3,6 +3,7 @@ from app.services.logic import generate_context_prompt, run_with_agent, load_que
 from app import mongo
 from datetime import datetime, timezone
 from bson import ObjectId
+import logging
 
 main = Blueprint("main", __name__)
 
@@ -250,7 +251,8 @@ def send_policy_to_context(context_id):
         return redirect(url_for("main.context_detail", context_id=context_id))
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logging.exception("Error while sending policy to context")
+        return jsonify({"error": "An internal server error occurred."}), 500
 
 
 @main.route("/context/<context_id>/generate_policy", methods=["POST"])
