@@ -1,7 +1,4 @@
-import os
-import re
 import yaml
-from openai import OpenAI
 from flask import current_app
 from app.agents.base import Agent
 from app.agents.openai.client import OpenAIClient
@@ -14,7 +11,7 @@ class OpenAIAgent(Agent):
         self.debug_mode = current_app.config.get("DEBUG", False)
 
         config_path = current_app.config.get("CONFIG_PATH", "/config/validator_agent.yaml")
-        with open(config_path, "r") as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
             self.prompt_template = config["agent"].get("prompt_template")
 
@@ -59,10 +56,10 @@ class OpenAIAgent(Agent):
                     "recommendations": parsed["recommendations"]  # També es pot intentar extraure si vénen en el text
                 })
 
-            except Exception as e:
+            except Exception as error:
                 if self.debug_mode:
-                    print(f"[LOGGING ERROR] {str(e)}")
-                    print(f'"role": {role_key},"status": {parsed["status"]},"text": {content},"reason": {parsed["reason"]},"recommendations": {parsed["recommendations"]}')
+                    print(f"[LOGGING ERROR] {error}")
+                continue
 
         if self.debug_mode:
             print(f"[RESULTS] {results}")

@@ -1,4 +1,3 @@
-import os
 from app.agents.base import Agent
 from app.agents.openai.client import OpenAIClient
 from app.agents.roles.rag import RAGProcessor
@@ -68,11 +67,10 @@ class OpenAIAgent(Agent):
         return {'text': current_prompt.strip(), 'structured_plan': structured_plan, "context_id": context_id}
 
     def _chat(self, prompt: str, instructions: str, temperature: float, max_tokens: int) -> str:
-        
         if current_app.config["DEBUG"]:
             print(f"prompt: {prompt}\n instructions:{instructions}\n temperature: {temperature}\n max_tokens: {max_tokens}")
-        
-        try:        
+
+        try:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
@@ -82,10 +80,11 @@ class OpenAIAgent(Agent):
                 temperature=temperature,
                 max_tokens=max_tokens
             )
-        except Exception as e:
-            print({"error": str(e) + response})
+        except Exception as error:
+            print({"error": str(error)})
+            return ""
 
-        if current_app.config["DEBUG"] and response:
+        if current_app.config["DEBUG"]:
             print(f"response: {response}")
 
         return response.choices[0].message.content.strip()
