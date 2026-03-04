@@ -58,7 +58,17 @@ jobs:
       uses: snyk/actions/docker@master
       with:
         image: ${{ matrix.agent }}:test
-        args: --file=${{ matrix.agent }}/Dockerfile
+        args: --file=${{ matrix.agent }}/Dockerfile --sarif-file-output=snyk.sarif
+    - name: Normalize Snyk SARIF for GitHub Code Scanning
+      if: steps.snyk-auth.outputs.available == 'true'
+      shell: bash
+      run: |
+        tmp_file="$(mktemp)"
+        jq '
+          (.runs[]?.tool.driver.rules[]?.properties."security-severity") |=
+            (if . == null or . == "" then "0.0" else . end)
+        ' snyk.sarif > "$tmp_file"
+        mv "$tmp_file" snyk.sarif
     - name: Upload result to GitHub Code Scanning
       if: steps.snyk-auth.outputs.available == 'true'
       uses: github/codeql-action/upload-sarif@v3
