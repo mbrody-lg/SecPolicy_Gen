@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   snyk:
-    environment: test
+    environment: testing
     permissions:
       contents: read
       security-events: write
