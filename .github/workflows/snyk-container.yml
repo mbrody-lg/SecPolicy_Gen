@@ -67,6 +67,9 @@ jobs:
         jq '
           (.runs[]?.tool.driver.rules[]?.properties."security-severity") |=
             (if . == null or . == "" then "0.0" else . end)
+          |
+          (.runs[]?.tool.extensions[]?.rules[]?.properties."security-severity") |=
+            (if . == null or . == "" then "0.0" else . end)
         ' snyk.sarif > "$tmp_file"
         mv "$tmp_file" snyk.sarif
     - name: Upload result to GitHub Code Scanning
