@@ -1,0 +1,60 @@
+[tool.pytest.ini_options]
+testpaths = [
+    "context-agent/tests",
+    "policy-agent/tests",
+    "validator-agent/tests",
+]
+markers = [
+    "fast: quick unit and small service tests",
+    "route: Flask route and client contract tests",
+    "integration: multi-component tests with broader setup",
+    "live: opt-in tests that touch real external dependencies",
+]
+
+[tool.coverage.run]
+branch = true
+source = [
+    "context-agent/app",
+    "policy-agent/app",
+    "validator-agent/app",
+]
+
+[tool.pylint.main]
+fail-under = 7.0
+persistent = false
+jobs = 1
+ignore-paths = [
+    "^.*\\\\tests\\\\.*|^.*/tests/.*",
+    "^.*\\\\scripts\\\\.*|^.*/scripts/.*",
+    "^.*\\\\data\\\\.*|^.*/data/.*",
+    "^.*\\\\infrastructure\\\\.*|^.*/infrastructure/.*",
+]
+
+[tool.pylint."messages control"]
+disable = [
+    "broad-exception-caught",
+    "cyclic-import",
+    "global-statement",
+    "import-error",
+    "import-outside-toplevel",
+    "no-member",
+    "no-name-in-module",
+    "duplicate-code",
+    "fixme",
+    "f-string-without-interpolation",
+    "invalid-name",
+    "line-too-long",
+    "missing-class-docstring",
+    "missing-final-newline",
+    "missing-function-docstring",
+    "missing-module-docstring",
+    "trailing-newlines",
+    "trailing-whitespace",
+    "unnecessary-semicolon",
+    "redefined-outer-name",
+    "reimported",
+    "too-few-public-methods",
+    "too-many-arguments",
+    "too-many-locals",
+    "too-many-positional-arguments",
+]
