@@ -173,6 +173,36 @@ temperature: 0.5
 
 ---
 
+## Local Test Bootstrap
+
+Use this when you need reproducible root-level test execution on your local machine.
+
+### Command
+
+```bash
+make bootstrap-test-env
+```
+
+### What it does
+
+- Creates `.venv` if it does not exist
+- Upgrades `pip` in `.venv`
+- Installs test/runtime dependencies from:
+  - `context-agent/requirements.txt`
+  - `policy-agent/requirements.txt`
+  - `validator-agent/requirements.txt`
+
+### Validate setup
+
+```bash
+.venv/bin/pytest --markers -c pyproject.toml
+.venv/bin/pytest -c pyproject.toml -m "fast or route"
+```
+
+Use Docker-based integration checks when changes affect cross-service behavior.
+
+---
+
 ## Troubleshooting
 
 ### "Connection refused" Error
@@ -305,4 +335,3 @@ After your first policy generation:
 - Review individual agent READMEs for advanced configuration
 
 **Happy policy generating!** 🚀
-
