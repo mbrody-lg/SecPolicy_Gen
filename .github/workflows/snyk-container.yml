@@ -29,6 +29,7 @@ jobs:
       actions: read
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         agent:
           - context-agent
@@ -77,3 +78,5 @@ jobs:
       uses: github/codeql-action/upload-sarif@v4
       with:
         sarif_file: snyk.sarif
+        category: "/snyk/${{ matrix.agent }}"
+        wait-for-processing: false
