@@ -70,3 +70,4 @@ instance/
 htmlcov/
 *.pdf
 /__MACOSX/
+/.local-workspace/
