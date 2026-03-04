@@ -22,6 +22,7 @@ permissions:
 
 jobs:
   snyk:
+    environment: test
     permissions:
       contents: read
       security-events: write
@@ -33,23 +34,33 @@ jobs:
           - context-agent
           - policy-agent
           - validator-agent
+    env:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
     steps:
     - uses: actions/checkout@v4
     - name: Build a Docker image for ${{ matrix.agent }}
       run: docker build -t ${{ matrix.agent }}:test -f ${{ matrix.agent }}/Dockerfile ${{ matrix.agent }}/
-    - name: Snyk monitor
-      run: snyk test --debug --log-level=trace
-      env:
-        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+    - name: Check Snyk authentication availability
+      id: snyk-auth
+      shell: bash
+      run: |
+        if [ -n "${SNYK_TOKEN}" ]; then
+          echo "available=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "available=false" >> "$GITHUB_OUTPUT"
+        fi
+    - name: Skip Snyk scan when token is unavailable
+      if: steps.snyk-auth.outputs.available != 'true'
+      run: echo "Skipping Snyk scan because SNYK_TOKEN is not available in this workflow context."
     - name: Run Snyk to check Docker image for vulnerabilities
+      if: steps.snyk-auth.outputs.available == 'true'
       continue-on-error: true
       uses: snyk/actions/docker@master
-      env:
-        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
       with:
         image: ${{ matrix.agent }}:test
         args: --file=${{ matrix.agent }}/Dockerfile
     - name: Upload result to GitHub Code Scanning
+      if: steps.snyk-auth.outputs.available == 'true'
       uses: github/codeql-action/upload-sarif@v3
       with:
         sarif_file: snyk.sarif
