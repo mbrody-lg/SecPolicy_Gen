@@ -2,8 +2,9 @@
 INFRA_DIR=infrastructure
 
 COMPOSE=docker-compose -f $(INFRA_DIR)/docker-compose.yml --env-file $(INFRA_DIR)/.env
+LINT_PYTHON=$(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi)
 
-.PHONY: all up down clean rebuild logs context-shell context-tests context-import policy-shell policy-tests policy-vectorize validator-shell validator-tests help
+.PHONY: all up down clean rebuild logs shell-context context-tests context-import policy-shell policy-tests policy-vectorize validator-shell validator-tests lint help
 
 ## Start all infrastructure
 up:
@@ -57,6 +58,10 @@ validator-shell:
 validator-tests:
 	docker exec -it validator_agent_service pytest
 
+## Run pylint with root pyproject.toml configuration
+lint:
+	$(LINT_PYTHON) -m pylint policy-agent context-agent validator-agent
+
 ## Help
 help:
 	@echo "Makefile for multi-agent project"
@@ -74,3 +79,4 @@ help:
 	@echo "make policy-vectorize 	-> Run data vectorization inside policy-agent"
 	@echo "make validator-shell 	-> Access validator-agent shell"
 	@echo "make validator-tests 	-> Run tests within validator-agent"
+	@echo "make lint 		-> Run pylint using root pyproject.toml config"
