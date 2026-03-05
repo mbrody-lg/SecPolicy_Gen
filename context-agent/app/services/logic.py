@@ -20,8 +20,8 @@ def load_questions(config_path="app/config/context_questions.yaml"):
 
 def generate_context_prompt(data: dict, question_config="app/config/context_questions.yaml") -> str:
     """
-    Construeix un prompt textual a partir de les respostes del formulari.
-    Aquest prompt serà utilitzat per alimentar un agent de generació.
+    Build a text prompt from form answers.
+    This prompt is used to drive context generation.
     """
     questions = load_questions(question_config)
 
@@ -39,13 +39,13 @@ def generate_context_prompt(data: dict, question_config="app/config/context_ques
 
 def run_with_agent(prompt: str, context_id: str = None, model_version: str = None) -> str:
     """
-    Executa l’agent configurat a partir del prompt inicial.
-    El context_id es pot fer servir com a base per nom de sessió, assistant_id o traçabilitat.
+    Execute the configured agent using the initial prompt.
+    The context_id can be used for session naming, assistant_id, or traceability.
     """
     config_path = "app/config/context_agent.yaml"
     _ = model_version
     agent = create_agent_from_config(config_path)
-    agent.create(context_id=context_id)  # passem context_id si cal persistència
+    agent.create(context_id=context_id)  # pass context_id when persistence is needed
     return agent.run(prompt, context_id)
 
 
@@ -77,7 +77,7 @@ def get_context_and_prompt(context_id: str) -> dict:
     return {
         "context_id": context_id,
         "refined_prompt": refined_prompt,
-        "language": context.get("language", "ca"),
+        "language": context.get("language", "en"),
         "model_version": context.get("version", "0.1.0"),
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }

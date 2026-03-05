@@ -10,7 +10,7 @@ import yaml
 from app import create_app, mongo
 from app.services.logic import generate_context_prompt, run_with_agent, load_questions
 
-# Inicialitza Flask app
+# Initialize Flask app
 app = create_app()
 app.app_context().push()
 
@@ -57,7 +57,7 @@ def recreate_context_from_answers(data):
     mongo.db.interactions.insert_one({
         "context_id": context_id,
         "question_id": "response_initial",
-        "question_text": "Resposta de l'agent",
+        "question_text": "Agent response",
         "answer": full_prompt.strip(),
         "timestamp": datetime.now(timezone.utc),
         "origin": "agent"
@@ -83,7 +83,7 @@ def process_directory(directory_path):
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print("Usage: python generate_context_from_yaml.py /ruta/a/answers")
+        print("Usage: python generate_context_from_yaml.py /path/to/answers")
         directory = Path(os.getenv('CONTEXT_IMPORT_PATH', '/context-agent/app/config/examples/answers'))
     else: 
         directory = Path(sys.argv[1])
@@ -92,7 +92,7 @@ if __name__ == "__main__":
         print(f"The path {directory} is invalid..")
         sys.exit(1)
 
-    # Esborrem tota la base de dades
+    # Clean the full database
     mongo.db.interactions.delete_many({})
     mongo.db.contexts.delete_many({})
     print("Database cleaned.")

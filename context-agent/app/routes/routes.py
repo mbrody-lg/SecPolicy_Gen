@@ -75,7 +75,7 @@ def create():
 
         context_id = inserted.inserted_id
 
-        # Desa preguntes i respostes per separat com a interacció d'agent (pregunta) i usuari (resposta)
+        # Store questions and answers as separate agent/user interactions
         questions = load_questions()
         for q in questions:
             mongo.db.interactions.insert_one({
@@ -95,7 +95,7 @@ def create():
                 "origin": "user"
             })
 
-        # Enviem el prompt a l'agent per generar el context refinat
+        # Send prompt to the agent to generate refined context
         full_prompt = run_with_agent(
             initial_prompt,
             str(context_id),
@@ -141,7 +141,7 @@ def context_detail(context_id):
         interactions = list(
             mongo.db.interactions.find({"context_id": context_id}).sort("timestamp", 1)
         )
-        # Processem només les respostes dels agents per afegir-hi format HTML des del Markdown
+        # Render only agent answers to HTML from Markdown
         for item in interactions:
             if item.get("origin") == "agent" and item.get("answer"):
                 item["rendered_answer"] = render_markdown(item["answer"])
@@ -174,7 +174,7 @@ def continue_context(context_id):
     })
     new_question_id = f"need_{count + 1}"
 
-    # 1. Desa la interacció de l'usuari
+    # 1. Save user interaction
     mongo.db.interactions.insert_one({
         "context_id": ObjectId(context_id),
         "question_id": new_question_id,
@@ -184,14 +184,14 @@ def continue_context(context_id):
         "origin": "user"
     })
 
-    # 2. Executa l'agent
+    # 2. Execute agent
     response = run_with_agent(
         new_prompt,
         context_id,
         model_version=context.get("version", "0.1.0"),
     )
 
-    # 3. Si no hi ha resposta vàlida → no es desa resposta i el context queda pendent
+    # 3. If no valid response exists, keep context pending and skip response save
     if not response or not response.strip():
         mongo.db.contexts.update_one(
             {"_id": ObjectId(context_id)},
@@ -200,7 +200,7 @@ def continue_context(context_id):
         flash("A response could not be generated. Please try again.", "warning")
         return redirect(url_for("main.context_detail", context_id=context_id))
 
-    # 4. Desa la resposta de l'agent
+    # 4. Save agent response
     mongo.db.interactions.insert_one({
         "context_id": ObjectId(context_id),
         "question_id": f"response_{count + 1}",
@@ -253,7 +253,7 @@ def send_policy_to_context(context_id):
 
         validated_at = datetime.now(timezone.utc)
 
-        # Desa la política com una resposta de l'agent a interactions
+        # Save policy as an agent response in interactions
         mongo.db.interactions.insert_one({
             "context_id": context_obj_id,
             "question_id": "validated_policy",

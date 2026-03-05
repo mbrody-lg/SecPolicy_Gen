@@ -5,28 +5,28 @@ from flask import Flask
 from flask_pymongo import PyMongo
 from dotenv import load_dotenv
 
-# Inicialitza l'objecte global de Mongo
+# Initialize global Mongo object
 mongo = PyMongo()
 
 def create_app():
     """Build and configure the Flask app and register routes."""
-    # Carrega variables d'entorn des de .env
+    # Load environment variables from .env
     load_dotenv()
 
-    # Crea l'app Flask
+    # Create Flask app
     app = Flask(__name__)
 
-    # Configuració de seguretat i base de dades
+    # Security and database settings
     app.secret_key = os.getenv("FLASK_SECRET_KEY", "1FQj9YHGCbxRkWswvw$ds")
     app.config["MONGO_URI"] = os.getenv("MONGO_URI", "mongodb://mongo:27017/policydb")
     app.config["CONFIG_PATH"] = os.getenv("CONFIG_PATH", "/config/policy_agent.yaml")
     app.config["DEBUG"] = True
 
 
-    # Inicialitza Mongo amb l'app
+    # Initialize Mongo with app
     mongo.init_app(app)
     
-    # Importa i registra els blueprints
+    # Import and register blueprints
     from app.routes.routes import routes
     app.register_blueprint(routes)
 

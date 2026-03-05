@@ -19,14 +19,14 @@ class MockAgent(Agent):
         """Run the mocked proactive and optimizer pipeline."""
         prompt_recieved = f"[MOCK]: {prompt}"
 
-        # Simulem millora del prompt (proactive)
+        # Simulate proactive prompt improvement
         proactive = MockProactiveGoalCreator()
         refined_prompt = proactive.execute(prompt_recieved)
 
-        # Simulem resposta generada (aquí simplement repeteix)
+        # Simulate generated response (simple echo)
         simulated_response = f"[Simulated]\n{refined_prompt}"
 
-        # Simulem optimització (response optimiser)
+        # Simulate response optimization
         optimiser = MockPromptResponseOptimiser()
         final_output = optimiser.execute(refined_prompt, simulated_response)
 

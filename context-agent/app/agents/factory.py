@@ -12,23 +12,23 @@ def load_agent_config(config_path: str) -> dict:
 def create_agent_from_config(config_path: str):
     """Create an agent instance from YAML configuration."""
     config = load_agent_config(config_path)
-    agent_type = config.get("type").lower()  # ex: "openai", "claude", "mock"
+    agent_type = config.get("type").lower()  # example: "openai", "claude", "mock"
     module_path = f"app.agents.{agent_type}.agent"
 
     try:
-        # Dinàmicament importa el mòdul (ex: app.agents.openai.agent)
+        # Dynamically import the backend module (example: app.agents.openai.agent)
         importlib.import_module(module_path)
     except ModuleNotFoundError as error:
         raise ImportError(
-            f"Agent backend '{agent_type}' no suportat. Error: {error}"
+            f"Agent backend '{agent_type}' is not supported. Error: {error}"
         ) from error
 
-    # Identificador esperat al registre
+    # Expected registry identifier
     registry_key = f"{agent_type}"
     agent_class = AGENT_REGISTRY.get(registry_key)
     
     if not agent_class:
-        raise ValueError(f"No s'ha registrat cap agent amb el tipus '{agent_type}'")
+        raise ValueError(f"No agent has been registered with type '{agent_type}'")
 
     return agent_class(
         name=config["name"],
