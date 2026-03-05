@@ -13,6 +13,8 @@ from app.agents.factory import create_agent_from_config
 from app.agents.roles.evaluator import Evaluator
 
 class Coordinator:
+    """Runs multi-round worker validation and final decision orchestration."""
+
     def __init__(self):
         self.config_path = current_app.config.get("CONFIG_PATH", "/config/validator_agent.yaml")
 

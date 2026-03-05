@@ -9,6 +9,8 @@ from flask import current_app
 
 
 class Evaluator:
+    """Evaluates worker outputs and returns consolidated EVA feedback."""
+
     def __init__(self):
         self.config_path = current_app.config.get("CONFIG_PATH", "/config/validator_agent.yaml")
 

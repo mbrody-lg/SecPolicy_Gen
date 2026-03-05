@@ -6,6 +6,8 @@ import re
 AGENT_REGISTRY = {}
 
 class Agent(ABC):
+    """Abstract base contract for validator-agent backends."""
+
     def __init__(self, name: str, instructions: str, model: str, tools: None, roles=None):
         self.name = name
         self.instructions = instructions
