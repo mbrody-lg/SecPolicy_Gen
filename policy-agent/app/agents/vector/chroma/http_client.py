@@ -3,12 +3,12 @@ import os
 import chromadb
 
 # Singleton (es crea una sola vegada)
-_client_instance = None
+_CLIENT_INSTANCE = None
 
 def get_chroma_http_client():
-    global _client_instance
-    if _client_instance is None:
+    global _CLIENT_INSTANCE
+    if _CLIENT_INSTANCE is None:
         host = os.getenv("CHROMA_HOST", "chroma")
         port = int(os.getenv("CHROMA_PORT", "8000"))
-        _client_instance = chromadb.HttpClient(host=host, port=port)
-    return _client_instance
+        _CLIENT_INSTANCE = chromadb.HttpClient(host=host, port=port)
+    return _CLIENT_INSTANCE
