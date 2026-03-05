@@ -44,7 +44,7 @@ class OpenAIAgent(Agent):
             full_prompt = self._render_prompt(instructions, prompt)
 
             if self.debug_mode:
-                print(f"[OpenAIAgent] Executant rol: {role_key}")
+                print(f"[OpenAIAgent] Executing role: {role_key}")
                 print(f"[Prompt]\n{full_prompt}\n")
 
             try:
@@ -59,10 +59,10 @@ class OpenAIAgent(Agent):
                 parsed = self.parse_response_content(content)
                 results.append({
                     "role": role_key,
-                    "status": parsed["status"],  # Aquesta línia es pot adaptar si l'output conté una altra indicació
+                    "status": parsed["status"],  # Adapt if output schema changes
                     "text": content,
                     "reason": parsed["reason"],
-                    "recommendations": parsed["recommendations"]  # També es pot intentar extraure si vénen en el text
+                    "recommendations": parsed["recommendations"]  # Can be further extracted if embedded in text
                 })
 
             except Exception as error:

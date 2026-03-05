@@ -7,7 +7,7 @@ import requests
 
 def send_policy_update_to_policy_agent(context_id: str, updated_text: str, reason: str, recommendations: list, version: str = "v1.0", language: str = "en"):
     """
-    Envia la resposta validada cap al policy-agent per fer update de la política.
+    Send validated output to policy-agent to request policy revision.
     """
     policy_agent_url = os.getenv("POLICY_AGENT_URL", "http://policy-agent:5000")
     update_endpoint = f"{policy_agent_url}/generate_policy/{context_id}/update"
@@ -28,11 +28,11 @@ def send_policy_update_to_policy_agent(context_id: str, updated_text: str, reaso
         response.raise_for_status()
         return {
             "success": True,
-            "message": "Policy update enviada correctament.",
+            "message": "Policy update sent successfully.",
             "response": response.json()
         }
     except requests.exceptions.RequestException as e:
         return {
             "success": False,
-            "message": f"Error enviant l'actualització al policy-agent: {str(e)}"
+            "message": f"Error sending policy update to policy-agent: {str(e)}"
         }

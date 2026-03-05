@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 
-# Diccionari global per registrar automàticament totes les subclasses
+# Global dictionary used to auto-register all subclasses
 AGENT_REGISTRY = {}
 
 class Agent(ABC):
@@ -17,11 +17,11 @@ class Agent(ABC):
         self.roles = roles or []
         self._validate_roles(self.roles)
 
-    # Registre automàtic de subclasses
+    # Automatic subclass registration
     def __init_subclass__(cls, **kwargs):
         """Auto-register subclasses in the backend registry."""
         super().__init_subclass__(**kwargs)
-        # El nom del tipus (per exemple "mock" ve de "MockAgent")
+        # Type key name (for example: "mock" from "MockAgent")
         registry_key = cls.__name__.lower().replace("agent", "")
         AGENT_REGISTRY[registry_key] = cls
 

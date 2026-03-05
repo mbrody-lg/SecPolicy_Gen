@@ -21,19 +21,19 @@ class Evaluator:
         with open(self.config_path, "r", encoding="utf-8") as f:
             self.config = yaml.safe_load(f)
 
-        # Instancia l'agent segons la configuració YAML
+        # Instantiate agent using YAML configuration
         self.agent = create_agent_from_config(self.config)
         self.debug_mode = current_app.config.get("DEBUG", False)
 
 
     def evaluate(self, worker_outputs: List[Dict], context_id: str) -> Dict:
         """
-        Construeix el prompt a partir dels resultats dels treballadors i
-        executa el rol EVA per obtenir una avaluació final.
-        TODO: fer servir prompt templates com OpenAIAgent
+        Build the evaluator prompt from worker results and
+        run the EVA role to obtain final evaluation feedback.
+        TODO: use prompt templates like OpenAIAgent
         """
         
-        # 1. Generar context per a l'evaluator
+        # 1. Build evaluator context
         prompt = "=== Validations from Workers ===\n"
         for res in worker_outputs:
             role = res.get("role", "UNKNOWN")
@@ -47,13 +47,13 @@ class Evaluator:
             if "recommendations" in res:
                 prompt += "RECOMMENDATIONS\n" + "\n".join(res["recommendations"]) + "\n"
 
-        # 2. Buscar el rol EVA del YAML
+        # 2. Locate EVA role in YAML
         eva_roles = [role for role in self.config["roles"] if "EVA" in role]
         if not eva_roles:
             raise ValueError("No EVA role found in configuration.")
 
-        # 3. Executar l'agent només amb EVA
+        # 3. Run agent with EVA role only
         eva_key = next(iter(eva_roles[0].keys()))
             
         eva_result = self.agent.run(prompt, context_id, only_roles=[{eva_key: self.agent.roles_by_key[eva_key]}])
-        return eva_result[0]  # Només hi ha un resultat esperat per EVA
+        return eva_result[0]  # EVA returns a single expected result

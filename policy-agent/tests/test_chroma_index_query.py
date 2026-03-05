@@ -8,15 +8,15 @@ def test_chroma_index_and_query():
     client = get_chroma_http_client()
     collection = client.get_or_create_collection(name="test_collection", embedding_function=embed_fn)
 
-    # Documents d'exemple
+    # Example documents
     docs = ["ISO 27001 establishes controls to protect information.",
             "The GDPR regulates the processing of personal data."]
     ids = ["doc1", "doc2"]
 
     collection.add(documents=docs, ids=ids)
 
-    results = collection.query(query_texts=["protecció dades"], n_results=2)
+    results = collection.query(query_texts=["data protection"], n_results=2)
 
     assert "documents" in results
     assert isinstance(results["documents"][0], list)
-    print("Resultats:", results["documents"][0])
+    print("Results:", results["documents"][0])

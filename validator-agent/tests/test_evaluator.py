@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 
-# Afegeix la ruta arrel del projecte
+# Add project root path
 ROOT_PATH = Path(__file__).resolve().parents[1]
 if str(ROOT_PATH) not in sys.path:
     sys.path.insert(0, str(ROOT_PATH))
@@ -14,7 +14,7 @@ from app.agents.roles.evaluator import Evaluator
 @pytest.fixture
 def app():
     app = Flask(__name__)
-    app.config["CONFIG_PATH"] = "/validator-agent/app/config/validator_agent.yaml"  # Aquest fitxer ha d'existir per al test
+    app.config["CONFIG_PATH"] = "/validator-agent/app/config/validator_agent.yaml"  # This file must exist for the test
     with app.app_context():
         yield app
 
@@ -41,4 +41,3 @@ def test_evaluator_runs_eva_role(app):
         assert result["status"] == "review"
         assert "reasons" in result
         assert "recommendations" in result
-

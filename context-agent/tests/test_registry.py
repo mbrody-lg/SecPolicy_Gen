@@ -7,4 +7,4 @@ from app.agents.openai.agent import OpenAIAgent
 print("AGENT_REGISTRY:", AGENT_REGISTRY)
 assert "mock" in AGENT_REGISTRY
 assert "openai" in AGENT_REGISTRY
-print("MockAgent registrat correctament.")
+print("MockAgent registered correctly.")

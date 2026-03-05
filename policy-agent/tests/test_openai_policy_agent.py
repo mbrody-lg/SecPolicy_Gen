@@ -23,4 +23,4 @@ def test_openai_policy_agent_pipeline(mock_chat, app_context, default_context_id
     assert result["context_id"] == default_context_id
     assert "[OpenAI simulation] generated response" in result["text"]
     assert isinstance(result["structured_plan"], list)
-    assert mock_chat.call_count >= 1  # ha de cridar almenys una vegada
+    assert mock_chat.call_count >= 1  # should be called at least once

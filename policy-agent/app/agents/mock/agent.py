@@ -33,7 +33,7 @@ class MockAgent(Agent):
             elif role_key == "MPG":
                 planner = MockMultiPathPlanner()
                 plans = planner.generate_plans(current_prompt)
-                current_prompt = plans # unim tot en una cadena perquè el SRFL ho rebi tot junt
+                current_prompt = plans  # merge into one payload so SRFL receives full context
 
             elif role_key == "SRFL":
                 reflector = MockSelfReflection()

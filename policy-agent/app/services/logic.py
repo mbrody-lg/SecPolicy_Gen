@@ -35,10 +35,10 @@ def run_with_agent(refined_prompt: str, context_id: str, model_version: str) -> 
         upsert=True
     )
     
-    # Creem l’agent segons el YAML
+    # Create agent from YAML configuration
     agent = create_agent_from_config(config)
 
-    # Executem el pipeline complet amb els rols definits al YAML
+    # Execute full pipeline with roles defined in YAML
     if current_app.config["DEBUG"]:
         print(f"[INFO] Running policy-agent ({model_version}) for context_id={context_id}")
     return agent.run(prompt=refined_prompt, context_id=context_id)
@@ -47,10 +47,10 @@ def update_with_agent(prompt: str, context_id: str = None, model_version: str = 
     """Run only update role pipeline to revise an existing policy text."""
     config = load_policy_config()
     
-    # Creem l’agent segons el YAML
+    # Create agent from YAML configuration
     agent = create_agent_from_config(config)
     
-    # Només executem l'últim rol (IMQ)
+    # Execute only the last role (IMQ)
     last_role = [agent.roles[-1]]
     agent.roles = last_role
 

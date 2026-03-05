@@ -5,16 +5,16 @@ from pathlib import Path
 from flask import Flask
 import mongomock
 
-# Assegurem que el path arrel del projecte és accessible
+# Ensure project root path is accessible
 ROOT_PATH = Path(__file__).resolve().parents[1]
 if str(ROOT_PATH) not in sys.path:
     sys.path.insert(0, str(ROOT_PATH))
 
-# Importem l'app original i les rutes correctes
+# Import app and routes
 from app import create_app, mongo
 from app.routes.routes import routes
 
-# App i context de test
+# Test app/context
 @pytest.fixture(scope="session")
 def app():
     app = create_app()
@@ -29,19 +29,19 @@ def app_context(app):
     with app.app_context():
         yield
 
-# Client per a tests HTTP
+# HTTP test client
 @pytest.fixture()
 def client(app):
     return app.test_client()
 
-# Mongo patch per defecte
+# Default Mongo patch
 @pytest.fixture(autouse=True)
 def mock_mongo():
     with patch.object(mongo, "cx", mongomock.MongoClient()):
         with patch.object(mongo, "db", mongomock.MongoClient().db):
             yield
 
-# Inputs per defecte de tests
+# Default test inputs
 @pytest.fixture(scope="session")
 def default_prompt():
     return "Generate a security policy for a spanish SME with GDPR and ISO 27001 requirements."

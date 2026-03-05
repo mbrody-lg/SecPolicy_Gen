@@ -12,16 +12,16 @@ def client():
             yield client
 
 def test_create_context(client):
-    # Dades de prova
+    # Test data
     form_data = {
-        "country": "Espanya",
-        "sector": "Salut",
-        "important_assets": "Historials mèdics",
-        "critical_assets": "Dades de pacients",
-        "current_security_operations": "Tallafocs i còpies",
+        "country": "Spain",
+        "sector": "Healthcare",
+        "important_assets": "Medical records",
+        "critical_assets": "Patient data",
+        "current_security_operations": "Firewalls and backups",
         "methodology": "ISO 27001",
-        "generic": "generiques",
-        "need": "Protecció de dades personals"
+        "generic": "generic",
+        "need": "Personal data protection"
     }
 
     response = client.post("/create", data=form_data, follow_redirects=True)
@@ -29,23 +29,22 @@ def test_create_context(client):
     html = response.data.decode("utf-8")
     assert "Context" in html or "context" in html
 
-    # Esperem a que Mongo actualitzi el document
+    # Wait for Mongo to update document
     context = None
     for _ in range(20):
-        context = mongo.db.contexts.find_one({"country": "Espanya"}, sort=[("created_at", -1)])
+        context = mongo.db.contexts.find_one({"country": "Spain"}, sort=[("created_at", -1)])
         if context and context.get("status") == "completed":
             break
         time.sleep(0.5)
 
     assert context is not None, "Context not found"
     assert context["status"] == "completed"
-    assert context["country"] == "Espanya"
+    assert context["country"] == "Spain"
     assert "refined_prompt" in context
 
-    # Verifiquem que s’han desat interaccions
+    # Verify interactions were saved
     interactions = list(mongo.db.interactions.find({"context_id": context["_id"]}))
     assert len(interactions) >= 1, "No interactions saved."
 
     print("Prompt:", context["refined_prompt"][:80])
-    print("Nº interaccions:", len(interactions))
-
+    print("Interactions count:", len(interactions))

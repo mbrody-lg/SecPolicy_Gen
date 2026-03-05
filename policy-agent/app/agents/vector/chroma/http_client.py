@@ -4,7 +4,7 @@ import os
 
 import chromadb
 
-# Singleton (es crea una sola vegada)
+# Singleton (created only once)
 _CLIENT_INSTANCE = None
 
 def get_chroma_http_client():

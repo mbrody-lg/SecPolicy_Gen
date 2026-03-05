@@ -8,15 +8,15 @@ class RAGProcessor:
 
     def __init__(self, config: dict):
         """Initialize vector clients and preload configured collections."""
-        # Llegeix la configuració del YAML del rol RAG
+        # Read RAG role configuration from YAML
         vector_config = config.get("vector")
         if not vector_config:
             raise ValueError("The RAG role must contain the 'vector' key with specific configuration.")
 
-        # Crea tots els clients vectorials segons la definició del YAML
+        # Create vector clients from YAML configuration
         self.vector_clients = get_vector_clients(vector_config)
 
-        # Carrega les col·leccions necessàries
+        # Load required collections
         self._load_collections(vector_config)
 
     def _load_collections(self, vector_config):
@@ -28,9 +28,9 @@ class RAGProcessor:
             if not isinstance(collections, list):
                 raise ValueError(f"'collection' must be a list for {backend_name}")
 
-            # Carreguem la col·lecció corresponent (una per client)
+            # Load matching collection (one per client)
             if collections:
-                client.load_collection(collections[0])  # només en carrega una per client
+                client.load_collection(collections[0])  # loads only one collection per client
 
     def apply(self, query: str, top_k: int = 3) -> str:
         """Return prompt enriched with retrieved context from all clients."""

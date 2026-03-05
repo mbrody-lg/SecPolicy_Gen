@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from app import mongo
 
 def test_update_policy_with_openaiagent(client):
-    # Inserim context fictici a Mongo (mongomock o real)
+    # Insert mock context into Mongo (mongomock or real)
     context_id = ObjectId()
     mongo.db.contexts.insert_one({
         "context_id": context_id,
@@ -33,7 +33,7 @@ def test_update_policy_with_openaiagent(client):
         ]
     }
 
-    # Fem la petició POST real a la ruta
+    # Execute real POST request against route
     response = client.post(f"/generate_policy/{context_id}/update", json=data)
 
     assert response.status_code == 200

@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Dict
 import re
 
-# Diccionari global per registrar automàticament totes les subclasses
+# Global dictionary used to auto-register all subclasses
 AGENT_REGISTRY = {}
 
 class Agent(ABC):
@@ -61,27 +61,27 @@ class Agent(ABC):
 
     def parse_response_content(self, content: str) -> Dict:
         """
-        Intenta extreure status, raó i recomanacions del contingut generat.
-        Retorna un diccionari amb els camps esperats.
+        Attempt to extract status, reason, and recommendations from generated content.
+        Return a dictionary with expected output fields.
         """
         result = {
-            "status": "accepted",  # per defecte
+            "status": "accepted",  # default
             "reason": "",
             "recommendations": []
         }
 
-        # STATUS
+        # Status
         match = re.search(r"\*\*?STATUS:?[\*\s]*([a-zA-Z]+)", content, re.IGNORECASE)
         if match:
             result["status"] = match.group(1).lower()
 
-        # REASON
+        # Reason
         match = re.search(r"\*\*?REASON:?[\*\s]*(.+?)(?=\n\*\*?RECOMMENDATIONS|\Z)", content, re.IGNORECASE | re.DOTALL)
         if match:
             reason_text = match.group(1).strip()
             result["reason"] = reason_text
 
-        # RECOMMENDATIONS agafa fins al final del content
+        # Recommendations section: capture until end of content
         match = re.search(r"\*\*RECOMMENDATIONS:?\*\*\s*(.+)$", content, re.IGNORECASE | re.DOTALL)
         if match:
             recommendations_block = match.group(1).strip()

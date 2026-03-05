@@ -3,7 +3,7 @@ from app.agents.mistralai.client import MistralClient
 def test_mistral_real(client):
     client = MistralClient()
 
-    model = "mistral-small"  # o mistral-medium, mistral-large si tens accés
+    model = "mistral-small"  # or mistral-medium, mistral-large if you have access
     prompt = "Please summarize the importance of cybersecurity policies."
     instructions = "You are a helpful assistant that provides concise and professional responses."
     temperature = 0.7

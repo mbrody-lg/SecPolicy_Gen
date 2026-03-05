@@ -7,7 +7,7 @@ from app.agents.vector.model_loader import download_model_if_needed, load_model
 def import_all_vector_modules(module_name):
     """Import backend client modules required for a vector provider."""
 
-    # Importa dinàmicament el mòdul client del backend
+    # Dynamically import backend client module
     try:
         importlib.import_module(f"app.agents.vector.{module_name}.client")
     except ImportError as error:
@@ -15,7 +15,7 @@ def import_all_vector_modules(module_name):
             f"Failed to import vector backend '{module_name}': {error}"
         ) from error
     
-    # Importa dinàmicament el mòdul client del backend
+    # Dynamically import backend HTTP client module
     try:
         importlib.import_module(f"app.agents.vector.{module_name}.http_client")
     except ImportError as error:
@@ -37,7 +37,7 @@ def get_vector_clients(vector_config: list):
         if not backend_class:
             raise ValueError(f"Unsupported or unregistered backend vector: {module_name}")
 
-        # Validació de camps requerits
+        # Required field validation
         for key in ("model", "collection"):
             if key not in entry:
                 raise ValueError(f"Missing '{key}' in configuration {module_name}")

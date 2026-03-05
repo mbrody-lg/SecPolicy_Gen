@@ -67,7 +67,7 @@ class MockAgent(Agent):
 
     def _simulate_result(self, _role_id: str) -> str:
         """Sample a simulated validation status for a role."""
-        # Distribució simulada: 50% acceptat, 30% review, 20% rebutjat
+        # Simulated distribution: 50% accepted, 30% review, 20% rejected
         outcomes = ["accepted", "review", "rejected"]
         weights = [0.5, 0.3, 0.2]
         return random.choices(outcomes, weights=weights, k=1)[0]

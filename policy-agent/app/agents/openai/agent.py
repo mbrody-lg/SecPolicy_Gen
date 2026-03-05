@@ -41,7 +41,7 @@ class OpenAIAgent(Agent):
             if role_key == "RAG":
                 rag_processor = RAGProcessor(role)
                 current_prompt = rag_processor.apply(instructions + current_prompt)
-                continue  # No passem per OpenAI aquí
+                continue  # Skip direct OpenAI call for RAG stage
     
             current_prompt = self._chat(current_prompt, instructions, temperature, max_tokens)
             
@@ -57,9 +57,9 @@ class OpenAIAgent(Agent):
                         "content": proposal_output.strip()
                     })
 
-                # Guardem com a pla estructurat totes les propostes
+                # Store all proposals as structured plan
                 structured_plan = all_proposals
-                # Preparem prompt per següents rols (si calen refinaments posteriors)
+                # Build prompt for following roles (if further refinement is needed)
                 current_prompt = "\n\n".join(
                     [f"Proposal {p['id']}:\n{p['content']}" for p in all_proposals]
                 )

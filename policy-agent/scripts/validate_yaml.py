@@ -13,9 +13,9 @@ def validate_all_configs(config_dir="configs/"):
     for yaml_file in yaml_files:
         try:
             agent = create_agent_from_config(yaml_file)
-            print(f"{os.path.basename(yaml_file)} → Vàlid [{agent.__class__.__name__}]")
+            print(f"{os.path.basename(yaml_file)} -> Valid [{agent.__class__.__name__}]")
         except Exception as e:
-            print(f"{os.path.basename(yaml_file)} → ERROR: {str(e)}")
+            print(f"{os.path.basename(yaml_file)} -> ERROR: {str(e)}")
 
 if __name__ == "__main__":
     validate_all_configs()

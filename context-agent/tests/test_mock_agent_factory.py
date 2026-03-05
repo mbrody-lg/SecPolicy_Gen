@@ -8,8 +8,8 @@ from app.agents.base import AGENT_REGISTRY
 test_yaml = """
 type: mock
 name: TestAgent
-instructions: Simula una resposta.
-model: simulador
+instructions: Simulate a response.
+model: simulator
 """
 
 test_config_path = "/tmp/test_mock_agent.yaml"
@@ -21,7 +21,7 @@ with open(test_config_path, "w") as f:
 agent = create_agent_from_config(test_config_path)
 
 # Run the agent with a dummy prompt
-prompt = "Aquest és un test de context inicial"
+prompt = "This is an initial context test"
 response = agent.run(prompt)
 
 # Output for verification

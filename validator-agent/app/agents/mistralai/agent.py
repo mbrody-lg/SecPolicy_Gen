@@ -43,7 +43,7 @@ class MistralAIAgent(Agent):
             max_tokens = role_config.get("max_tokens", 1000)
             
             if self.debug_mode:
-                print(f"[MistraAIAgent] Executant rol: {role_key}\n")
+                print(f"[MistralAIAgent] Executing role: {role_key}\n")
                 print(f"[Prompt]\n{prompt}\n")
 
             try:

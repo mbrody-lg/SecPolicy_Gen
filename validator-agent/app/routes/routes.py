@@ -24,15 +24,15 @@ def validate_policy():
                 "error": f"Missing required fields from policy-agent output: {', '.join(missing)}"
             }), 400
 
-        # Executar la validació
+        # Execute validation
         coordinator = Coordinator()
         validation_result = coordinator.validate_policy(data)
 
-        # DEBUG opcional
+        # Optional debug output
         if coordinator.debug_mode:
             print(f'\nVALIDATION_RESULT:\n{validation_result}\n')
 
-        # Retornar resposta completa, tant si és acceptada com si no
+        # Return full response regardless of acceptance status
         response = {
             "context_id": data["context_id"],
             "language": data.get("language", ""),
@@ -71,7 +71,7 @@ def get_validations_by_context(context_id):
     if not validations:
         return jsonify({"message": "No validation records found for this context."}), 404
 
-    # Serialitzar els ObjectId i timestamps per JSON
+    # Serialize ObjectId and timestamps for JSON response
     for v in validations:
         v["_id"] = str(v["_id"])
         v["context_id"] = str(v["context_id"])

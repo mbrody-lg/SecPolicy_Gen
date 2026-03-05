@@ -56,7 +56,7 @@ def update_policy(context_id):
     if str(data.get("context_id")) == str(context_id):
         context = mongo.db.contexts.find_one({"context_id": ObjectId(context_id)})
     if not context:
-        return abort(404, "Context no trobat.")
+        return abort(404, "Context not found.")
     
     if not all(field in data for field in required_fields):
         return jsonify({"error": "Required fields are missing."}), 400
@@ -68,7 +68,7 @@ def update_policy(context_id):
     language = data.get("language", "")
     version = data.get("policy_agent_version", "")
     
-    # Construim prompt per al rol IMQ "One or Incremental Model Query"
+    # Build prompt for IMQ role ("Incremental Model Query")
     prompt = (
         f"[Original Policy]:\n{policy_text}\n\n"
         f"[Reasons]:\n{json.dumps(reasons, indent=2)}\n\n"
@@ -92,8 +92,8 @@ def update_policy(context_id):
             "generated_at":  datetime.now(timezone.utc)
         }
 
-        # Actualitzem el document amb el prompt actualitzat
-        # TODO:guardar totes les iteracions per traçabilitat.
+        # Update stored document with refreshed prompt output
+        # TODO: store all iterations for traceability.
         mongo.db.contexts.update_one(
             {"context_id": ObjectId(context_id)},
             {"$set": {

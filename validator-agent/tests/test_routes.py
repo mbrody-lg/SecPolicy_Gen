@@ -24,7 +24,7 @@ def test_validate_policy_route(client, default_context_id):
 
     data = response.get_json()
 
-    # Validem els camps bàsics retornats
+    # Validate basic returned fields
     assert "context_id" in data
     assert data["context_id"] == default_context_id
     assert "language" in data
@@ -32,10 +32,10 @@ def test_validate_policy_route(client, default_context_id):
     assert "generated_at" in data
     assert "policy_agent_version" in data
 
-    # Validem que tingui estructura de validació
+    # Validate response has validation structure
     assert "status" in data
 
-    # Si no és acceptada, hi ha d’haver recomanacions
+    # If status is not accepted, recommendations must exist
     if data["status"] != "accepted":
         assert "recommendations" in data
         assert "reasons" in data
@@ -43,7 +43,7 @@ def test_validate_policy_route(client, default_context_id):
     assert data["status"] in ["accepted", "review", "rejected"]
 
 def test_delete_validation_by_context(client, app_context):
-    # Inserim una validació fictícia amb context_id
+    # Insert mock validation record with context_id
     context_id = str(ObjectId())
     mongo.db.validations.insert_one({
         "context_id": context_id,
@@ -59,13 +59,13 @@ def test_delete_validation_by_context(client, app_context):
     })
     print(f"test context_id: {context_id}");
 
-    # Fem DELETE
+    # Execute DELETE request
     response = client.delete(f"/validation/{context_id}")
     assert response.status_code == 200
 
     json_response = response.get_json()
     assert "deleted" in json_response.get("message", "").lower()
 
-    # Comprovem que s'ha eliminat realment
+    # Verify it was actually deleted
     remaining = list(mongo.db.validations.find({"context_id": context_id}))
     assert len(remaining) == 0

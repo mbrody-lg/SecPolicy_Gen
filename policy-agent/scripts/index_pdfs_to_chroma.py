@@ -51,7 +51,7 @@ def load_config_from_policy_yaml():
 
 def process_collection(config):
     collection_name = config['name']
-    log_path = Path(f"logs/vectoritzacio/{collection_name}.log")
+    log_path = Path(f"logs/vectorization/{collection_name}.log")
     log_file = open(log_path, "w", encoding="utf-8")
 
     def log(msg):
@@ -87,11 +87,11 @@ def process_collection(config):
     indexed_total = 0
     skipped_chunks = 0
 
-    for i, file in enumerate(tqdm(files, desc=f"Processant {collection_name}")):
+    for i, file in enumerate(tqdm(files, desc=f"Processing {collection_name}")):
         text = extract_text_from_pdf(file)
         chunks = chunk_text(text, chunk_size, chunk_overlap)
 
-        # Filtra chunks massa llargs
+        # Filter oversized chunks
         filtered = []
         ids = []
         for j, chunk in enumerate(chunks):
@@ -121,10 +121,10 @@ def process_collection(config):
 if __name__ == "__main__":
     print("Starting document vectorization from policy-agent.yaml...")
     try:
-        # Carrega variables d'entorn des de .env
+        # Load environment variables from .env
         load_dotenv()
         
-        log_dir = Path("logs/vectoritzacio")
+        log_dir = Path("logs/vectorization")
         log_dir.mkdir(parents=True, exist_ok=True)
         
         configs = load_config_from_policy_yaml()
