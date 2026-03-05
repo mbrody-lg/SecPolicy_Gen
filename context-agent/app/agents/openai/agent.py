@@ -78,7 +78,7 @@ class OpenAIAgent(Agent):
             )
             if run.status == "completed":
                 break
-            elif run.status in ("failed", "cancelled"):
+            if run.status in ("failed", "cancelled"):
                 raise RuntimeError("OpenAI Run failed or cancelled.")
             time.sleep(0.5)
 

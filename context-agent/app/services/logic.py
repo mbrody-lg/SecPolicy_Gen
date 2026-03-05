@@ -34,12 +34,13 @@ def generate_context_prompt(data: dict, question_config="app/config/context_ques
     return "\n".join(lines)
 
 
-def run_with_agent(prompt: str, context_id: str = None, _model_version: str = None) -> str:
+def run_with_agent(prompt: str, context_id: str = None, model_version: str = None) -> str:
     """
     Executa l’agent configurat a partir del prompt inicial.
     El context_id es pot fer servir com a base per nom de sessió, assistant_id o traçabilitat.
     """
     config_path = "app/config/context_agent.yaml"
+    _ = model_version
     agent = create_agent_from_config(config_path)
     agent.create(context_id=context_id)  # passem context_id si cal persistència
     return agent.run(prompt, context_id)

@@ -21,7 +21,7 @@ def create_app():
     def inject_agent_type():
         from app.agents.factory import load_agent_config
         config = load_agent_config("app/config/context_agent.yaml")
-        return dict(agent_type=config.get("type", "unknown"))
+        return {"agent_type": config.get("type", "unknown")}
 
     from app.routes.routes import main
     app.register_blueprint(main)
