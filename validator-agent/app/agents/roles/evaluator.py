@@ -1,3 +1,5 @@
+"""Evaluator role that consolidates worker outputs into final feedback."""
+
 import os
 from typing import List, Dict
 

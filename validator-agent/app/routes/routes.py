@@ -1,3 +1,5 @@
+"""HTTP routes for validator-agent validation and trace retrieval."""
+
 import traceback
 
 from bson import ObjectId

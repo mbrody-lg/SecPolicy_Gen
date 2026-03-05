@@ -1,3 +1,5 @@
+"""Factory helpers to load validator-agent backend implementations."""
+
 import importlib
 from pathlib import Path
 

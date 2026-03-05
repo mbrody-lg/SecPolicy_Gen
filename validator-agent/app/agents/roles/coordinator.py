@@ -1,3 +1,5 @@
+"""Coordinator orchestration for multi-round validator decisions."""
+
 import os
 from collections import Counter
 from datetime import datetime, timezone
