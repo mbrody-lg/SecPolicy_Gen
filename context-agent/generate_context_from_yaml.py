@@ -1,3 +1,5 @@
+"""Utility to rebuild context records from YAML answer files."""
+
 import os
 import sys
 from pathlib import Path
@@ -13,12 +15,14 @@ app = create_app()
 app.app_context().push()
 
 def parse_yaml_answers(file_path):
+    """Parse answers from a YAML file into an id->answer dictionary."""
     with open(file_path, 'r', encoding='utf-8') as f:
         content = yaml.safe_load(f)
         answers = content.get('answers', [])
         return {item['id']: item['answer'].strip() for item in answers if 'id' in item and 'answer' in item}
 
 def recreate_context_from_answers(data):
+    """Create context and interaction records, then run initial agent generation."""
     created_at = datetime.now(timezone.utc)
     initial_prompt = generate_context_prompt(data)
 
@@ -67,6 +71,7 @@ def recreate_context_from_answers(data):
     print(f"Context created by: {data.get('country', 'unknown')} - {data.get('sector', 'unknown')}")
 
 def process_directory(directory_path):
+    """Process every YAML file in a directory and recreate its context."""
     yaml_files = Path(directory_path).glob("*.yaml")
     for file_path in yaml_files:
         print(f"Processing {file_path.name}...")

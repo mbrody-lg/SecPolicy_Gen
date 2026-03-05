@@ -9,6 +9,7 @@ from flask import current_app
 from app.agents.base import AGENT_REGISTRY
 
 def load_agent_config(config_path: str = None) -> dict:
+    """Load validator-agent configuration from disk."""
     path = config_path or current_app.config.get("CONFIG_PATH", "/config/validator_agent.yaml")
     path = Path(path)
     if not path.exists():
@@ -17,6 +18,7 @@ def load_agent_config(config_path: str = None) -> dict:
         return yaml.safe_load(f)
 
 def create_agent_from_config(config: dict):
+    """Instantiate and return the configured backend agent implementation."""
     agent_type = config.get("type", "").lower()
     module_path = f"app.agents.{agent_type}.agent"
     

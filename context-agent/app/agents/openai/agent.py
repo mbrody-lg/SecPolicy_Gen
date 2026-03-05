@@ -1,3 +1,5 @@
+"""OpenAI-backed agent implementation for context generation."""
+
 import time
 
 from bson import ObjectId
@@ -9,12 +11,16 @@ from app.agents.openai.roles.optimiser import PromptResponseOptimiser
 from app.agents.openai.roles.proactive import ProactiveGoalCreator
 
 class OpenAIAgent(Agent):
+    """Concrete agent that uses OpenAI Assistants and role processors."""
+
     def __init__(self, name, instructions, model, tools=None):
+        """Initialize OpenAI agent state and lazily created assistant id."""
         Agent.__init__(self, name, instructions, model, tools or [])
         self.client = OpenAIClient()
         self.assistant_id = None
 
     def create(self, context_id: str = None):
+        """Create or recover an assistant bound to the provided context."""
         # Si ja existeix un agent per aquest context, el recuperem de Mongo
         if context_id:
             doc = mongo.db.contexts.find_one({"_id": ObjectId(context_id)})
@@ -38,6 +44,7 @@ class OpenAIAgent(Agent):
         return {"assistant_id": self.assistant_id}
 
     def run(self, prompt: str, context_id: str = None) -> str:
+        """Run context generation lifecycle and persist outputs in Mongo."""
         # Millora del prompt (proactive)
         proactive = ProactiveGoalCreator()
         refined_prompt = proactive.execute(prompt)

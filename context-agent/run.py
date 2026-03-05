@@ -1,3 +1,5 @@
+"""Flask entrypoint for the context-agent service."""
+
 from app import create_app
 
 app = create_app()

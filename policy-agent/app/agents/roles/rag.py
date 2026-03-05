@@ -1,8 +1,13 @@
+"""RAG role processor that enriches prompts with vector context."""
+
 from app.agents.vector.factory import get_vector_clients
 from flask import current_app
 
 class RAGProcessor:
+    """Apply retrieval-augmented generation over configured vector backends."""
+
     def __init__(self, config: dict):
+        """Initialize vector clients and preload configured collections."""
         # Llegeix la configuració del YAML del rol RAG
         vector_config = config.get("vector")
         if not vector_config:
@@ -15,6 +20,7 @@ class RAGProcessor:
         self._load_collections(vector_config)
 
     def _load_collections(self, vector_config):
+        """Load vector collections declared in the RAG role configuration."""
         for client, entry in zip(self.vector_clients, vector_config):
             backend_name = next(iter(entry)).lower()
             collections = entry.get("collection", [])
@@ -27,6 +33,7 @@ class RAGProcessor:
                 client.load_collection(collections[0])  # només en carrega una per client
 
     def apply(self, query: str, top_k: int = 3) -> str:
+        """Return prompt enriched with retrieved context from all clients."""
         results = []
         for client in self.vector_clients:
             

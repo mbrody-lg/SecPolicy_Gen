@@ -1,3 +1,5 @@
+"""Application factory for the context-agent service."""
+
 import os
 
 from flask import Flask
@@ -7,6 +9,7 @@ from dotenv import load_dotenv
 mongo = PyMongo()
 
 def create_app():
+    """Create and configure the Flask application instance."""
     load_dotenv()
     
     app = Flask(__name__)

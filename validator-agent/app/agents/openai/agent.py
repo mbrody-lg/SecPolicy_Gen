@@ -1,3 +1,5 @@
+"""OpenAI-backed validator agent implementation."""
+
 from typing import List, Dict, Optional
 
 import yaml
@@ -7,7 +9,10 @@ from app.agents.base import Agent
 from app.agents.openai.client import OpenAIClient
 
 class OpenAIAgent(Agent):
+    """Execute validator roles using OpenAI chat completions."""
+
     def __init__(self, name: str, instructions: str, model: str, tools: list = None, roles: list = None):
+        """Initialize OpenAI backend and load optional prompt template."""
         super().__init__(name, instructions, model, tools, roles)
         self.client = OpenAIClient()
         self.debug_mode = current_app.config.get("DEBUG", False)
@@ -18,9 +23,11 @@ class OpenAIAgent(Agent):
             self.prompt_template = config["agent"].get("prompt_template")
 
     def create(self, context_id: str = None):
+        """Create logical session metadata for validator operations."""
         return {"id": context_id or "openai-policy-session"}
 
     def run(self, prompt: str, context_id: str = None, only_roles: Optional[List[Dict]] = None) -> List[Dict]:
+        """Run configured roles and return parsed validation outputs."""
         selected_roles = only_roles if only_roles else self.roles
         
         if self.debug_mode:

@@ -1,3 +1,5 @@
+"""HTTP routes for context creation, iteration, and policy handoff."""
+
 from datetime import datetime, timezone
 
 from bson import ObjectId
@@ -10,6 +12,7 @@ main = Blueprint("main", __name__)
 
 @main.route("/")
 def index():
+    """Render the context dashboard with filters, sort, and pagination."""
     per_page = 10
     page = max(int(request.args.get("page", 1)), 1)
     status_filter = request.args.get("status", "")
@@ -54,6 +57,7 @@ def index():
 
 @main.route("/create", methods=["GET", "POST"])
 def create():
+    """Create a new context and trigger the initial agent response."""
     if request.method == "POST":
         allowed_fields = {"country", "region", "sector", "important_assets", "critical_assets", "current_security_operations", "methodology", "generic", "need"}
         data = {k: v.strip() for k, v in request.form.items() if k in allowed_fields}
@@ -126,6 +130,7 @@ def create():
 
 @main.route("/context/<context_id>")
 def context_detail(context_id):
+    """Render a context detail page with ordered interactions."""
     from bson.errors import InvalidId
     try:
         context_id = ObjectId(context_id)
@@ -154,6 +159,7 @@ def context_detail(context_id):
 
 @main.route("/context/<context_id>/continue", methods=["POST"])
 def continue_context(context_id):
+    """Append user input to an existing context and request next agent response."""
     context = mongo.db.contexts.find_one({"_id": ObjectId(context_id)})
     if not context:
         return abort(404, "Context not found.")
@@ -213,6 +219,7 @@ def continue_context(context_id):
 
 @main.route("/context/<context_id>/delete", methods=["POST"])
 def delete_context(context_id):
+    """Delete a context and its interaction history."""
     try:
         result = mongo.db.contexts.delete_one({"_id": ObjectId(context_id)})
         mongo.db.interactions.delete_many({"context_id": ObjectId(context_id)})
@@ -227,6 +234,7 @@ def delete_context(context_id):
 
 @main.route("/context/<context_id>/policy", methods=["POST"])
 def send_policy_to_context(context_id):
+    """Persist a validated policy payload in context interactions."""
     try:
         data = request.get_json(force=True)
 
@@ -265,6 +273,7 @@ def send_policy_to_context(context_id):
 
 @main.route("/context/<context_id>/generate_policy", methods=["POST"])
 def trigger_policy_generation(context_id):
+    """Run end-to-end policy generation and validation for a context."""
     result = generate_full_policy_pipeline(context_id)
     if result.get("success"):
         flash("Policy successfully generated and validated.", "success")

@@ -1,8 +1,11 @@
+"""Factory utilities to import and construct vector backend clients."""
+
 import importlib
 
 from app.agents.vector.base import VECTOR_CLIENT_REGISTRY
 from app.agents.vector.model_loader import download_model_if_needed, load_model
 def import_all_vector_modules(module_name):
+    """Import backend client modules required for a vector provider."""
 
     # Importa dinàmicament el mòdul client del backend
     try:
@@ -21,6 +24,7 @@ def import_all_vector_modules(module_name):
         ) from error
 
 def get_vector_clients(vector_config: list):
+    """Create vector backend clients from YAML role configuration."""
     for entry in vector_config:
         if not isinstance(entry, dict):
             raise ValueError("Each entry within 'vector' must be a dictionary with a single key")

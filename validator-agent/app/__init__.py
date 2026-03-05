@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 mongo = PyMongo()
 
 def create_app():
+    """Create and configure the Flask application for validator-agent."""
     # Carrega les variables d'entorn
     load_dotenv()
 

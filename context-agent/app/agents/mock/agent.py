@@ -1,3 +1,5 @@
+"""Mock agent backend for deterministic local context testing."""
+
 from bson import ObjectId
 
 from app import mongo
@@ -6,11 +8,15 @@ from app.agents.mock.roles.proactive import MockProactiveGoalCreator
 from app.agents.mock.roles.optimiser import MockPromptResponseOptimiser
 
 class MockAgent(Agent):
+    """Mock implementation that simulates prompt processing pipeline."""
+
     def create(self, context_id: str = None):
+        """Simulate backend initialization for a context."""
         print(f"[MOCK] Agent created by context_id={context_id}")
         return {"id": context_id or "mock-session"}
 
     def run(self, prompt: str, context_id: str = None) -> str:
+        """Run the mocked proactive and optimizer pipeline."""
         prompt_recieved = f"[MOCK]: {prompt}"
 
         # Simulem millora del prompt (proactive)

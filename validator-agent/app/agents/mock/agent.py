@@ -1,14 +1,21 @@
+"""Mock validator agent used for local and test execution paths."""
+
 import random
 from app.agents.base import Agent
 
 class MockAgent(Agent):
+    """Simulate validator role outcomes without calling external providers."""
+
     def __init__(self, name: str, instructions: str, model: str, tools: list = None, roles: list = None):
+        """Initialize mock agent using shared base configuration."""
         super().__init__(name, instructions, model, tools, roles)
 
     def create(self, context_id: str = None):
+        """Return synthetic creation metadata for the given context."""
         return {"status": "created", "context_id": context_id}
 
     def run(self, prompt: str, context_id: str = None) -> list:
+        """Generate simulated role-by-role validation responses."""
         results = []
         for role in self.roles:
             role_id, _role_config = next(iter(role.items()))
@@ -59,6 +66,7 @@ class MockAgent(Agent):
         return results
 
     def _simulate_result(self, _role_id: str) -> str:
+        """Sample a simulated validation status for a role."""
         # Distribució simulada: 50% acceptat, 30% review, 20% rebutjat
         outcomes = ["accepted", "review", "rejected"]
         weights = [0.5, 0.3, 0.2]

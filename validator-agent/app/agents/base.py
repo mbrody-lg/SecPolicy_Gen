@@ -1,3 +1,5 @@
+"""Base abstractions and shared parsing helpers for validator agents."""
+
 from abc import ABC, abstractmethod
 from typing import Dict
 import re
@@ -9,6 +11,7 @@ class Agent(ABC):
     """Abstract base contract for validator-agent backends."""
 
     def __init__(self, name: str, instructions: str, model: str, tools: None, roles=None):
+        """Initialize common agent state and validate configured roles."""
         self.name = name
         self.instructions = instructions
         self.model = model
@@ -19,19 +22,23 @@ class Agent(ABC):
 
 
     def __init_subclass__(cls, **kwargs):
+        """Auto-register concrete subclasses in the global agent registry."""
         super().__init_subclass__(**kwargs)
         registry_key = cls.__name__.lower().replace("agent", "")
         AGENT_REGISTRY[registry_key] = cls
 
     @abstractmethod
     def create(self, context_id: str = None):
+        """Create remote/session resources required by the concrete backend."""
         pass
 
     @abstractmethod
     def run(self, prompt: str, context_id: str = None) -> str:
+        """Execute the concrete validation flow and return backend output."""
         pass
 
     def _validate_roles(self, roles: list):
+        """Validate role structure and required role configuration fields."""
         if not roles or not isinstance(roles, list):
             raise ValueError("The YAML must contain a list of 'roles'.")
 
@@ -99,6 +106,7 @@ class Agent(ABC):
         return result
     
     def _render_prompt(self, instructions: str, prompt: str) -> str:
+        """Render the final prompt, honoring optional prompt template configuration."""
         return self.prompt_template.format(
             instructions=instructions.strip(),
             prompt=prompt.strip()

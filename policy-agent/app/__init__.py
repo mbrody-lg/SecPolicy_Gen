@@ -1,3 +1,5 @@
+"""Application factory and extensions for the policy-agent service."""
+
 import os
 from flask import Flask
 from flask_pymongo import PyMongo
@@ -7,6 +9,7 @@ from dotenv import load_dotenv
 mongo = PyMongo()
 
 def create_app():
+    """Build and configure the Flask app and register routes."""
     # Carrega variables d'entorn des de .env
     load_dotenv()
 

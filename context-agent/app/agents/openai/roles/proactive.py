@@ -1,7 +1,12 @@
+"""Role processor that proactively rewrites user context objectives."""
+
 from app.agents.openai.client import OpenAIClient
 
 class ProactiveGoalCreator(OpenAIClient):
+    """Generate an improved goal prompt before assistant execution."""
+
     def execute(self, input_prompt: str) -> str:
+        """Return an enhanced objective prompt using chat completion."""
         instructions = """
         Improve this objective to make it more effective in generating security context. 
         Enumerate which technical requirements must needed to secure this type of SME's.

@@ -16,6 +16,7 @@ class Coordinator:
     """Runs multi-round worker validation and final decision orchestration."""
 
     def __init__(self):
+        """Load configuration and initialize agent/evaluator dependencies."""
         self.config_path = current_app.config.get("CONFIG_PATH", "/config/validator_agent.yaml")
 
         if not os.path.exists(self.config_path):
@@ -31,17 +32,21 @@ class Coordinator:
 
     @property
     def max_rounds(self) -> int:
+        """Return maximum validation rounds configured for coordinator flow."""
         return self.validation.get("rounds", 3)
 
     @property
     def consensus_threshold(self) -> int:
+        """Return minimum threshold used by consensus configuration."""
         return self.validation.get("consensus_threshold", 2)
 
     @property
     def vote_strategy(self) -> str:
+        """Return vote strategy name configured for fallback decisions."""
         return self.validation.get("vote_strategy", "majority")
 
     def validate_policy(self, policy_input: dict) -> dict:
+        """Run iterative validation rounds and produce final policy decision payload."""
         from app.services.logic import send_policy_update_to_policy_agent  # importar funció auxiliar
 
         context_id = policy_input.get("context_id")
@@ -127,6 +132,7 @@ class Coordinator:
 
 
     def format_response(self, decision: str, last_round_results: List[Dict]) -> Dict:
+        """Format simplified decision payload from a round result set."""
         response = {
             "status": decision,
             "reasons": [],
@@ -147,6 +153,7 @@ class Coordinator:
         return response
 
     def vote(self, results: List[Dict]) -> str:
+        """Compute final fallback decision using majority status vote."""
         statuses = [r["status"] for r in results if r["role"] != "EVA"]
         counts = Counter(statuses)
         return counts.most_common(1)[0][0]
@@ -161,6 +168,7 @@ class Coordinator:
         all_rounds: List[List[Dict]] = None,
         evaluator_result: Optional[Dict] = None,
     ):
+        """Persist validation trace and metadata in MongoDB."""
         try:
             log_data = {
                 "context_id": context_id,
@@ -198,6 +206,7 @@ class Coordinator:
         generated_at: str,
         evaluator_feedback: Dict
     ) -> Dict:
+        """Build final API response payload for accepted/review/rejected outcomes."""
         response = {
             "context_id": context_id,
             "language": language,

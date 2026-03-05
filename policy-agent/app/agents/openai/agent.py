@@ -1,3 +1,5 @@
+"""OpenAI-backed policy generation agent implementation."""
+
 from app.agents.base import Agent
 from app.agents.openai.client import OpenAIClient
 from app.agents.roles.rag import RAGProcessor
@@ -5,15 +7,19 @@ from flask import current_app
 
 
 class OpenAIAgent(Agent):
+    """Run configured role chain to build policy outputs with OpenAI."""
 
     def __init__(self, name, instructions, model, tools=None, roles=None):
+        """Initialize policy agent with OpenAI client and role config."""
         super().__init__(name, instructions, model, tools, roles)
         self.client = OpenAIClient()
 
     def create(self, context_id: str = None):
+        """Return a lightweight backend session descriptor."""
         return {"id": context_id or "openai-policy-session"}
         
     def run(self, prompt: str, context_id: str = None) -> str:
+        """Execute configured roles and return generated policy payload."""
         if not self.roles:
             raise ValueError("The YAML file does not contain any 'roles'.")
 
@@ -67,6 +73,7 @@ class OpenAIAgent(Agent):
         return {'text': current_prompt.strip(), 'structured_plan': structured_plan, "context_id": context_id}
 
     def _chat(self, prompt: str, instructions: str, temperature: float, max_tokens: int) -> str:
+        """Run a chat completion call with role-specific instructions."""
         if current_app.config["DEBUG"]:
             print(f"prompt: {prompt}\n instructions:{instructions}\n temperature: {temperature}\n max_tokens: {max_tokens}")
 

@@ -1,10 +1,15 @@
+"""Base abstractions and registry for policy-agent backends."""
+
 from abc import ABC, abstractmethod
 
 # Diccionari global per registrar automàticament totes les subclasses
 AGENT_REGISTRY = {}
 
 class Agent(ABC):
+    """Abstract policy generation agent interface."""
+
     def __init__(self, name: str, instructions: str, model: str, tools: None, roles=None ):
+        """Initialize core agent metadata and role configuration."""
         self.name = name
         self.instructions = instructions
         self.model = model
@@ -14,6 +19,7 @@ class Agent(ABC):
 
     # Registre automàtic de subclasses
     def __init_subclass__(cls, **kwargs):
+        """Auto-register subclasses in the backend registry."""
         super().__init_subclass__(**kwargs)
         # El nom del tipus (per exemple "mock" ve de "MockAgent")
         registry_key = cls.__name__.lower().replace("agent", "")
@@ -21,13 +27,16 @@ class Agent(ABC):
 
     @abstractmethod
     def create(self, context_id: str = None):
+        """Create or recover backend state for an optional context id."""
         pass
 
     @abstractmethod
     def run(self, prompt: str, context_id: str = None) -> str:
+        """Generate policy output for a prompt and optional context."""
         pass
     
     def _validate_roles(self, roles: list):
+        """Validate YAML role configuration structure and value types."""
         if not roles or not isinstance(roles, list):
             raise ValueError("The YAML must contain a list of 'roles'.")
 

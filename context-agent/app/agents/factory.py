@@ -1,12 +1,16 @@
+"""Factory helpers to load and instantiate context-agent backends."""
+
 import importlib
 import yaml
 from app.agents.base import AGENT_REGISTRY
 
 def load_agent_config(config_path: str) -> dict:
+    """Load agent configuration from a YAML file path."""
     with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 def create_agent_from_config(config_path: str):
+    """Create an agent instance from YAML configuration."""
     config = load_agent_config(config_path)
     agent_type = config.get("type").lower()  # ex: "openai", "claude", "mock"
     module_path = f"app.agents.{agent_type}.agent"

@@ -12,6 +12,7 @@ class Evaluator:
     """Evaluates worker outputs and returns consolidated EVA feedback."""
 
     def __init__(self):
+        """Load evaluator configuration and initialize backend agent."""
         self.config_path = current_app.config.get("CONFIG_PATH", "/config/validator_agent.yaml")
 
         if not os.path.exists(self.config_path):

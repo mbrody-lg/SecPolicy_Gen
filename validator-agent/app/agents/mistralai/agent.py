@@ -1,3 +1,5 @@
+"""Mistral-backed validator agent implementation."""
+
 from typing import List, Dict, Optional
 
 import yaml
@@ -7,7 +9,10 @@ from app.agents.base import Agent
 from app.agents.mistralai.client import MistralClient
 
 class MistralAIAgent(Agent):
+    """Execute validator roles using the Mistral chat backend."""
+
     def __init__(self, name: str, instructions: str, model: str, tools: list = None, roles: list = None):
+        """Initialize Mistral backend client and prompt template configuration."""
         super().__init__(name, instructions, model, tools, roles)
         self.client = MistralClient()
         self.debug_mode = current_app.config.get("DEBUG", False)
@@ -18,9 +23,11 @@ class MistralAIAgent(Agent):
             self.prompt_template = config["agent"].get("prompt_template")
 
     def create(self, context_id: str = None):
+        """Return synthetic creation metadata for validator sessions."""
         return {"status": "created", "context_id": context_id}
 
     def run(self, prompt: str, context_id: str = None, only_roles: Optional[List[Dict]] = None) -> List[Dict]:
+        """Run configured roles and return parsed validation outputs."""
         selected_roles = only_roles if only_roles else self.roles
         
         if self.debug_mode:

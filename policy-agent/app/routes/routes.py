@@ -1,3 +1,5 @@
+"""HTTP routes for policy generation and policy revision workflow."""
+
 from datetime import datetime, timezone
 import json
 import traceback
@@ -13,6 +15,7 @@ routes = Blueprint("routes", __name__)
 
 @routes.route("/generate_policy", methods=["POST"])
 def generate_policy():
+    """Generate a policy from refined context data via policy-agent pipeline."""
     data = request.get_json()
     required_fields = ["context_id", "refined_prompt", "language", "model_version"]
     if not all(field in data for field in required_fields):
@@ -45,6 +48,7 @@ def generate_policy():
     
 @routes.route("/generate_policy/<context_id>/update", methods=["POST"])
 def update_policy(context_id):
+    """Regenerate policy text after validator feedback for a context."""
     data = request.get_json()
     required_fields = ["context_id", "language", "policy_text", "policy_agent_version", "generated_at", "status", "reasons", "recommendations"]
 

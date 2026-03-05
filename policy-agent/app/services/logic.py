@@ -1,3 +1,5 @@
+"""Service helpers for policy-agent configuration and execution flow."""
+
 import os
 from datetime import datetime, timezone
 
@@ -9,6 +11,7 @@ from app.agents.factory import create_agent_from_config
 
 
 def load_policy_config() -> dict:
+    """Load policy-agent YAML configuration from configured path."""
     config_path = os.path.join(current_app.config["CONFIG_PATH"])
 
     if not os.path.exists(config_path):
@@ -17,6 +20,7 @@ def load_policy_config() -> dict:
         return yaml.safe_load(f)
 
 def run_with_agent(refined_prompt: str, context_id: str, model_version: str) -> str:
+    """Run full policy-agent role pipeline for initial policy generation."""
     config = load_policy_config()
     
     mongo.db.policy_configs.update_one(
@@ -40,6 +44,7 @@ def run_with_agent(refined_prompt: str, context_id: str, model_version: str) -> 
     return agent.run(prompt=refined_prompt, context_id=context_id)
 
 def update_with_agent(prompt: str, context_id: str = None, model_version: str = None) -> str:
+    """Run only update role pipeline to revise an existing policy text."""
     config = load_policy_config()
     
     # Creem l’agent segons el YAML

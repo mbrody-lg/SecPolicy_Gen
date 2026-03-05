@@ -1,17 +1,22 @@
+"""Helpers to cache, download, and load sentence-transformer models."""
+
 import os
 from sentence_transformers import SentenceTransformer
 from huggingface_hub import snapshot_download
 from huggingface_hub.utils import RepositoryNotFoundError, RevisionNotFoundError
 
 def get_model_cache_path(model_id: str) -> str:
+    """Return local Hugging Face cache path for a model id."""
     return os.path.expanduser(f"~/.cache/huggingface/hub/models--{model_id.replace('/', '--')}")
 
 def is_model_cached(model_id: str) -> bool:
+    """Check whether a model already exists in the local cache."""
     if not model_id:
         raise ValueError("'model' not specified in YAML.")
     return os.path.exists(get_model_cache_path(model_id))
 
 def download_model_if_needed(model_id: str):
+    """Download a model snapshot when it is not available locally."""
     if not model_id:
         raise ValueError("'model' not specified. It must be indicated explicitly.")
     
@@ -26,6 +31,7 @@ def download_model_if_needed(model_id: str):
             ) from error
 
 def load_model(model_id: str) -> SentenceTransformer:
+    """Load a sentence-transformer model from local cache."""
     if not model_id:
         raise ValueError("'model' not specified. Unable to load.")
     

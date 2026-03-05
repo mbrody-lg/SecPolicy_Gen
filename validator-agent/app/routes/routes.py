@@ -12,6 +12,7 @@ routes = Blueprint("routes", __name__)
 
 @routes.route("/validate-policy", methods=["POST"])
 def validate_policy():
+    """Validate policy payload received from policy-agent and return decision data."""
     try:
         data = request.get_json(force=True)
 
@@ -57,6 +58,7 @@ def validate_policy():
 
 @routes.route("/validation/<context_id>", methods=["GET"])
 def get_validations_by_context(context_id):
+    """Return stored validation rounds for a given context identifier."""
     try:
         ObjectId(context_id)
     except Exception:
@@ -80,6 +82,7 @@ def get_validations_by_context(context_id):
 
 @routes.route("/validation/<context_id>", methods=["DELETE"])
 def delete_validations_by_context(context_id):
+    """Delete validation records for a context when test mode is enabled."""
     if not current_app.config.get("TESTING", False):
         abort(403, "This operation is only allowed in DEBUG mode.")
 

@@ -1,3 +1,5 @@
+"""Singleton HTTP client accessor for Chroma backend connections."""
+
 import os
 
 import chromadb
@@ -6,6 +8,7 @@ import chromadb
 _CLIENT_INSTANCE = None
 
 def get_chroma_http_client():
+    """Return a cached Chroma HTTP client instance."""
     global _CLIENT_INSTANCE
     if _CLIENT_INSTANCE is None:
         host = os.getenv("CHROMA_HOST", "chroma")

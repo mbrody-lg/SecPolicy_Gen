@@ -1,3 +1,5 @@
+"""Mock policy-agent backend used for deterministic local testing."""
+
 from app.agents.base import Agent
 from app.agents.mock.roles.rag import MockRAGRetriever
 from app.agents.mock.roles.multi_path import MockMultiPathPlanner
@@ -5,12 +7,15 @@ from app.agents.mock.roles.reflection import MockSelfReflection
 from app.agents.mock.roles.incremental_query import MockIncrementalQuery
 
 class MockAgent(Agent):
+    """Simulate role-based policy generation without external APIs."""
 
     def create(self, context_id: str = None):
+        """Return a simulated session descriptor for the context."""
         print(f"[MOCK] Policy agent created by context_id={context_id}")
         return {"id": context_id or "openai-policy-session"}
 
     def run(self, prompt: str, context_id: str = None) -> str:
+        """Run the mocked role pipeline and return simulated policy output."""
         if not self.roles:
             raise ValueError("No role has been defined within 'roles' in the MockAgent YAML.")
 
