@@ -21,12 +21,21 @@ class Coordinator:
             self.config = yaml.safe_load(f)
 
         self.agent = create_agent_from_config(self.config)
-        self.validation_config = self.config.get("validation", {})
-        self.max_rounds = self.validation_config.get("rounds", 3)
-        self.consensus_threshold = self.validation_config.get("consensus_threshold", 2)
-        self.vote_strategy = self.validation_config.get("vote_strategy", "majority")
+        self.validation = self.config.get("validation", {})
         self.debug_mode = current_app.config.get("DEBUG", True)
         self.evaluator = Evaluator()
+
+    @property
+    def max_rounds(self) -> int:
+        return self.validation.get("rounds", 3)
+
+    @property
+    def consensus_threshold(self) -> int:
+        return self.validation.get("consensus_threshold", 2)
+
+    @property
+    def vote_strategy(self) -> str:
+        return self.validation.get("vote_strategy", "majority")
 
     def validate_policy(self, policy_input: dict) -> dict:
         from app.services.logic import send_policy_update_to_policy_agent  # importar funció auxiliar
@@ -49,10 +58,11 @@ class Coordinator:
         while rounds_done < self.max_rounds:
             rounds_done += 1
             round_results = self.agent.run(prompt, context_id, only_roles=validation_roles)
-            
-            print(f"[DEBUG] Round {rounds_done} - Results:")
-            print(round_results)
-            
+
+            if self.debug_mode:
+                print(f"[DEBUG] Round {rounds_done} - Results:")
+                print(round_results)
+
             all_rounds.append(round_results)
 
             if self.debug_mode:
@@ -74,7 +84,7 @@ class Coordinator:
             if decision == "accepted":
                 return self.build_response("accepted", round_results, context_id, language, prompt, version, generated_at, evaluator_feedback)
 
-            elif decision in ["rejected", "review"]:
+            if decision in ["rejected", "review"]:
                 if self.debug_mode:
                     print(f"\n→ {decision.upper()} — enviant a policy-agent per revisió")
 
@@ -102,7 +112,7 @@ class Coordinator:
 
         last_round = all_rounds[-1]
         final_decision = self.vote(last_round)
-        evaluator_feedback = self.run_evaluator(last_round, context_id)
+        evaluator_feedback = self.evaluator.evaluate(last_round, context_id)
 
         self.log_validation(
             context_id, last_round, final_decision, self.max_rounds, False,
