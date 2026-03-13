@@ -54,7 +54,7 @@ def update_policy(context_id):
 
     context = None
     if str(data.get("context_id")) == str(context_id):
-        context = mongo.db.contexts.find_one({"context_id": ObjectId(context_id)})
+        context = mongo.db.contexts.find_one({"_id": ObjectId(context_id)})
     if not context:
         return abort(404, "Context not found.")
     
@@ -95,7 +95,7 @@ def update_policy(context_id):
         # Update stored document with refreshed prompt output
         # TODO: store all iterations for traceability.
         mongo.db.contexts.update_one(
-            {"context_id": ObjectId(context_id)},
+            {"_id": ObjectId(context_id)},
             {"$set": {
                 "language": result["language"],
                 "policy_text": result["policy_text"],

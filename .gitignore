@@ -71,3 +71,5 @@ htmlcov/
 *.pdf
 /__MACOSX/
 /.local-workspace/
+/tasks/
+/migration/

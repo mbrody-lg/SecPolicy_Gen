@@ -26,13 +26,9 @@ def send_policy_update_to_policy_agent(context_id: str, updated_text: str, reaso
     try:
         response = requests.post(update_endpoint, json=payload)
         response.raise_for_status()
-        return {
-            "success": True,
-            "message": "Policy update sent successfully.",
-            "response": response.json()
-        }
+        return response.json()
     except requests.exceptions.RequestException as e:
         return {
             "success": False,
-            "message": f"Error sending policy update to policy-agent: {str(e)}"
+            "error": f"Error sending policy update to policy-agent: {str(e)}"
         }
