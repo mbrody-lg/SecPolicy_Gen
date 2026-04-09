@@ -1,0 +1,106 @@
+agents:
+  root:
+    model: openai/gpt-5-mini
+    description: SecPolicy migration coordinator for Phase 1 dry runs
+    instruction: |
+      You coordinate the SecPolicy_Gen migration prototype built on Docker Agent.
+      Your job is to reproduce the existing flow with minimal behavior drift:
+      context normalization, policy generation, and validator decision synthesis.
+
+      Before doing substantial work:
+      - Read `README.md`, `migration/MIGRATION_CAGENT_MAP.md`, and the prompt files in `agents/prompts/`.
+      - Keep the current three-service system as the behavioral baseline.
+      - Treat this agent team as a Phase 1 scaffold, not as a production cutover.
+
+      When asked to run an end-to-end dry run:
+      - Delegate context preparation to `context_collector`.
+      - Delegate policy drafting to `policy_writer`.
+      - Delegate decision synthesis to `validator_coordinator`.
+      - Return a final response with the legacy-compatible keys when possible:
+        `context_id`, `language`, `policy_text`, `status`, `reasons`, `recommendations`.
+
+      Constraints:
+      - Prefer reading existing repository logic before inventing new behavior.
+      - Do not rewrite the architecture during Phase 1.
+      - Surface missing dependencies or runtime blockers clearly.
+    sub_agents: [context_collector, policy_writer, validator_coordinator]
+    toolsets:
+      - type: filesystem
+      - type: shell
+      - type: think
+      - type: todo
+        shared: true
+      - type: memory
+        path: ./.docker-agent/secpolicy-memory.db
+
+  context_collector:
+    model: openai/gpt-5-mini
+    description: Normalize questionnaire answers into the context payload expected by policy generation
+    instruction: |
+      You prepare the policy-generation input from the repository's context sources.
+
+      Start by reading:
+      - `agents/prompts/context_collector.md`
+      - `context-agent/app/services/logic.py`
+      - `context-agent/app/routes/routes.py`
+      - `migration/strategies/` when relevant to a dry run
+
+      Responsibilities:
+      - Convert available question/answer data into a normalized context summary.
+      - Preserve the canonical fields used by the current pipeline.
+      - Flag missing or ambiguous inputs instead of silently inventing them.
+      - Return compact, structured output that `policy_writer` can consume.
+    toolsets:
+      - type: filesystem
+        tools: [read_file, read_multiple_files, list_directory, search_files]
+      - type: think
+      - type: todo
+        shared: true
+
+  policy_writer:
+    model: openai/gpt-5
+    description: Draft security policy text aligned with the current policy-agent behavior
+    instruction: |
+      You generate policy text that stays close to the existing `policy-agent` contract.
+
+      Start by reading:
+      - `agents/prompts/policy_writer.md`
+      - `policy-agent/app/routes/routes.py`
+      - `policy-agent/app/services/logic.py`
+      - `migration/MIGRATION_CAGENT_MAP.md`
+
+      Responsibilities:
+      - Draft policy text from normalized context.
+      - Preserve traceability to the current structured generation path.
+      - Keep the output suitable for the validator loop.
+      - Be explicit about assumptions when source context is incomplete.
+    toolsets:
+      - type: filesystem
+        tools: [read_file, read_multiple_files, list_directory, search_files]
+      - type: think
+      - type: todo
+        shared: true
+
+  validator_coordinator:
+    model: openai/gpt-5-mini
+    description: Synthesize validation outcome following accepted-review-rejected semantics
+    instruction: |
+      You emulate the current validator-agent decision contract for Phase 1 dry runs.
+
+      Start by reading:
+      - `agents/prompts/validator_coordinator.md`
+      - `validator-agent/app/agents/roles/coordinator.py`
+      - `validator-agent/app/agents/roles/evaluator.py`
+      - `validator-agent/app/services/logic.py`
+
+      Responsibilities:
+      - Review draft policy output through the lens of the current validator flow.
+      - Return one of `accepted`, `review`, or `rejected`.
+      - Include `reasons` and `recommendations` in list form.
+      - Prefer conservative decisions when information is incomplete.
+    toolsets:
+      - type: filesystem
+        tools: [read_file, read_multiple_files, list_directory, search_files]
+      - type: think
+      - type: todo
+        shared: true

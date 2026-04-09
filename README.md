@@ -56,6 +56,8 @@ make logs            # View live logs from all services
 make context-tests   # Run Context Agent tests
 make policy-tests    # Run Policy Agent tests
 make validator-tests # Run Validator Agent tests
+make cagent-phase1   # Run the Docker Agent Phase 1 migration scaffold
+make cagent-phase1-case CASE=migration/golden-contexts/case-01-healthcare-clinic.json
 ```
 
 See [infrastructure/README.md](infrastructure/README.md) for complete command reference.
@@ -64,6 +66,7 @@ See [infrastructure/README.md](infrastructure/README.md) for complete command re
 
 ```
 SecPolicy_Gen/
+├── agents/            # Docker Agent Phase 1 scaffold
 ├── context-agent/      # User interaction & context generation
 ├── policy-agent/       # Security policy generation
 ├── validator-agent/    # Policy validation & refinement
