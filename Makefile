@@ -4,7 +4,7 @@ INFRA_DIR=infrastructure
 COMPOSE=docker-compose -f $(INFRA_DIR)/docker-compose.yml --env-file $(INFRA_DIR)/.env
 LINT_PYTHON=$(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi)
 
-.PHONY: all up down clean rebuild logs shell-context context-tests context-import policy-shell policy-tests policy-vectorize validator-shell validator-tests functional-smoke bootstrap-test-env lint help
+.PHONY: all up down clean rebuild logs shell-context context-tests context-import policy-shell policy-tests policy-vectorize validator-shell validator-tests functional-smoke cagent-phase1 bootstrap-test-env lint help
 
 ## Start all infrastructure
 up:
@@ -62,6 +62,10 @@ validator-tests:
 functional-smoke:
 	./scripts/run_docker_functional_smoke.sh
 
+## Run Docker Agent Phase 1 scaffold
+cagent-phase1:
+	./scripts/run_cagent_phase1.sh
+
 ## Bootstrap a reproducible local test environment in .venv
 bootstrap-test-env:
 	bash scripts/bootstrap-test-env.sh
@@ -88,5 +92,6 @@ help:
 	@echo "make validator-shell 	-> Access validator-agent shell"
 	@echo "make validator-tests 	-> Run tests within validator-agent"
 	@echo "make functional-smoke 	-> Run full docker functional smoke pipeline"
+	@echo "make cagent-phase1 	-> Run the Docker Agent Phase 1 scaffold"
 	@echo "make bootstrap-test-env -> Install local test dependencies into .venv"
 	@echo "make lint 		-> Run pylint using root pyproject.toml config"
