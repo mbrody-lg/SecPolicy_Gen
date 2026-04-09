@@ -78,6 +78,14 @@ def get_context_and_prompt(context_id: str) -> dict:
             refined_prompt = prompt_entry.get("answer", "").strip()
 
     if not refined_prompt:
+        prompt_entry = mongo.db.interactions.find_one(
+            {"context_id": context_obj_id, "question_id": "response_initial"},
+            sort=[("timestamp", -1)]
+        )
+        if prompt_entry:
+            refined_prompt = prompt_entry.get("answer", "").strip()
+
+    if not refined_prompt:
         raise ValueError("Refined prompt is empty")
 
     return {

@@ -1,6 +1,7 @@
 """Mock validator agent used for local and test execution paths."""
 
 import random
+from typing import Dict, List, Optional
 from app.agents.base import Agent
 
 class MockAgent(Agent):
@@ -14,10 +15,17 @@ class MockAgent(Agent):
         """Return synthetic creation metadata for the given context."""
         return {"status": "created", "context_id": context_id}
 
-    def run(self, prompt: str, context_id: str = None) -> list:
+    def run(
+        self,
+        prompt: str,
+        context_id: str = None,
+        only_roles: Optional[List[Dict]] = None,
+    ) -> list:
         """Generate simulated role-by-role validation responses."""
         results = []
-        for role in self.roles:
+        selected_roles = only_roles if only_roles else self.roles
+
+        for role in selected_roles:
             role_id, _role_config = next(iter(role.items()))
             simulated_result = self._simulate_result(role_id)
 

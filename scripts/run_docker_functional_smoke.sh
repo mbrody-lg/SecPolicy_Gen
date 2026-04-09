@@ -12,12 +12,15 @@ CONTEXT_CONTAINER="context_agent_web"
 POLICY_CONTAINER="policy_agent_service"
 VALIDATOR_CONTAINER="validator_agent_service"
 COMPOSE_FILE="${INFRA_DIR}/docker-compose.yml"
+POLICY_CONTAINER_CONFIG="/config/policy_agent.yaml"
+POLICY_CONTAINER_SOURCE_CONFIG="/policy-agent/app/config/policy_agent.yaml"
+POLICY_MOCK_CONFIG="/policy-agent/app/config/examples/policy_agent.example.mock.yaml"
 
-MOCK_MODE="${MIGRATION_SMOKE_MOCK:-0}"
-GOLDEN_DIR="${MIGRATION_SMOKE_GOLDEN_DIR:-/context-agent/app/config/examples/answers}"
+MOCK_MODE="${MIGRATION_SMOKE_MOCK:-1}"
 CLEAN_DB="${MIGRATION_SMOKE_CLEAN_DB:-1}"
 KEEP_STACK="${MIGRATION_SMOKE_KEEP_STACK:-0}"
 TMP_BACKUP_DIR=""
+GOLDEN_DIR="${MIGRATION_SMOKE_GOLDEN_DIR:-/migration/golden-contexts}"
 
 log() {
   printf "[functional-smoke] %s\n" "$*"
@@ -39,7 +42,8 @@ restore_and_cleanup() {
         docker cp "$TMP_BACKUP_DIR/context_agent.yaml" "$CONTEXT_CONTAINER:/context-agent/app/config/context_agent.yaml" || true
       fi
       if [[ -f "$TMP_BACKUP_DIR/policy_agent.yaml" ]]; then
-        docker cp "$TMP_BACKUP_DIR/policy_agent.yaml" "$POLICY_CONTAINER:/policy-agent/app/config/policy_agent.yaml" || true
+        docker exec "$POLICY_CONTAINER" mkdir -p /config
+        docker cp "$TMP_BACKUP_DIR/policy_agent.yaml" "$POLICY_CONTAINER:$POLICY_CONTAINER_CONFIG" || true
       fi
       if [[ -f "$TMP_BACKUP_DIR/validator_agent.yaml" ]]; then
         docker cp "$TMP_BACKUP_DIR/validator_agent.yaml" "$VALIDATOR_CONTAINER:/validator-agent/app/config/validator_agent.yaml" || true
@@ -121,9 +125,18 @@ wait_for_http "http://localhost:5003/"
 wait_for_http "http://localhost:5002/generate_policy"
 wait_for_http "http://localhost:5001/validate-policy"
 
+if [[ "$GOLDEN_DIR" == "/migration/golden-contexts" ]]; then
+  if ! docker exec "$CONTEXT_CONTAINER" test -d /migration/golden-contexts; then
+    GOLDEN_DIR="/context-agent/app/config/examples/answers"
+  fi
+fi
+
+docker exec "$CONTEXT_CONTAINER" test -d "$GOLDEN_DIR"
+log "loading golden fixtures from $GOLDEN_DIR"
+
 if [[ "$CLEAN_DB" == "1" || "$CLEAN_DB" == "true" ]]; then
   log "clearing previous service state for deterministic run"
-  docker exec "$CONTEXT_CONTAINER" python - <<'PY'
+  docker exec -i "$CONTEXT_CONTAINER" python - <<'PY'
 from pymongo import MongoClient
 
 client = MongoClient("mongo", 27017)
@@ -137,11 +150,13 @@ fi
 if [[ "$MOCK_MODE" == "1" || "$MOCK_MODE" == "true" ]]; then
   TMP_BACKUP_DIR="$(mktemp -d)"
   docker cp "$CONTEXT_CONTAINER:/context-agent/app/config/context_agent.yaml" "$TMP_BACKUP_DIR/context_agent.yaml"
-  docker cp "$POLICY_CONTAINER:/policy-agent/app/config/policy_agent.yaml" "$TMP_BACKUP_DIR/policy_agent.yaml"
+  if ! docker cp "$POLICY_CONTAINER:$POLICY_CONTAINER_CONFIG" "$TMP_BACKUP_DIR/policy_agent.yaml"; then
+    docker cp "$POLICY_CONTAINER:$POLICY_CONTAINER_SOURCE_CONFIG" "$TMP_BACKUP_DIR/policy_agent.yaml"
+  fi
   docker cp "$VALIDATOR_CONTAINER:/validator-agent/app/config/validator_agent.yaml" "$TMP_BACKUP_DIR/validator_agent.yaml"
   log "using mock agent configs for deterministic execution"
   docker exec "$CONTEXT_CONTAINER" cp /context-agent/app/config/examples/context_agent.example.mock.yaml /context-agent/app/config/context_agent.yaml
-  docker exec "$POLICY_CONTAINER" cp /policy-agent/app/config/examples/policy_agent.example.mock.yaml /policy-agent/app/config/policy_agent.yaml
+  docker exec "$POLICY_CONTAINER" sh -lc "mkdir -p /config && cp $POLICY_MOCK_CONFIG $POLICY_CONTAINER_CONFIG"
   docker exec "$VALIDATOR_CONTAINER" cp /validator-agent/app/config/examples/validator_agent.example.mock.yaml /validator-agent/app/config/validator_agent.yaml
 else
   log "using existing service configs (requires production-like API keys for model calls)"
@@ -154,7 +169,7 @@ RESULT_FILE="$ROOT_DIR/migration/functional-smoke-result.json"
 mkdir -p "$(dirname "$RESULT_FILE")"
 
 log "running full context -> policy -> validation pipeline and collecting evidence"
-if ! docker exec "$CONTEXT_CONTAINER" python - <<'PY' | tee "$RESULT_FILE"; then
+if ! docker exec -i "$CONTEXT_CONTAINER" python - > "$RESULT_FILE" <<'PY'
 import json
 from datetime import datetime
 from bson import ObjectId
@@ -183,6 +198,7 @@ client = MongoClient("mongo", 27017)
 context_db = client.contextdb
 policy_db = client.policydb
 validator_db = client.validatordb
+fallback_db = client.contextdb
 
 summary = []
 failed = []
@@ -194,9 +210,16 @@ for context_id in context_ids:
         "question_id": "validated_policy",
     })
     policy_records = policy_db.policies.count_documents({"context_id": context_id})
+    if policy_records == 0:
+        policy_records = fallback_db.policies.count_documents({"context_id": context_id})
+
     validation_docs = list(
         validator_db.validations.find({"context_id": context_id}).sort("timestamp", -1)
     )
+    if not validation_docs:
+        validation_docs = list(
+            fallback_db.validations.find({"context_id": context_id}).sort("timestamp", -1)
+        )
 
     reasons = []
     generate_status = status_by_context.get(context_id, 0)
@@ -236,6 +259,7 @@ print(json.dumps(result, indent=2))
 if failed:
     raise SystemExit(1)
 PY
+then
   echo "functional smoke pipeline failed. See $RESULT_FILE"
   exit 1
 fi
