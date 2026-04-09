@@ -23,7 +23,10 @@ Use the helper script:
 ./scripts/run_cagent_phase1.sh
 ./scripts/run_cagent_phase1.sh --dry-run --exec
 ./scripts/run_cagent_phase1.sh --env-from-file .env.cagent --dry-run --exec
+./scripts/run_cagent_phase1_case.sh migration/golden-contexts/case-01-healthcare-clinic.json
 ```
+
+The case runner reads one golden context plus its linked strategy file and asks the root agent to emit a JSON object close to the legacy policy/validator contract.
 
 Or run the config directly with Docker Agent:
 

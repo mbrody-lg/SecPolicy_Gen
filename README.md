@@ -57,6 +57,7 @@ make context-tests   # Run Context Agent tests
 make policy-tests    # Run Policy Agent tests
 make validator-tests # Run Validator Agent tests
 make cagent-phase1   # Run the Docker Agent Phase 1 migration scaffold
+make cagent-phase1-case CASE=migration/golden-contexts/case-01-healthcare-clinic.json
 ```
 
 See [infrastructure/README.md](infrastructure/README.md) for complete command reference.
