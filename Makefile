@@ -4,7 +4,7 @@ INFRA_DIR=infrastructure
 COMPOSE=docker-compose -f $(INFRA_DIR)/docker-compose.yml --env-file $(INFRA_DIR)/.env
 LINT_PYTHON=$(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi)
 
-.PHONY: all up down clean rebuild logs shell-context context-tests context-import policy-shell policy-tests policy-vectorize validator-shell validator-tests functional-smoke cagent-phase1 cagent-phase1-case cagent-phase1-compare legacy-phase1-case phase1-shadow-case bootstrap-test-env lint help
+.PHONY: all up down clean rebuild logs shell-context context-tests context-import policy-shell policy-tests policy-vectorize validator-shell validator-tests functional-smoke cagent-phase1 cagent-phase1-case cagent-phase1-compare legacy-phase1-case phase1-shadow-case phase1-shadow-batch bootstrap-test-env lint help
 
 ## Start all infrastructure
 up:
@@ -82,6 +82,10 @@ legacy-phase1-case:
 phase1-shadow-case:
 	./scripts/run_phase1_shadow_case.sh $(CASE) $(OUTPUT_DIR)
 
+## Run a Phase 1 shadow batch across the golden set and summarize it
+phase1-shadow-batch:
+	./scripts/run_phase1_shadow_batch.sh $(GOLDEN_DIR) $(OUTPUT_DIR)
+
 ## Bootstrap a reproducible local test environment in .venv
 bootstrap-test-env:
 	bash scripts/bootstrap-test-env.sh
@@ -113,5 +117,6 @@ help:
 	@echo "make cagent-phase1-compare CANDIDATE=... LEGACY=... -> Compare Phase 1 output with legacy JSON"
 	@echo "make legacy-phase1-case CASE=... OUTPUT=... -> Capture one legacy comparable JSON"
 	@echo "make phase1-shadow-case CASE=... OUTPUT_DIR=... -> Run legacy, candidate and comparison for one case"
+	@echo "make phase1-shadow-batch GOLDEN_DIR=... OUTPUT_DIR=... -> Run shadow mode for the golden set and summarize results"
 	@echo "make bootstrap-test-env -> Install local test dependencies into .venv"
 	@echo "make lint 		-> Run pylint using root pyproject.toml config"
