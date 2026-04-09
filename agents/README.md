@@ -28,6 +28,20 @@ Use the helper script:
 
 The case runner reads one golden context plus its linked strategy file and asks the root agent to emit a JSON object close to the legacy policy/validator contract.
 
+To compare one candidate output against the legacy contract:
+
+```bash
+./scripts/run_cagent_phase1_compare.sh candidate.json
+./scripts/run_cagent_phase1_compare.sh candidate.json legacy.json
+make cagent-phase1-compare CANDIDATE=candidate.json LEGACY=legacy.json
+```
+
+The comparison helper checks:
+- required contract keys
+- field types
+- allowed validator status values
+- key and value differences when a legacy output is provided
+
 Or run the config directly with Docker Agent:
 
 ```bash
