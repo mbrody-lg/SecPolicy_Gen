@@ -4,7 +4,7 @@ INFRA_DIR=infrastructure
 COMPOSE=docker-compose -f $(INFRA_DIR)/docker-compose.yml --env-file $(INFRA_DIR)/.env
 LINT_PYTHON=$(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi)
 
-.PHONY: all up down clean rebuild logs shell-context context-tests context-import policy-shell policy-tests policy-vectorize validator-shell validator-tests functional-smoke cagent-phase1 cagent-phase1-case cagent-phase1-compare bootstrap-test-env lint help
+.PHONY: all up down clean rebuild logs shell-context context-tests context-import policy-shell policy-tests policy-vectorize validator-shell validator-tests functional-smoke cagent-phase1 cagent-phase1-case cagent-phase1-compare legacy-phase1-case phase1-shadow-case bootstrap-test-env lint help
 
 ## Start all infrastructure
 up:
@@ -74,6 +74,14 @@ cagent-phase1-case:
 cagent-phase1-compare:
 	./scripts/run_cagent_phase1_compare.sh $(CANDIDATE) $(LEGACY)
 
+## Capture one comparable legacy output for a golden case
+legacy-phase1-case:
+	./scripts/run_legacy_phase1_case.sh $(CASE) $(OUTPUT)
+
+## Run a full Phase 1 shadow case: legacy, candidate, compare
+phase1-shadow-case:
+	./scripts/run_phase1_shadow_case.sh $(CASE) $(OUTPUT_DIR)
+
 ## Bootstrap a reproducible local test environment in .venv
 bootstrap-test-env:
 	bash scripts/bootstrap-test-env.sh
@@ -103,5 +111,7 @@ help:
 	@echo "make cagent-phase1 	-> Run the Docker Agent Phase 1 scaffold"
 	@echo "make cagent-phase1-case CASE=... -> Run a Phase 1 dry run for one golden case"
 	@echo "make cagent-phase1-compare CANDIDATE=... LEGACY=... -> Compare Phase 1 output with legacy JSON"
+	@echo "make legacy-phase1-case CASE=... OUTPUT=... -> Capture one legacy comparable JSON"
+	@echo "make phase1-shadow-case CASE=... OUTPUT_DIR=... -> Run legacy, candidate and comparison for one case"
 	@echo "make bootstrap-test-env -> Install local test dependencies into .venv"
 	@echo "make lint 		-> Run pylint using root pyproject.toml config"
