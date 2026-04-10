@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from pathlib import Path
 
 import pytest
 
@@ -7,9 +7,11 @@ import app as app_module
 
 def _set_common_env(monkeypatch):
     monkeypatch.setattr(app_module, "load_dotenv", lambda: None)
-    monkeypatch.setenv("MONGO_URI", "mongodb://mongo:27017/contextdb")
-    monkeypatch.setenv("POLICY_AGENT_URL", "http://policy-agent:5000")
-    monkeypatch.setenv("VALIDATOR_AGENT_URL", "http://validator-agent:5000")
+    monkeypatch.setenv("MONGO_URI", "mongodb://mongo:27017/validatordb")
+    monkeypatch.setenv(
+        "CONFIG_PATH",
+        str(Path(__file__).resolve().parents[1] / "app" / "config" / "validator_agent.yaml"),
+    )
 
 
 def test_create_app_requires_secret_key_outside_testing(monkeypatch):

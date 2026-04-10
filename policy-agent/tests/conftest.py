@@ -1,3 +1,4 @@
+import os
 import pytest
 import sys
 from unittest.mock import patch
@@ -9,6 +10,12 @@ import mongomock
 ROOT_PATH = Path(__file__).resolve().parents[1]
 if str(ROOT_PATH) not in sys.path:
     sys.path.insert(0, str(ROOT_PATH))
+
+os.environ.setdefault("TESTING", "true")
+os.environ.setdefault("DEBUG", "false")
+os.environ.setdefault("FLASK_SECRET_KEY", "test-only-secret-key")
+os.environ.setdefault("CONFIG_PATH", str(ROOT_PATH / "app" / "config" / "policy_agent.yaml"))
+os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 
 # Import app and routes
 from app import create_app, mongo

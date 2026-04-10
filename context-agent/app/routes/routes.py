@@ -6,7 +6,14 @@ from bson import ObjectId
 from flask import Blueprint, render_template, request, redirect, url_for, abort, flash, jsonify
 
 from app import mongo
-from app.services.logic import generate_context_prompt, run_with_agent, load_questions, generate_full_policy_pipeline, render_markdown
+from app.services.logic import (
+    generate_context_prompt,
+    run_with_agent,
+    load_questions,
+    generate_full_policy_pipeline,
+    render_markdown,
+    store_validated_policy,
+)
 
 main = Blueprint("main", __name__)
 
@@ -236,39 +243,15 @@ def delete_context(context_id):
 def send_policy_to_context(context_id):
     """Persist a validated policy payload in context interactions."""
     try:
-        data = request.get_json(force=True)
-
-        required_fields = ["policy_text", "generated_at", "policy_agent_version", "language"]
-        missing = [field for field in required_fields if field not in data]
-
-        if missing:
-            return jsonify({
-                "error": f"Missing required fields: {', '.join(missing)}"
-            }), 400
-
-        try:
-            context_obj_id = ObjectId(context_id)
-        except Exception:
-            return jsonify({"error": "Invalid context_id format."}), 400
-
-        validated_at = datetime.now(timezone.utc)
-
-        # Save policy as an agent response in interactions
-        mongo.db.interactions.insert_one({
-            "context_id": context_obj_id,
-            "question_id": "validated_policy",
-            "question_text": "Agent-generated policy",
-            "answer": data["policy_text"],
-            "timestamp": validated_at,
-            "origin": "agent",
-            "status": data.get("status", "review"),
-            "recommendations": data.get("recommendations", [])
-        })
-
+        data = request.get_json(force=True) or {}
+        store_validated_policy(context_id, data)
         return redirect(url_for("main.context_detail", context_id=context_id))
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except LookupError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
 
 
 @main.route("/context/<context_id>/generate_policy", methods=["POST"])

@@ -1,17 +1,21 @@
-import pytest
-from bson import ObjectId
 from datetime import datetime, timezone
+from unittest.mock import patch
+
+from bson import ObjectId
+
 from app import mongo
 
 def test_update_policy_with_openaiagent(client):
-    # Insert mock context into Mongo (mongomock or real)
     context_id = ObjectId()
-    mongo.db.contexts.insert_one({
-        "context_id": context_id,
+    mongo.db.policies.insert_one({
+        "context_id": str(context_id),
+        "language": "ca",
+        "policy_text": "previous policy",
         "structured_plan": [],
-        "model_version": "gpt-4"
+        "model_version": "gpt-4",
+        "policy_agent_version": "0.1.0",
+        "generated_at": datetime.now(timezone.utc),
     })
-    print(f"test context_id: {context_id}");
 
     data = {
         "context_id": str(context_id),
@@ -33,12 +37,37 @@ def test_update_policy_with_openaiagent(client):
         ]
     }
 
-    # Execute real POST request against route
-    response = client.post(f"/generate_policy/{context_id}/update", json=data)
+    with patch(
+        "app.routes.routes.update_with_agent",
+        return_value={"text": "Updated policy with incident response and access controls."},
+    ) as update_with_agent:
+        response = client.post(f"/generate_policy/{context_id}/update", json=data)
 
     assert response.status_code == 200
     json_data = response.get_json()
+    stored_policy = mongo.db.policies.find_one({"context_id": str(context_id)})
+    assert stored_policy is not None
+    assert stored_policy["policy_text"] == json_data["policy_text"]
+    assert mongo.db.contexts.find_one({"context_id": context_id}) is None
+    update_with_agent.assert_called_once()
 
-    print("\n== REFINED POLICY (OpenAI) ==")
-    print(json_data["policy_text"])
     assert "incident" in json_data["policy_text"].lower() or "access" in json_data["policy_text"].lower()
+
+
+def test_update_policy_returns_404_when_canonical_policy_is_missing(client):
+    context_id = ObjectId()
+    data = {
+        "context_id": str(context_id),
+        "language": "en",
+        "policy_text": "policy text",
+        "policy_agent_version": "0.1.0",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "status": "review",
+        "reasons": ["reason"],
+        "recommendations": ["recommendation"],
+    }
+
+    response = client.post(f"/generate_policy/{context_id}/update", json=data)
+
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "Policy not found."}

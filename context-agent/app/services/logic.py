@@ -64,15 +64,19 @@ def get_context_and_prompt(context_id: str) -> dict:
     if not context:
         raise LookupError("Context not found")
 
-    prompt_entry = mongo.db.interactions.find_one(
-        {"context_id": context_obj_id, "question_id": "refined_prompt"}
-    )
-    if not prompt_entry:
-        raise LookupError("Refined prompt not found")
-
-    refined_prompt = prompt_entry.get("answer", "").strip()
+    refined_prompt = (context.get("refined_prompt") or "").strip()
     if not refined_prompt:
-        raise ValueError("Refined prompt is empty")
+        prompt_entry = mongo.db.interactions.find_one(
+            {"context_id": context_obj_id, "question_id": "refined_prompt"}
+        )
+        if not prompt_entry:
+            if "refined_prompt" in context:
+                raise ValueError("Refined prompt is empty")
+            raise LookupError("Refined prompt not found")
+
+        refined_prompt = prompt_entry.get("answer", "").strip()
+        if not refined_prompt:
+            raise ValueError("Refined prompt is empty")
 
     return {
         "context_id": context_id,
@@ -116,12 +120,34 @@ def call_validator_agent(policy_data: dict) -> dict:
     return response.json()
 
 
-def forward_validated_policy(context_id: str, validated_data: dict):
-    """Forward validated policy payload back into context-agent routes."""
-    internal_context_url = f"http://localhost:5000/context/{context_id}/policy"
-    response = requests.post(internal_context_url, json=validated_data)
-    if response.status_code not in (200, 302):
-        raise RuntimeError("Error saving validated policy", response.text)
+def store_validated_policy(context_id: str, validated_data: dict) -> dict:
+    """Persist a validated policy payload in context interactions."""
+    data = validated_data or {}
+    required_fields = ["policy_text", "generated_at", "policy_agent_version", "language"]
+    missing = [field for field in required_fields if field not in data]
+    if missing:
+        raise ValueError(f"Missing required fields: {', '.join(missing)}")
+
+    try:
+        context_obj_id = ObjectId(context_id)
+    except Exception as exc:
+        raise ValueError("Invalid context_id format.") from exc
+
+    validated_at = datetime.now(timezone.utc)
+    mongo.db.interactions.insert_one({
+        "context_id": context_obj_id,
+        "question_id": "validated_policy",
+        "question_text": "Agent-generated policy",
+        "answer": data["policy_text"],
+        "timestamp": validated_at,
+        "origin": "agent",
+        "status": data.get("status", "review"),
+        "recommendations": data.get("recommendations", []),
+        "generated_at": data["generated_at"],
+        "policy_agent_version": data["policy_agent_version"],
+        "language": data["language"],
+    })
+    return {"context_id": context_id, "stored_at": validated_at.isoformat()}
 
 
 def generate_full_policy_pipeline(context_id: str) -> dict:
@@ -133,7 +159,7 @@ def generate_full_policy_pipeline(context_id: str) -> dict:
 
         policy_data = policy_result["policy_data"]
         validated_data = call_validator_agent(policy_data)
-        forward_validated_policy(context_id, validated_data)
+        store_validated_policy(context_id, validated_data)
         return {"success": True, "validated_data": validated_data}
     except Exception as exc:
         details = getattr(exc, "args", [""])[-1]

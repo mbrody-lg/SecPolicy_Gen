@@ -47,10 +47,9 @@ class Coordinator:
 
     def validate_policy(self, policy_input: dict) -> dict:
         """Run iterative validation rounds and produce final policy decision payload."""
-        from app.services.logic import send_policy_update_to_policy_agent  # import helper function
+        from app.services.logic import send_policy_update_to_policy_agent
 
         context_id = policy_input.get("context_id")
-        original_prompt = policy_input.get("policy_text", "")
         prompt = policy_input.get("policy_text", "")
         language = policy_input.get("language", "en")
         version = policy_input.get("policy_agent_version", "0.1.0")
@@ -100,7 +99,7 @@ class Coordinator:
                 update_response = send_policy_update_to_policy_agent(
                     context_id=context_id,
                     language=language,
-                    policy_text=original_prompt,
+                    policy_text=prompt,
                     policy_agent_version=version,
                     generated_at=generated_at,
                     status=decision,

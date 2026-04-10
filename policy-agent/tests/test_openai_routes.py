@@ -1,4 +1,8 @@
 import json
+from unittest.mock import patch
+
+from app import mongo
+
 
 def test_generate_policy_route_with_openai(client, default_prompt, default_context_id, openai_model_version, default_language):
     payload = {
@@ -8,11 +12,18 @@ def test_generate_policy_route_with_openai(client, default_prompt, default_conte
         "model_version": openai_model_version
     }
 
-    response = client.post(
-        "/generate_policy",
-        data=json.dumps(payload),
-        content_type="application/json"
-    )
+    with patch(
+        "app.routes.routes.run_with_agent",
+        return_value={
+            "text": "[Generated policy simulation] Policy body",
+            "structured_plan": [{"id": "proposal_1", "content": "Plan"}],
+        },
+    ):
+        response = client.post(
+            "/generate_policy",
+            data=json.dumps(payload),
+            content_type="application/json"
+        )
 
     assert response.status_code == 200
     data = response.get_json()
@@ -25,3 +36,7 @@ def test_generate_policy_route_with_openai(client, default_prompt, default_conte
     assert data["context_id"] == payload["context_id"]
     assert data["language"] == payload["language"]
     assert "[Generated policy simulation]" in data["policy_text"]
+
+    stored_policy = mongo.db.policies.find_one({"context_id": payload["context_id"]})
+    assert stored_policy is not None
+    assert stored_policy["policy_text"] == data["policy_text"]

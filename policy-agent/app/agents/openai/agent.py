@@ -42,10 +42,7 @@ class OpenAIAgent(Agent):
                 rag_processor = RAGProcessor(role)
                 current_prompt = rag_processor.apply(instructions + current_prompt)
                 continue  # Skip direct OpenAI call for RAG stage
-    
-            current_prompt = self._chat(current_prompt, instructions, temperature, max_tokens)
-            
-          
+
             if role_key == "MPG":
                 proposals = role.get("proposals", 2)
                 all_proposals = []
@@ -63,9 +60,11 @@ class OpenAIAgent(Agent):
                 current_prompt = "\n\n".join(
                     [f"Proposal {p['id']}:\n{p['content']}" for p in all_proposals]
                 )
-                
+
             else:
-                current_prompt = self._chat(current_prompt, instructions, temperature, max_tokens)            
+                current_prompt = self._chat(
+                    current_prompt, instructions, temperature, max_tokens
+                )
 
             if current_app.config["DEBUG"]:
                 print(current_prompt)

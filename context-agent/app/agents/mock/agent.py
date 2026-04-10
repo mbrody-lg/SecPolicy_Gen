@@ -35,6 +35,7 @@ class MockAgent(Agent):
                 {"_id": ObjectId(context_id)},
                 {"$set": {
                     "status": "completed",
+                    "refined_prompt": refined_prompt,
                     "llm_state.assistant_id": f"mock-{context_id}",
                     "llm_state.thread_id": f"mock-thread-{context_id}"
                 }}
