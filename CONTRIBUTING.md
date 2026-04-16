@@ -33,6 +33,8 @@ Be respectful, inclusive, and professional in all interactions.
    - Follow the existing code style
    - Add tests for new functionality
    - Update documentation if needed
+   - Update the relevant service playbook in `docs/playbooks/` when testing, lint, or security workflow changes in a non-self-explanatory way
+   - Prefer one coherent commit per meaningful change, with a commit message that explains the intent and impact of the change
 
 4. **Run tests locally**
    ```bash
@@ -140,12 +142,17 @@ pytest --cov
 - Changing API endpoints
 - Modifying configuration options
 - Adding new configuration parameters
+- Changing service-specific testing, lint, or security workflow expectations
 
 ### Documentation Format
 - Use clear, concise language
 - Provide practical examples
 - Include expected outputs
 - Explain non-obvious behavior
+
+### Service Playbooks
+- Use `docs/playbooks/README.md` as the index for service-specific execution guidance.
+- Update the relevant playbook when a change alters the normal testing path, lint workflow, or security-control workflow for that service.
 
 ## Pull Request Checklist
 
@@ -155,6 +162,7 @@ Before submitting a PR, ensure:
 - [ ] All tests pass locally
 - [ ] New tests are added for new functionality
 - [ ] Documentation is updated
+- [ ] Relevant service playbook is updated when workflow behavior changed
 - [ ] No unnecessary files are included
 - [ ] Commit messages are clear
 - [ ] Branch is up to date with main
@@ -232,4 +240,3 @@ roles:
 ## License
 
 By contributing, you agree that your contributions will be licensed under the MIT License.
-

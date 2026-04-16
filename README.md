@@ -46,6 +46,10 @@ See [infrastructure/README.md](infrastructure/README.md) for detailed setup inst
 | Validator Agent | Validate and improve policies | [validator-agent/README.md](validator-agent/README.md) |
 | Infrastructure | Docker setup and configuration | [infrastructure/README.md](infrastructure/README.md) |
 
+## Service Playbooks
+
+Tracked execution playbooks for service-specific testing, lint, and security workflows live in [docs/playbooks/README.md](docs/playbooks/README.md).
+
 ## Useful Commands
 
 ```bash
@@ -77,7 +81,8 @@ SecPolicy_Gen/
 1. Fork the repository
 2. Create a feature branch (`feat/your-feature`)
 3. Make your changes and add tests
-4. Submit a pull request
+4. Update the relevant documentation or service playbook when workflow or behavior changes
+5. Submit a pull request
 
 ## License
 

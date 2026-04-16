@@ -147,6 +147,8 @@ Run the test suite:
 make context-tests
 ```
 
+For the service-specific workflow guidance, see [docs/playbooks/context-agent.md](../docs/playbooks/context-agent.md).
+
 ## Development
 
 1. Create a feature branch: `git checkout -b feat/your-feature`
