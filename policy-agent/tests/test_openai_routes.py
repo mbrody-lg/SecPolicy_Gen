@@ -1,6 +1,26 @@
 import json
 
-def test_generate_policy_route_with_openai(client, default_prompt, default_context_id, openai_model_version, default_language):
+import pytest
+from app.routes import routes as routes_module
+
+pytestmark = [pytest.mark.route]
+
+def test_generate_policy_route_with_openai(
+    client,
+    default_prompt,
+    default_context_id,
+    openai_model_version,
+    default_language,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        routes_module,
+        "run_with_agent",
+        lambda **kwargs: {
+            "text": "[Generated policy simulation] Access control and incident response policy",
+            "structured_plan": ["scope", "controls"],
+        },
+    )
     payload = {
         "context_id": default_context_id,
         "refined_prompt": default_prompt,

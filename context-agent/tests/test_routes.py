@@ -1,5 +1,9 @@
 from test_base import *
 
+import pytest
+
+pytestmark = [pytest.mark.route]
+
 def test_dashboard_route(client):
     response = client.get('/')
     assert response.status_code == 200

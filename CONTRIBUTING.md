@@ -33,14 +33,15 @@ Be respectful, inclusive, and professional in all interactions.
    - Follow the existing code style
    - Add tests for new functionality
    - Update documentation if needed
+   - Treat a change as self-explanatory only when it is a localized implementation detail with no change to service boundaries, persistence ownership, external dependency wiring, startup behavior, security posture, or workflow guidance, and the purpose is clear from the diff plus commit message
+   - If a change is not self-explanatory, document it before review by updating the relevant docs/playbook or by linking the PR to a backlog item or decision-log entry
    - Update the relevant service playbook in `docs/playbooks/` when testing, lint, or security workflow changes in a non-self-explanatory way
    - Prefer one coherent commit per meaningful change, with a commit message that explains the intent and impact of the change
 
 4. **Run tests locally**
    ```bash
-   make context-tests
-   make policy-tests
-   make validator-tests
+   make bootstrap-test-env
+   make host-fast-tests
    ```
 
 5. **Commit with clear messages**
@@ -57,6 +58,7 @@ Be respectful, inclusive, and professional in all interactions.
 7. **Open a Pull Request**
    - Use a descriptive title
    - Explain what your change does and why
+   - Link any non-self-explanatory change to documentation, a backlog item, or a decision-log entry
    - Link any related issues
    - Ensure all tests pass
 
@@ -123,7 +125,11 @@ python run.py
 
 ### Run Tests
 ```bash
-# All tests for a specific agent
+# Fast host validation across services
+make bootstrap-test-env
+make host-fast-tests
+
+# All tests for a specific agent in Docker environments
 make context-tests
 make policy-tests
 make validator-tests
@@ -149,11 +155,21 @@ pytest --cov
 - Provide practical examples
 - Include expected outputs
 - Explain non-obvious behavior
+- If a change is not self-explanatory, document it or link it to a backlog item before review
+- Default to documenting when in doubt
 
 ### Service Playbooks
 - Use `docs/playbooks/README.md` as the index for service-specific execution guidance.
 - Update the relevant playbook when a change alters the normal testing path, lint workflow, or security-control workflow for that service.
 
+### Service Playbooks
+- Use `docs/playbooks/README.md` as the index for service-specific execution guidance.
+- Update the relevant playbook when a change alters the normal testing path, lint workflow, or security-control workflow for that service.
+
+### Documentation Gates
+- Self-explanatory changes are narrow, behavior-preserving implementation details that do not change service boundaries, persistence ownership, external dependency wiring, startup behavior, security posture, or workflow guidance.
+- Non-self-explanatory changes must be documented or linked to a backlog item, issue, or decision-log entry before review.
+- If a change affects service contracts, ownership, persistence, security, bootstrap, or cross-service behavior, treat it as non-self-explanatory by default.
 ## Pull Request Checklist
 
 Before submitting a PR, ensure:
@@ -162,6 +178,7 @@ Before submitting a PR, ensure:
 - [ ] All tests pass locally
 - [ ] New tests are added for new functionality
 - [ ] Documentation is updated
+- [ ] Non-self-explanatory changes are documented or linked to backlog items or decision-log entries
 - [ ] Relevant service playbook is updated when workflow behavior changed
 - [ ] No unnecessary files are included
 - [ ] Commit messages are clear
