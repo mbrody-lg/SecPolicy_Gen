@@ -2,8 +2,16 @@ import pytest
 from bson import ObjectId
 from datetime import datetime, timezone
 from app import mongo
+from app.routes import routes as routes_module
 
-def test_update_policy_with_openaiagent(client):
+pytestmark = [pytest.mark.route]
+
+def test_update_policy_with_openaiagent(client, monkeypatch):
+    monkeypatch.setattr(
+        routes_module,
+        "update_with_agent",
+        lambda **kwargs: {"text": "Updated policy with incident handling and access controls."},
+    )
     # Insert mock context into Mongo (mongomock or real)
     context_id = ObjectId()
     mongo.db.contexts.insert_one({
