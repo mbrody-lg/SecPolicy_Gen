@@ -201,6 +201,18 @@ make bootstrap-test-env
 
 Use Docker-based integration checks when changes affect cross-service behavior.
 
+Run the full suite in a dockerized stack:
+
+```bash
+make functional-smoke
+```
+
+For production-like checks (with real providers, not mocks):
+
+```bash
+MIGRATION_SMOKE_MOCK=0 make functional-smoke
+```
+
 ---
 
 ## Troubleshooting

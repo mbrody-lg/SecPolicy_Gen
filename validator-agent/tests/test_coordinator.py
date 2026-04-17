@@ -137,7 +137,13 @@ def test_validate_policy_uses_final_vote_when_no_consensus():
         "generated_at": "2026-03-05T00:00:00+00:00",
     }
 
-    with patch("app.services.logic.send_policy_update_to_policy_agent", return_value={}) as update_policy:
+    update_response = {
+        "policy_text": "policy without consensus",
+        "policy_agent_version": "0.1.0",
+        "generated_at": "2026-03-05T01:00:00+00:00",
+    }
+
+    with patch("app.services.logic.send_policy_update_to_policy_agent", return_value=update_response) as update_policy:
         result = coordinator.validate_policy(policy_input)
 
     assert result["status"] == "rejected"
