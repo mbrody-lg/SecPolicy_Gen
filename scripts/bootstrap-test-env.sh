@@ -16,4 +16,4 @@ fi
 "$VENV_DIR/bin/pip" install -r validator-agent/requirements.txt
 
 echo "Test environment bootstrap complete."
-echo "Use: .venv/bin/pytest -c pyproject.toml -m \"fast or route\""
+echo "Use: make host-fast-tests"

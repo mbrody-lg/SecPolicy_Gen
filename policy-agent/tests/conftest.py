@@ -3,7 +3,6 @@ import pytest
 import sys
 from unittest.mock import patch
 from pathlib import Path
-from flask import Flask
 import mongomock
 
 # Ensure project root path is accessible
@@ -20,11 +19,17 @@ os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 # Import app and routes
 from app import create_app, mongo
 
+
+@pytest.fixture(autouse=True)
+def service_cwd(monkeypatch):
+    monkeypatch.chdir(ROOT_PATH)
+
 # Test app/context
 @pytest.fixture(scope="session")
 def app():
     app = create_app()
     app.config["TESTING"] = True
+    app.config["CONFIG_PATH"] = str(ROOT_PATH / "app/config/policy_agent.yaml")
     return app
 
 @pytest.fixture(scope="function")

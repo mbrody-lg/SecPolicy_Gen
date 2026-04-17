@@ -23,6 +23,7 @@ services:
       - "5003:5000"
     volumes:
       - ../context-agent:/context-agent
+      - ../migration:/migration
     working_dir: /context-agent
     environment:
       - FLASK_APP=run.py

@@ -19,6 +19,12 @@ def send_policy_update_to_policy_agent(
     policy_agent_url = os.getenv("POLICY_AGENT_URL", "http://policy-agent:5000")
     update_endpoint = f"{policy_agent_url}/generate_policy/{context_id}/update"
 
+    final_policy_text = policy_text if policy_text is not None else updated_text
+    resolved_reasons = _normalize_reasons(
+        reasons if reasons is not None else reason
+    )
+
+    final_version = policy_agent_version or version
     payload = {
         "context_id": context_id,
         "language": language,
@@ -29,6 +35,7 @@ def send_policy_update_to_policy_agent(
         "reasons": reasons,
         "recommendations": recommendations,
     }
+    payload = _serialize_for_json(payload)
 
     try:
         response = requests.post(update_endpoint, json=payload)

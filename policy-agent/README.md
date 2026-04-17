@@ -200,6 +200,8 @@ Run the test suite:
 make policy-tests
 ```
 
+Service-specific workflow notes live in [docs/playbooks/policy-agent.md](../docs/playbooks/policy-agent.md).
+
 ## Development
 
 1. Create a feature branch: `git checkout -b feat/your-feature`

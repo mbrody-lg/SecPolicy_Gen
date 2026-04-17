@@ -4,6 +4,7 @@ from unittest.mock import patch
 from bson import ObjectId
 
 from app import mongo
+from app.routes import routes as routes_module
 
 def test_update_policy_with_openaiagent(client):
     context_id = ObjectId()

@@ -20,6 +20,12 @@ The Validator Agent:
 - **Detailed Feedback**: Specific reasons and recommendations for changes
 - **Full History Tracking**: Stores all validation rounds and decisions
 
+## Working Playbook
+
+Use the service playbook for the current execution workflow:
+
+- [Validator Agent Playbook](../docs/playbooks/validator-agent.md)
+
 ## Prerequisites
 
 - Docker (recommended)

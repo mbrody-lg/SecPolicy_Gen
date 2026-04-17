@@ -6,7 +6,24 @@ from bson import ObjectId
 
 from app import mongo
 
-def test_validate_policy_route(client, default_context_id):
+import pytest
+from app.routes import routes as routes_module
+
+pytestmark = [pytest.mark.route]
+
+def test_validate_policy_route(client, default_context_id, monkeypatch):
+    class FakeCoordinator:
+        debug_mode = False
+
+        def validate_policy(self, payload):
+            return {
+                "status": "review",
+                "reasons": ["Missing access control details"],
+                "recommendations": ["Add an incident response plan"],
+            }
+
+    monkeypatch.setattr(routes_module, "Coordinator", FakeCoordinator)
+
     payload = {
         "context_id": default_context_id,
         "policy_text": "This policy establishes the principles for asset management...",
