@@ -246,12 +246,12 @@ def send_policy_to_context(context_id):
         data = request.get_json(force=True) or {}
         store_validated_policy(context_id, data)
         return redirect(url_for("main.context_detail", context_id=context_id))
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    except LookupError as exc:
-        return jsonify({"error": str(exc)}), 404
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+    except ValueError:
+        return jsonify({"error": "Invalid request payload."}), 400
+    except LookupError:
+        return jsonify({"error": "Context not found."}), 404
+    except Exception:
+        return jsonify({"error": "An internal error has occurred."}), 500
 
 
 @main.route("/context/<context_id>/generate_policy", methods=["POST"])
