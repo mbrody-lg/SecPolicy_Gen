@@ -148,6 +148,7 @@ pytest --cov
 - Changing API endpoints
 - Modifying configuration options
 - Adding new configuration parameters
+- Changing service-specific testing, lint, or security workflow expectations
 
 ### Documentation Format
 - Use clear, concise language
@@ -156,6 +157,10 @@ pytest --cov
 - Explain non-obvious behavior
 - If a change is not self-explanatory, document it or link it to a backlog item before review
 - Default to documenting when in doubt
+
+### Service Playbooks
+- Use `docs/playbooks/README.md` as the index for service-specific execution guidance.
+- Update the relevant playbook when a change alters the normal testing path, lint workflow, or security-control workflow for that service.
 
 ### Service Playbooks
 - Use `docs/playbooks/README.md` as the index for service-specific execution guidance.
