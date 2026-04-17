@@ -35,11 +35,14 @@ def validate_policy():
         # Return full response regardless of acceptance status
         response = {
             "context_id": data["context_id"],
-            "language": data.get("language", ""),
-            "policy_text": data["policy_text"],
+            "language": validation_result.get("language", data.get("language", "")),
+            "policy_text": validation_result.get("policy_text", data["policy_text"]),
             "structured_plan": data["structured_plan"],
-            "generated_at": data["generated_at"],
-            "policy_agent_version": data.get("policy_agent_version", ""),
+            "generated_at": validation_result.get("generated_at", data["generated_at"]),
+            "policy_agent_version": validation_result.get(
+                "policy_agent_version",
+                data.get("policy_agent_version", ""),
+            ),
             "status": validation_result.get("status", "review"),
             "reasons": validation_result.get("reasons", []),
             "recommendations": validation_result.get("recommendations", []),

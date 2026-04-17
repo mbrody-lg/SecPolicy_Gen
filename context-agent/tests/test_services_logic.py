@@ -1,179 +1,162 @@
 from types import SimpleNamespace
-from unittest.mock import Mock
 
 import pytest
 from bson import ObjectId
 
+from test_base import *
 from app.services import logic
 
-pytestmark = [pytest.mark.fast]
 
+class FakeCollection:
+    def __init__(self, docs=None):
+        self.docs = list(docs or [])
 
-def _install_fake_mongo(monkeypatch, context_doc=None, interaction_doc=None):
-    fake_contexts = Mock()
-    fake_interactions = Mock()
-
-    def find_context(query):
-        if context_doc and query == {"_id": context_doc["_id"]}:
-            return context_doc
+    def find_one(self, query):
+        for doc in self.docs:
+            if all(doc.get(key) == value for key, value in query.items()):
+                return doc
         return None
 
-    def find_interaction(query):
-        if interaction_doc and query == {
-            "context_id": interaction_doc["context_id"],
-            "question_id": "refined_prompt",
-        }:
-            return interaction_doc
-        return None
+    def insert_one(self, document):
+        self.docs.append(document)
+        return SimpleNamespace(inserted_id=document.get("_id"))
 
-    fake_contexts.find_one.side_effect = find_context
-    fake_interactions.find_one.side_effect = find_interaction
 
-    monkeypatch.setattr(
-        logic,
-        "mongo",
-        SimpleNamespace(db=SimpleNamespace(contexts=fake_contexts, interactions=fake_interactions)),
+class FakeDB:
+    def __init__(self, contexts=None, interactions=None):
+        self.contexts = FakeCollection(contexts)
+        self.interactions = FakeCollection(interactions)
+
+
+def test_get_context_and_prompt_prefers_context_refined_prompt(monkeypatch):
+    context_id = ObjectId()
+    fake_db = FakeDB(
+        contexts=[
+            {
+                "_id": context_id,
+                "refined_prompt": "canonical refined prompt",
+                "language": "es",
+                "version": "1.2.3",
+            }
+        ],
+        interactions=[
+            {
+                "context_id": context_id,
+                "question_id": "refined_prompt",
+                "answer": "legacy refined prompt",
+            }
+        ],
     )
 
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
 
-def test_get_context_and_prompt_happy_path(monkeypatch):
-    context_id = "64b64b64b64b64b64b64b64b"
-    context_obj_id = ObjectId(context_id)
-    context_doc = {
-        "_id": context_obj_id,
-        "language": "es",
-        "version": "2.4.1",
-    }
-    interaction_doc = {
-        "context_id": context_obj_id,
-        "question_id": "refined_prompt",
-        "answer": "  Refined prompt ready for validation  ",
-    }
-    _install_fake_mongo(monkeypatch, context_doc=context_doc, interaction_doc=interaction_doc)
+    payload = logic.get_context_and_prompt(str(context_id))
 
-    result = logic.get_context_and_prompt(context_id)
-
-    assert result["context_id"] == context_id
-    assert result["refined_prompt"] == "Refined prompt ready for validation"
-    assert result["language"] == "es"
-    assert result["model_version"] == "2.4.1"
-    assert result["generated_at"].endswith("+00:00")
+    assert payload["refined_prompt"] == "canonical refined prompt"
+    assert payload["language"] == "es"
+    assert payload["model_version"] == "1.2.3"
 
 
-def test_get_context_and_prompt_raises_lookuperror_when_refined_prompt_missing(monkeypatch):
-    context_id = "64b64b64b64b64b64b64b64b"
-    context_obj_id = ObjectId(context_id)
-    context_doc = {
-        "_id": context_obj_id,
-        "language": "en",
-        "version": "1.0.0",
-    }
-    _install_fake_mongo(monkeypatch, context_doc=context_doc, interaction_doc=None)
+def test_get_context_and_prompt_falls_back_to_legacy_interaction(monkeypatch):
+    context_id = ObjectId()
+    fake_db = FakeDB(
+        contexts=[{"_id": context_id, "language": "en", "version": "0.2.0"}],
+        interactions=[
+            {
+                "context_id": context_id,
+                "question_id": "refined_prompt",
+                "answer": "legacy refined prompt",
+            }
+        ],
+    )
 
-    with pytest.raises(LookupError, match="Refined prompt not found"):
-        logic.get_context_and_prompt(context_id)
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    payload = logic.get_context_and_prompt(str(context_id))
+
+    assert payload["refined_prompt"] == "legacy refined prompt"
+    assert payload["language"] == "en"
+    assert payload["model_version"] == "0.2.0"
 
 
-def test_trigger_policy_generation_happy_path(monkeypatch):
+def test_store_validated_policy_inserts_agent_interaction(monkeypatch):
+    context_id = ObjectId()
+    fake_db = FakeDB()
     payload = {
-        "context_id": "64b64b64b64b64b64b64b64b",
-        "refined_prompt": "Generate a policy",
+        "policy_text": "Validated policy text",
+        "generated_at": "2026-04-10T10:00:00+00:00",
+        "policy_agent_version": "0.1.0",
         "language": "en",
-        "model_version": "1.0.0",
-        "generated_at": "2026-04-16T12:00:00+00:00",
+        "status": "accepted",
+        "recommendations": ["Keep evidence"],
     }
-    policy_data = {"policy_text": "Generated policy", "status": "review"}
-    get_context_and_prompt = Mock(return_value=payload)
-    call_policy_agent = Mock(return_value=policy_data)
 
-    monkeypatch.setattr(logic, "get_context_and_prompt", get_context_and_prompt)
-    monkeypatch.setattr(logic, "call_policy_agent", call_policy_agent)
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
 
-    result = logic.trigger_policy_generation(payload["context_id"])
+    result = logic.store_validated_policy(str(context_id), payload)
 
-    assert result == {"success": True, "policy_data": policy_data}
-    get_context_and_prompt.assert_called_once_with(payload["context_id"])
-    call_policy_agent.assert_called_once_with(payload)
+    assert result["context_id"] == str(context_id)
+    assert len(fake_db.interactions.docs) == 1
+    stored = fake_db.interactions.docs[0]
+    assert stored["context_id"] == context_id
+    assert stored["question_id"] == "validated_policy"
+    assert stored["answer"] == "Validated policy text"
+    assert stored["policy_agent_version"] == "0.1.0"
+    assert stored["language"] == "en"
+    assert stored["status"] == "accepted"
+    assert stored["recommendations"] == ["Keep evidence"]
 
 
-def test_trigger_policy_generation_maps_downstream_failure_to_500(monkeypatch):
-    payload = {
-        "context_id": "64b64b64b64b64b64b64b64b",
-        "refined_prompt": "Generate a policy",
+def test_store_validated_policy_requires_full_payload(monkeypatch):
+    context_id = ObjectId()
+    fake_db = FakeDB()
+
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    with pytest.raises(ValueError, match="Missing required fields: generated_at"):
+        logic.store_validated_policy(
+            str(context_id),
+            {
+                "policy_text": "Validated policy text",
+                "policy_agent_version": "0.1.0",
+                "language": "en",
+            },
+        )
+
+
+def test_generate_full_policy_pipeline_stores_validated_policy_without_internal_http(monkeypatch):
+    context_id = ObjectId()
+    fake_db = FakeDB()
+    validated_payload = {
+        "policy_text": "Validated policy text",
+        "generated_at": "2026-04-10T10:00:00+00:00",
+        "policy_agent_version": "0.1.0",
         "language": "en",
-        "model_version": "1.0.0",
-        "generated_at": "2026-04-16T12:00:00+00:00",
+        "status": "review",
+        "recommendations": ["Clarify retention period"],
     }
-    monkeypatch.setattr(logic, "get_context_and_prompt", Mock(return_value=payload))
+
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
     monkeypatch.setattr(
         logic,
-        "call_policy_agent",
-        Mock(side_effect=RuntimeError("Error generating policy", "gateway timed out")),
-    )
-
-    result = logic.trigger_policy_generation(payload["context_id"])
-
-    assert result["success"] is False
-    assert result["error"] == "Error generating policy"
-    assert result["details"] == "gateway timed out"
-    assert result["status_code"] == 500
-
-
-def test_generate_full_policy_pipeline_happy_path(monkeypatch):
-    policy_result = {
-        "success": True,
-        "policy_data": {
-            "policy_text": "Generated policy",
-            "status": "review",
-            "generated_at": "2026-04-16T12:00:00+00:00",
+        "trigger_policy_generation",
+        lambda current_context_id: {
+            "success": True,
+            "policy_data": {
+                "context_id": current_context_id,
+                "policy_text": "Draft policy text",
+            },
         },
-    }
-    validated_data = {
-        "policy_text": "Validated policy",
-        "status": "approved",
-        "policy_agent_version": "1.2.3",
-    }
-    trigger_policy_generation = Mock(return_value=policy_result)
-    call_validator_agent = Mock(return_value=validated_data)
-    forward_validated_policy = Mock()
-
-    monkeypatch.setattr(logic, "trigger_policy_generation", trigger_policy_generation)
-    monkeypatch.setattr(logic, "call_validator_agent", call_validator_agent)
-    monkeypatch.setattr(logic, "forward_validated_policy", forward_validated_policy)
-
-    result = logic.generate_full_policy_pipeline("64b64b64b64b64b64b64b64b")
-
-    assert result == {"success": True, "validated_data": validated_data}
-    trigger_policy_generation.assert_called_once_with("64b64b64b64b64b64b64b64b")
-    call_validator_agent.assert_called_once_with(policy_result["policy_data"])
-    forward_validated_policy.assert_called_once_with("64b64b64b64b64b64b64b64b", validated_data)
-
-
-def test_generate_full_policy_pipeline_maps_forwarding_failure_to_500(monkeypatch):
-    policy_result = {
-        "success": True,
-        "policy_data": {
-            "policy_text": "Generated policy",
-            "status": "review",
-            "generated_at": "2026-04-16T12:00:00+00:00",
-        },
-    }
-    validated_data = {
-        "policy_text": "Validated policy",
-        "status": "approved",
-        "policy_agent_version": "1.2.3",
-    }
-    monkeypatch.setattr(logic, "trigger_policy_generation", Mock(return_value=policy_result))
-    monkeypatch.setattr(logic, "call_validator_agent", Mock(return_value=validated_data))
-    monkeypatch.setattr(
-        logic,
-        "forward_validated_policy",
-        Mock(side_effect=RuntimeError("Error saving validated policy", "database offline")),
     )
+    monkeypatch.setattr(logic, "call_validator_agent", lambda policy_data: validated_payload)
 
-    result = logic.generate_full_policy_pipeline("64b64b64b64b64b64b64b64b")
+    def unexpected_http_call(*args, **kwargs):
+        raise AssertionError("generate_full_policy_pipeline should not make internal HTTP callbacks")
 
-    assert result["success"] is False
-    assert result["error"] == "Policy generation failed."
-    assert result["details"] == "database offline"
-    assert result["status_code"] == 500
+    monkeypatch.setattr(logic.requests, "post", unexpected_http_call)
+
+    result = logic.generate_full_policy_pipeline(str(context_id))
+
+    assert result == {"success": True, "validated_data": validated_payload}
+    assert len(fake_db.interactions.docs) == 1
+    assert fake_db.interactions.docs[0]["answer"] == "Validated policy text"

@@ -1,3 +1,4 @@
+import os
 import pytest
 import sys
 from unittest.mock import patch
@@ -10,6 +11,12 @@ ROOT_PATH = Path(__file__).resolve().parents[1]
 if str(ROOT_PATH) not in sys.path:
     sys.path.insert(0, str(ROOT_PATH))
 
+os.environ.setdefault("TESTING", "true")
+os.environ.setdefault("DEBUG", "false")
+os.environ.setdefault("FLASK_SECRET_KEY", "test-only-secret-key")
+os.environ.setdefault("CONFIG_PATH", str(ROOT_PATH / "app" / "config" / "validator_agent.yaml"))
+os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
+
 # Import app and routes
 from app import create_app, mongo
 from app.routes.routes import routes
@@ -20,7 +27,7 @@ def app():
     app = create_app()
     app.config["TESTING"] = True
     app.config["MONGO_URI"] = "mongodb://mongo:27017/validator-testdb"
-    app.config["CONFIG_PATH"] = "/validator-agent/app/config/validator_agent.yaml"
+    app.config["CONFIG_PATH"] = str(ROOT_PATH / "app" / "config" / "validator_agent.yaml")
 
     return app
 

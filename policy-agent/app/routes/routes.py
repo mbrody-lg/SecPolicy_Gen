@@ -4,8 +4,7 @@ from datetime import datetime, timezone
 import json
 import traceback
 
-from bson import ObjectId
-from flask import Blueprint, request, jsonify, abort
+from flask import Blueprint, request, jsonify
 
 from app import mongo
 from app.services.logic import run_with_agent, update_with_agent
@@ -49,19 +48,18 @@ def generate_policy():
 @routes.route("/generate_policy/<context_id>/update", methods=["POST"])
 def update_policy(context_id):
     """Regenerate policy text after validator feedback for a context."""
-    data = request.get_json()
+    data = request.get_json() or {}
     required_fields = ["context_id", "language", "policy_text", "policy_agent_version", "generated_at", "status", "reasons", "recommendations"]
-
-    context = None
-    if str(data.get("context_id")) == str(context_id):
-        context = mongo.db.contexts.find_one({"_id": ObjectId(context_id)})
-    if not context:
-        return abort(404, "Context not found.")
-    
     if not all(field in data for field in required_fields):
         return jsonify({"error": "Required fields are missing."}), 400
-    
-    context_id = data.get("context_id")
+
+    if str(data.get("context_id")) != str(context_id):
+        return jsonify({"error": "Context ID mismatch."}), 400
+
+    policy = mongo.db.policies.find_one({"context_id": str(context_id)})
+    if not policy:
+        return jsonify({"error": "Policy not found."}), 404
+
     policy_text = data.get("policy_text")
     reasons = data.get("reasons", [])
     recommendations = data.get("recommendations", [])
@@ -78,24 +76,22 @@ def update_policy(context_id):
     try:
         result_object = update_with_agent(
             prompt=prompt,
-            context_id=data.get("context_id"),
-            model_version=context.get("model_version")
+            context_id=str(context_id),
+            model_version=policy.get("model_version")
         )
 
         result = {
             "context_id": data["context_id"],
             "language": language,
             "policy_text": result_object["text"],
-            "structured_plan": context.get("structured_plan",[]),
-            "model_version": context.get("model_version"),
+            "structured_plan": policy.get("structured_plan", []),
+            "model_version": policy.get("model_version"),
             "policy_agent_version": version,
-            "generated_at":  datetime.now(timezone.utc)
+            "generated_at": datetime.now(timezone.utc)
         }
 
-        # Update stored document with refreshed prompt output
-        # TODO: store all iterations for traceability.
-        mongo.db.contexts.update_one(
-            {"_id": ObjectId(context_id)},
+        mongo.db.policies.update_one(
+            {"_id": policy["_id"]},
             {"$set": {
                 "language": result["language"],
                 "policy_text": result["policy_text"],
@@ -103,7 +99,7 @@ def update_policy(context_id):
                 "model_version": result["model_version"],
                 "policy_agent_version": version,
                 "generated_at": result["generated_at"]
-            }}
+            }},
         )
 
         return jsonify(result), 200

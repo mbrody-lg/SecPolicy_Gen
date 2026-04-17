@@ -137,21 +137,32 @@ def test_validate_policy_uses_final_vote_when_no_consensus():
         "generated_at": "2026-03-05T00:00:00+00:00",
     }
 
-    update_response = {
-        "policy_text": "policy without consensus",
-        "policy_agent_version": "0.1.0",
-        "generated_at": "2026-03-05T01:00:00+00:00",
-    }
-
-    with patch("app.services.logic.send_policy_update_to_policy_agent", return_value=update_response) as update_policy:
+    with patch(
+        "app.services.logic.send_policy_update_to_policy_agent",
+        side_effect=[
+            {
+                "policy_text": "revised after round one",
+                "policy_agent_version": "0.2.0",
+                "generated_at": "2026-03-05T01:00:00+00:00",
+            },
+            {
+                "policy_text": "revised after round two",
+                "policy_agent_version": "0.3.0",
+                "generated_at": "2026-03-05T02:00:00+00:00",
+            },
+        ],
+    ) as update_policy:
         result = coordinator.validate_policy(policy_input)
 
     assert result["status"] == "rejected"
+    assert result["policy_text"] == "revised after round two"
     assert result["reasons"] == ["Control gaps", "Logic conflicts"]
     assert result["recommendations"] == ["Add controls", "Resolve conflicts"]
     assert coordinator.agent.run.call_count == 2
     assert coordinator.evaluator.evaluate.call_count == 3
     assert update_policy.call_count == 2
+    assert update_policy.call_args_list[0].kwargs["policy_text"] == "policy without consensus"
+    assert update_policy.call_args_list[1].kwargs["policy_text"] == "revised after round one"
 
     final_log_call = coordinator.log_validation.call_args_list[-1]
     assert final_log_call.args[3] == coordinator.max_rounds
