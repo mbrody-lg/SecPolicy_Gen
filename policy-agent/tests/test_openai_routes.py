@@ -9,6 +9,24 @@ from app.routes import routes as routes_module
 
 pytestmark = [pytest.mark.route]
 
+
+def test_generate_policy_route_rejects_missing_required_fields(client):
+    response = client.post(
+        "/generate_policy",
+        data=json.dumps({"context_id": "ctx-1", "refined_prompt": "prompt only"}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "success": False,
+        "error_type": "contract_error",
+        "error_code": "missing_required_fields",
+        "message": "Required fields are missing.",
+        "details": {"missing_fields": ["language", "model_version"]},
+        "correlation_id": "ctx-1",
+    }
+
 def test_generate_policy_route_with_openai(
     client,
     default_prompt,
@@ -60,3 +78,29 @@ def test_generate_policy_route_with_openai(
     stored_policy = mongo.db.policies.find_one({"context_id": payload["context_id"]})
     assert stored_policy is not None
     assert stored_policy["policy_text"] == data["policy_text"]
+
+
+def test_generate_policy_route_returns_deterministic_internal_error(client):
+    payload = {
+        "context_id": "ctx-err",
+        "refined_prompt": "Generate a policy",
+        "language": "en",
+        "model_version": "gpt-4",
+    }
+
+    with patch("app.routes.routes.run_with_agent", side_effect=RuntimeError("agent boom")):
+        response = client.post(
+            "/generate_policy",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    assert response.status_code == 500
+    assert response.get_json() == {
+        "success": False,
+        "error_type": "internal_error",
+        "error_code": "policy_generation_failed",
+        "message": "Policy generation failed.",
+        "details": {"operation": "generate_policy"},
+        "correlation_id": "ctx-err",
+    }

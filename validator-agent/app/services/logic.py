@@ -1,8 +1,42 @@
 """Service helpers for policy-update communication with policy-agent."""
 
+import logging
 import os
 
 import requests
+
+
+POLICY_UPDATE_REQUIRED_FIELDS = [
+    "context_id",
+    "language",
+    "policy_text",
+    "policy_agent_version",
+    "generated_at",
+    "status",
+    "reasons",
+    "recommendations",
+]
+logger = logging.getLogger(__name__)
+
+
+def _error_payload(
+    *,
+    error_type: str,
+    error_code: str,
+    message: str,
+    details: dict | None = None,
+    correlation_id: str | None = None,
+) -> dict:
+    body = {
+        "success": False,
+        "error_type": error_type,
+        "error_code": error_code,
+        "message": message,
+        "details": details or {},
+    }
+    if correlation_id:
+        body["correlation_id"] = correlation_id
+    return body
 
 
 def send_policy_update_to_policy_agent(
@@ -19,12 +53,6 @@ def send_policy_update_to_policy_agent(
     policy_agent_url = os.getenv("POLICY_AGENT_URL", "http://policy-agent:5000")
     update_endpoint = f"{policy_agent_url}/generate_policy/{context_id}/update"
 
-    final_policy_text = policy_text if policy_text is not None else updated_text
-    resolved_reasons = _normalize_reasons(
-        reasons if reasons is not None else reason
-    )
-
-    final_version = policy_agent_version or version
     payload = {
         "context_id": context_id,
         "language": language,
@@ -35,14 +63,26 @@ def send_policy_update_to_policy_agent(
         "reasons": reasons,
         "recommendations": recommendations,
     }
-    payload = _serialize_for_json(payload)
 
     try:
         response = requests.post(update_endpoint, json=payload)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as exc:
-        return {
-            "success": False,
-            "error": f"Error sending policy update to policy-agent: {exc}",
-        }
+        logger.warning(
+            "Policy update request failed for context_id=%s target=%s",
+            context_id,
+            update_endpoint,
+            exc_info=exc,
+        )
+        return _error_payload(
+            error_type="dependency_error",
+            error_code="policy_update_request_failed",
+            message="Error sending policy update to policy-agent.",
+            details={
+                "target_service": "policy-agent",
+                "operation": "generate_policy_update",
+                "request_fields": POLICY_UPDATE_REQUIRED_FIELDS,
+            },
+            correlation_id=context_id,
+        )

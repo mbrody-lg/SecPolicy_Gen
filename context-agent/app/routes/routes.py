@@ -247,11 +247,35 @@ def send_policy_to_context(context_id):
         store_validated_policy(context_id, data)
         return redirect(url_for("main.context_detail", context_id=context_id))
     except ValueError:
-        return jsonify({"error": "Invalid request payload."}), 400
+        correlation_id = request.headers.get("X-Correlation-ID") or context_id
+        return jsonify({
+            "success": False,
+            "error_type": "contract_error",
+            "error_code": "invalid_request_payload",
+            "message": "Invalid request payload.",
+            "details": {"context_id": context_id},
+            "correlation_id": correlation_id,
+        }), 400
     except LookupError:
-        return jsonify({"error": "Context not found."}), 404
+        correlation_id = request.headers.get("X-Correlation-ID") or context_id
+        return jsonify({
+            "success": False,
+            "error_type": "validation_error",
+            "error_code": "context_not_found",
+            "message": "Context not found.",
+            "details": {"context_id": context_id},
+            "correlation_id": correlation_id,
+        }), 404
     except Exception:
-        return jsonify({"error": "An internal error has occurred."}), 500
+        correlation_id = request.headers.get("X-Correlation-ID") or context_id
+        return jsonify({
+            "success": False,
+            "error_type": "internal_error",
+            "error_code": "policy_callback_failed",
+            "message": "An internal error has occurred.",
+            "details": {"context_id": context_id},
+            "correlation_id": correlation_id,
+        }), 500
 
 
 @main.route("/context/<context_id>/generate_policy", methods=["POST"])

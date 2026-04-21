@@ -167,3 +167,42 @@ def test_validate_policy_uses_final_vote_when_no_consensus():
     final_log_call = coordinator.log_validation.call_args_list[-1]
     assert final_log_call.args[3] == coordinator.max_rounds
     assert final_log_call.args[4] is False
+
+
+def test_validate_policy_returns_dependency_error_when_policy_update_fails():
+    round_results = [[
+        {
+            "role": "AWC",
+            "status": "review",
+            "reason": "Missing audit scope",
+            "recommendations": ["Add audit scope"],
+        },
+        {"role": "AWL", "status": "accepted"},
+        {"role": "AWT", "status": "accepted"},
+    ]]
+    evaluator_results = [{"status": "review"}]
+    coordinator = _build_coordinator(round_results, evaluator_results, rounds=3)
+
+    policy_input = {
+        "context_id": "ctx-dep",
+        "policy_text": "original policy",
+        "language": "en",
+        "policy_agent_version": "0.1.0",
+        "generated_at": "2026-03-05T00:00:00+00:00",
+    }
+    dependency_error = {
+        "success": False,
+        "error_type": "dependency_error",
+        "error_code": "policy_update_request_failed",
+        "message": "Error sending policy update to policy-agent.",
+        "details": {"target_service": "policy-agent"},
+        "correlation_id": "ctx-dep",
+    }
+
+    with patch(
+        "app.services.logic.send_policy_update_to_policy_agent",
+        return_value=dependency_error,
+    ):
+        result = coordinator.validate_policy(policy_input)
+
+    assert result == dependency_error

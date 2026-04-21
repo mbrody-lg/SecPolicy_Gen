@@ -11,6 +11,24 @@ from app.routes import routes as routes_module
 
 pytestmark = [pytest.mark.route]
 
+
+def test_validate_policy_route_rejects_missing_required_fields(client):
+    response = client.post(
+        "/validate-policy",
+        data=json.dumps({"context_id": "ctx-1", "policy_text": "policy"}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "success": False,
+        "error_type": "contract_error",
+        "error_code": "missing_required_fields",
+        "message": "Required fields are missing.",
+        "details": {"missing_fields": ["structured_plan", "generated_at"]},
+        "correlation_id": "ctx-1",
+    }
+
 def test_validate_policy_route(client, default_context_id, monkeypatch):
     class FakeCoordinator:
         debug_mode = False
@@ -70,6 +88,65 @@ def test_validate_policy_route(client, default_context_id, monkeypatch):
     assert data["reasons"] == ["Missing controls"]
     assert data["recommendations"] == ["Add controls"]
     assert data["evaluator_analysis"] == {"status": "review"}
+
+
+def test_validate_policy_route_propagates_dependency_error(client):
+    payload = {
+        "context_id": "ctx-dep",
+        "policy_text": "Policy text",
+        "structured_plan": [],
+        "generated_at": "2026-03-05T01:00:00+00:00",
+    }
+    dependency_error = {
+        "success": False,
+        "error_type": "dependency_error",
+        "error_code": "policy_update_request_failed",
+        "message": "Error sending policy update to policy-agent.",
+        "details": {"target_service": "policy-agent"},
+        "correlation_id": "ctx-dep",
+    }
+
+    coordinator = MagicMock()
+    coordinator.debug_mode = False
+    coordinator.validate_policy.return_value = dependency_error
+
+    with patch("app.routes.routes.Coordinator", return_value=coordinator):
+        response = client.post(
+            "/validate-policy",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    assert response.status_code == 502
+    assert response.get_json() == dependency_error
+
+
+def test_validate_policy_route_hides_internal_exception_details(client):
+    payload = {
+        "context_id": "ctx-int",
+        "policy_text": "Policy text",
+        "structured_plan": [],
+        "generated_at": "2026-03-05T01:00:00+00:00",
+    }
+    coordinator = MagicMock()
+    coordinator.validate_policy.side_effect = RuntimeError("sensitive validator detail")
+
+    with patch("app.routes.routes.Coordinator", return_value=coordinator):
+        response = client.post(
+            "/validate-policy",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    assert response.status_code == 500
+    assert response.get_json() == {
+        "success": False,
+        "error_type": "internal_error",
+        "error_code": "validation_execution_failed",
+        "message": "Validator execution failed.",
+        "details": {"operation": "validate_policy"},
+        "correlation_id": "ctx-int",
+    }
 
 def test_delete_validation_by_context(client, app_context):
     context_id = str(ObjectId())

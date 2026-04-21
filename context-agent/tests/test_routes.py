@@ -51,7 +51,12 @@ def test_send_policy_to_context_returns_400_when_required_fields_missing(client)
 
     assert response.status_code == 400
     assert response.get_json() == {
-        "error": "Missing required fields: generated_at, policy_agent_version, language"
+        "success": False,
+        "error_type": "contract_error",
+        "error_code": "invalid_request_payload",
+        "message": "Invalid request payload.",
+        "details": {"context_id": context_id},
+        "correlation_id": context_id,
     }
 
 
