@@ -120,6 +120,34 @@ def test_validate_policy_route_propagates_dependency_error(client):
     assert response.status_code == 502
     assert response.get_json() == dependency_error
 
+
+def test_validate_policy_route_hides_internal_exception_details(client):
+    payload = {
+        "context_id": "ctx-int",
+        "policy_text": "Policy text",
+        "structured_plan": [],
+        "generated_at": "2026-03-05T01:00:00+00:00",
+    }
+    coordinator = MagicMock()
+    coordinator.validate_policy.side_effect = RuntimeError("sensitive validator detail")
+
+    with patch("app.routes.routes.Coordinator", return_value=coordinator):
+        response = client.post(
+            "/validate-policy",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    assert response.status_code == 500
+    assert response.get_json() == {
+        "success": False,
+        "error_type": "internal_error",
+        "error_code": "validation_execution_failed",
+        "message": "Validator execution failed.",
+        "details": {"operation": "validate_policy"},
+        "correlation_id": "ctx-int",
+    }
+
 def test_delete_validation_by_context(client, app_context):
     context_id = str(ObjectId())
     mongo.db.validations.insert_one({

@@ -101,6 +101,6 @@ def test_generate_policy_route_returns_deterministic_internal_error(client):
         "error_type": "internal_error",
         "error_code": "policy_generation_failed",
         "message": "Policy generation failed.",
-        "details": {"exception": "agent boom"},
+        "details": {"operation": "generate_policy"},
         "correlation_id": "ctx-err",
     }

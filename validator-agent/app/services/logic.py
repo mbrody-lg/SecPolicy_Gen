@@ -1,5 +1,6 @@
 """Service helpers for policy-update communication with policy-agent."""
 
+import logging
 import os
 
 import requests
@@ -15,6 +16,7 @@ POLICY_UPDATE_REQUIRED_FIELDS = [
     "reasons",
     "recommendations",
 ]
+logger = logging.getLogger(__name__)
 
 
 def _error_payload(
@@ -67,6 +69,12 @@ def send_policy_update_to_policy_agent(
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as exc:
+        logger.warning(
+            "Policy update request failed for context_id=%s target=%s",
+            context_id,
+            update_endpoint,
+            exc_info=exc,
+        )
         return _error_payload(
             error_type="dependency_error",
             error_code="policy_update_request_failed",
@@ -74,7 +82,6 @@ def send_policy_update_to_policy_agent(
             details={
                 "target_service": "policy-agent",
                 "operation": "generate_policy_update",
-                "exception": str(exc),
                 "request_fields": POLICY_UPDATE_REQUIRED_FIELDS,
             },
             correlation_id=context_id,

@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 import json
+import logging
 
 from flask import Blueprint, jsonify, request
 
@@ -10,6 +11,7 @@ from app.services.logic import run_with_agent, update_with_agent
 
 
 routes = Blueprint("routes", __name__)
+logger = logging.getLogger(__name__)
 
 POLICY_GENERATION_REQUIRED_FIELDS = ["context_id", "refined_prompt", "language", "model_version"]
 POLICY_UPDATE_REQUIRED_FIELDS = [
@@ -100,12 +102,13 @@ def generate_policy():
         return jsonify(result), 200
 
     except Exception as exc:
+        logger.exception("Policy generation failed for context_id=%s", data.get("context_id"))
         return _error_response(
             500,
             error_type="internal_error",
             error_code="policy_generation_failed",
             message="Policy generation failed.",
-            details={"exception": str(exc)},
+            details={"operation": "generate_policy"},
             payload=data,
         )
 
@@ -194,11 +197,12 @@ def update_policy(context_id):
         return jsonify(result), 200
 
     except Exception as exc:
+        logger.exception("Policy update failed for context_id=%s", data.get("context_id"))
         return _error_response(
             500,
             error_type="internal_error",
             error_code="policy_update_failed",
             message="Policy update failed.",
-            details={"exception": str(exc)},
+            details={"operation": "update_policy"},
             payload=data,
         )

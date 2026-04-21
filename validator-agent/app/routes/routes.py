@@ -1,5 +1,7 @@
 """HTTP routes for validator-agent validation and trace retrieval."""
 
+import logging
+
 from bson import ObjectId
 from flask import Blueprint, abort, current_app, jsonify, request
 
@@ -7,6 +9,7 @@ from app import mongo
 from app.agents.roles.coordinator import Coordinator
 
 routes = Blueprint("routes", __name__)
+logger = logging.getLogger(__name__)
 
 VALIDATION_REQUIRED_FIELDS = ["context_id", "policy_text", "structured_plan", "generated_at"]
 
@@ -91,12 +94,13 @@ def validate_policy():
         return jsonify(response), 200
 
     except Exception as exc:
+        logger.exception("Validator execution failed for context_id=%s", data.get("context_id"))
         return _error_response(
             500,
             error_type="internal_error",
             error_code="validation_execution_failed",
             message="Validator execution failed.",
-            details={"exception": str(exc)},
+            details={"operation": "validate_policy"},
             payload=data,
         )
 
