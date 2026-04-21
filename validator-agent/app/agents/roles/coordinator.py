@@ -109,6 +109,8 @@ class Coordinator:
                         for rec in r.get("recommendations", [])
                     ]
                 )
+                if update_response.get("success") is False:
+                    return update_response
                 if not update_response.get("policy_text"):
                     raise RuntimeError("Policy update endpoint did not return revised policy text.")
 

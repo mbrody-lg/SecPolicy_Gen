@@ -61,5 +61,25 @@ def test_send_policy_update_to_policy_agent_returns_deterministic_error():
             recommendations=["Add scope"],
         )
 
-    assert result["success"] is False
-    assert "Error sending policy update to policy-agent: boom" == result["error"]
+    assert result == {
+        "success": False,
+        "error_type": "dependency_error",
+        "error_code": "policy_update_request_failed",
+        "message": "Error sending policy update to policy-agent.",
+        "details": {
+            "target_service": "policy-agent",
+            "operation": "generate_policy_update",
+            "exception": "boom",
+            "request_fields": [
+                "context_id",
+                "language",
+                "policy_text",
+                "policy_agent_version",
+                "generated_at",
+                "status",
+                "reasons",
+                "recommendations",
+            ],
+        },
+        "correlation_id": "ctx-1",
+    }
