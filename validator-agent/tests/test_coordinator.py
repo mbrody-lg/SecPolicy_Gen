@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock, patch
 
+from app.agents.roles import coordinator as coordinator_module
 from app.agents.roles.coordinator import Coordinator
 
 
@@ -206,3 +207,38 @@ def test_validate_policy_returns_dependency_error_when_policy_update_fails():
         result = coordinator.validate_policy(policy_input)
 
     assert result == dependency_error
+
+
+def test_log_validation_persists_ownership_and_policy_reference():
+    coordinator = Coordinator.__new__(Coordinator)
+    coordinator.validation = {"rounds": 3, "consensus_threshold": 2, "vote_strategy": "majority"}
+    coordinator.debug_mode = False
+
+    inserted = {}
+
+    class FakeValidations:
+        def insert_one(self, document):
+            inserted["document"] = document
+
+    fake_db = MagicMock()
+    fake_db.validations = FakeValidations()
+
+    with patch.object(coordinator_module.mongo, "db", fake_db, create=True):
+        coordinator.log_validation(
+            context_id="ctx-ownership",
+            results=[{"role": "AWC", "status": "accepted"}],
+            decision="accepted",
+            round_num=1,
+            consensus=True,
+        )
+
+    assert inserted["document"]["ownership"] == {
+        "owner_service": "validator-agent",
+        "source_of_truth": True,
+        "collection": "validations",
+    }
+    assert inserted["document"]["policy_ref"] == {
+        "owner_service": "policy-agent",
+        "source_collection": "policies",
+        "context_id": "ctx-ownership",
+    }

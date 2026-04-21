@@ -78,6 +78,13 @@ def test_generate_policy_route_with_openai(
     stored_policy = mongo.db.policies.find_one({"context_id": payload["context_id"]})
     assert stored_policy is not None
     assert stored_policy["policy_text"] == data["policy_text"]
+    assert stored_policy["ownership"] == {
+        "owner_service": "policy-agent",
+        "source_of_truth": True,
+        "collection": "policies",
+    }
+    assert stored_policy["lifecycle_status"] == "generated"
+    assert stored_policy["revision_count"] == 0
 
 
 def test_generate_policy_route_returns_deterministic_internal_error(client):

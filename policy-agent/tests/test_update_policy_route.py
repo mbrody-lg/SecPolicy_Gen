@@ -51,6 +51,16 @@ def test_update_policy_with_openaiagent(client):
     assert stored_policy["policy_text"] == json_data["policy_text"]
     assert mongo.db.contexts.find_one({"context_id": context_id}) is None
     update_with_agent.assert_called_once()
+    assert stored_policy["ownership"] == {
+        "owner_service": "policy-agent",
+        "source_of_truth": True,
+        "collection": "policies",
+    }
+    assert stored_policy["lifecycle_status"] == "revised"
+    assert stored_policy["revision_count"] == 1
+    assert stored_policy["last_validation_status"] == "not_accepted"
+    assert stored_policy["last_validation_reasons"] == data["reasons"]
+    assert stored_policy["last_validation_recommendations"] == data["recommendations"]
 
     assert "incident" in json_data["policy_text"].lower() or "access" in json_data["policy_text"].lower()
 

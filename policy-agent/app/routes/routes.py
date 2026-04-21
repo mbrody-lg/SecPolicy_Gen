@@ -96,6 +96,13 @@ def generate_policy():
             "model_version": data["model_version"],
             "policy_agent_version": "0.1.0",
             "generated_at": datetime.now(timezone.utc).isoformat(),
+            "lifecycle_status": "generated",
+            "revision_count": 0,
+            "ownership": {
+                "owner_service": "policy-agent",
+                "source_of_truth": True,
+                "collection": "policies",
+            },
         }
 
         mongo.db.policies.insert_one(result)
@@ -180,6 +187,16 @@ def update_policy(context_id):
             "model_version": policy.get("model_version"),
             "policy_agent_version": version,
             "generated_at": datetime.now(timezone.utc).isoformat(),
+            "lifecycle_status": "revised",
+            "revision_count": policy.get("revision_count", 0) + 1,
+            "ownership": policy.get("ownership", {
+                "owner_service": "policy-agent",
+                "source_of_truth": True,
+                "collection": "policies",
+            }),
+            "last_validation_status": data["status"],
+            "last_validation_reasons": reasons,
+            "last_validation_recommendations": recommendations,
         }
 
         mongo.db.policies.update_one(
@@ -191,6 +208,12 @@ def update_policy(context_id):
                 "model_version": result["model_version"],
                 "policy_agent_version": version,
                 "generated_at": result["generated_at"],
+                "lifecycle_status": result["lifecycle_status"],
+                "revision_count": result["revision_count"],
+                "ownership": result["ownership"],
+                "last_validation_status": result["last_validation_status"],
+                "last_validation_reasons": result["last_validation_reasons"],
+                "last_validation_recommendations": result["last_validation_recommendations"],
             }},
         )
 

@@ -180,6 +180,16 @@ class Coordinator:
                 "consensus_achieved": consensus,
                 "final_decision": decision,
                 "last_round_results": results,
+                "ownership": {
+                    "owner_service": "validator-agent",
+                    "source_of_truth": True,
+                    "collection": "validations",
+                },
+                "policy_ref": {
+                    "owner_service": "policy-agent",
+                    "source_collection": "policies",
+                    "context_id": context_id,
+                },
                 "config_used": {
                     "rounds": self.max_rounds,
                     "threshold": self.consensus_threshold,

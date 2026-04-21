@@ -105,6 +105,21 @@ def test_store_validated_policy_inserts_agent_interaction(monkeypatch):
     assert stored["language"] == "en"
     assert stored["status"] == "accepted"
     assert stored["recommendations"] == ["Keep evidence"]
+    assert stored["ownership"] == {
+        "owner_service": "context-agent",
+        "source_of_truth": False,
+        "view_type": "derived_policy_snapshot",
+    }
+    assert stored["policy_ref"] == {
+        "owner_service": "policy-agent",
+        "source_collection": "policies",
+        "context_id": str(context_id),
+    }
+    assert stored["validation_ref"] == {
+        "owner_service": "validator-agent",
+        "source_collection": "validations",
+        "context_id": str(context_id),
+    }
 
 
 def test_store_validated_policy_requires_full_payload(monkeypatch):

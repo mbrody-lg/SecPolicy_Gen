@@ -146,6 +146,21 @@ def store_validated_policy(context_id: str, validated_data: dict) -> dict:
         "generated_at": data["generated_at"],
         "policy_agent_version": data["policy_agent_version"],
         "language": data["language"],
+        "ownership": {
+            "owner_service": "context-agent",
+            "source_of_truth": False,
+            "view_type": "derived_policy_snapshot",
+        },
+        "policy_ref": {
+            "owner_service": "policy-agent",
+            "source_collection": "policies",
+            "context_id": context_id,
+        },
+        "validation_ref": {
+            "owner_service": "validator-agent",
+            "source_collection": "validations",
+            "context_id": context_id,
+        },
     })
     return {"context_id": context_id, "stored_at": validated_at.isoformat()}
 
