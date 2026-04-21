@@ -95,6 +95,8 @@ def test_store_validated_policy_inserts_agent_interaction(monkeypatch):
 
     result = logic.store_validated_policy(str(context_id), payload)
 
+    assert result["success"] is True
+    assert result["stage"] == "persistence"
     assert result["context_id"] == str(context_id)
     assert len(fake_db.interactions.docs) == 1
     stored = fake_db.interactions.docs[0]
@@ -128,7 +130,7 @@ def test_store_validated_policy_requires_full_payload(monkeypatch):
 
     monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
 
-    with pytest.raises(ValueError, match="Missing required fields: generated_at"):
+    with pytest.raises(logic.PipelineStepError) as exc_info:
         logic.store_validated_policy(
             str(context_id),
             {
@@ -137,6 +139,9 @@ def test_store_validated_policy_requires_full_payload(monkeypatch):
                 "language": "en",
             },
         )
+
+    assert exc_info.value.stage == "persistence"
+    assert exc_info.value.error_code == "validated_policy_missing_fields"
 
 
 def test_generate_full_policy_pipeline_stores_validated_policy_without_internal_http(monkeypatch):
@@ -172,6 +177,37 @@ def test_generate_full_policy_pipeline_stores_validated_policy_without_internal_
 
     result = logic.generate_full_policy_pipeline(str(context_id))
 
-    assert result == {"success": True, "validated_data": validated_payload}
+    assert result["success"] is True
+    assert result["stage"] == "completed"
+    assert result["validated_data"] == validated_payload
+    assert result["persistence"]["stage"] == "persistence"
     assert len(fake_db.interactions.docs) == 1
     assert fake_db.interactions.docs[0]["answer"] == "Validated policy text"
+
+
+def test_generate_full_policy_pipeline_returns_structured_stage_error(monkeypatch):
+    monkeypatch.setattr(
+        logic,
+        "trigger_policy_generation",
+        lambda context_id: {
+            "success": False,
+            "stage": "policy_generation",
+            "error_type": "dependency_error",
+            "error_code": "policy_agent_request_failed",
+            "message": "Policy generation failed.",
+            "details": {"target_service": "policy-agent"},
+            "status_code": 502,
+        },
+    )
+
+    result = logic.generate_full_policy_pipeline("ctx-1")
+
+    assert result == {
+        "success": False,
+        "stage": "policy_generation",
+        "error_type": "dependency_error",
+        "error_code": "policy_agent_request_failed",
+        "message": "Policy generation failed.",
+        "details": {"target_service": "policy-agent"},
+        "status_code": 502,
+    }
