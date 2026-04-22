@@ -16,6 +16,7 @@ roles:
       - chroma: Chroma Vector Database
         collection: [normativa, sector, guia, metodologia]
         model: intfloat/e5-base
+        revision: b533fe4636f4a2507c08ddab40644d20b0006d6a
         chunk_size: 300
         chunk_overlap: 50
   - MPG: Multi-Path Plan Generator

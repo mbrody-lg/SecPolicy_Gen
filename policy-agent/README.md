@@ -107,6 +107,10 @@ To set up regulatory data for RAG:
 4. **Wait**: Processing takes time depending on file size
 5. **Configure**: Update `policy-agent.yaml` with collection names (normativa, guia, sector, etc.)
 
+Runtime model downloads are disabled by default as a secure baseline. Preload embeddings with
+`make policy-vectorize` before using RAG, or set `POLICY_AGENT_ALLOW_MODEL_DOWNLOAD=1` only for
+an explicit one-time bootstrap in a controlled environment.
+
 See `config/examples/` for complete configuration examples.
 
 ## API Endpoints

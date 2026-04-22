@@ -46,6 +46,8 @@ This playbook is the service-specific execution guide for `policy-agent`.
 - Are secrets and sensitive values kept out of logs and responses?
 - Does the change increase attack surface through external calls or broader persistence access?
 - Is the failure path covered, not only the success path?
+- Keep model downloads explicit for vector workflows; prefer preloading and local-only model use over runtime hub fetches.
+- Prefer safetensors-backed model loading and avoid enabling remote model code unless it has been explicitly reviewed.
 
 ## Commit Discipline
 

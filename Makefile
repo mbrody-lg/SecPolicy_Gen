@@ -32,7 +32,7 @@ shell-context:
 
 ## Run tests for agent-context
 context-tests: 
-	docker exec -it context_agent_web pytest
+	docker exec context_agent_web pytest
 
 ## Run tests for agent-context
 context-import: 
@@ -44,7 +44,7 @@ policy-shell:
 
 ## Run tests for policy-agent
 policy-tests: 
-	docker exec -it policy_agent_service pytest
+	docker exec policy_agent_service pytest
 
 ## Run tests for policy-agent
 policy-vectorize: 
@@ -56,7 +56,7 @@ validator-shell:
 
 ## Execute testos for validator-agent
 validator-tests:
-	docker exec -it validator_agent_service pytest
+	docker exec validator_agent_service pytest
 
 ## Run full functional smoke in docker (end-to-end) using example fixtures
 functional-smoke:
