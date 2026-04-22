@@ -6,103 +6,21 @@ from bson import ObjectId
 from flask import Blueprint, abort, current_app, jsonify, request
 
 from app import mongo
-from app.agents.roles.coordinator import Coordinator
+from app.services.logic import run_validation_pipeline
 
 routes = Blueprint("routes", __name__)
 logger = logging.getLogger(__name__)
-
-VALIDATION_REQUIRED_FIELDS = ["context_id", "policy_text", "structured_plan", "generated_at"]
-
-
-def _get_correlation_id(payload: dict | None) -> str | None:
-    if not isinstance(payload, dict):
-        return request.headers.get("X-Correlation-ID")
-    return (
-        request.headers.get("X-Correlation-ID")
-        or payload.get("correlation_id")
-        or payload.get("context_id")
-    )
-
-
-def _error_payload(
-    *,
-    error_type: str,
-    error_code: str,
-    message: str,
-    details: dict | None = None,
-    payload: dict | None = None,
-) -> dict:
-    body = {
-        "success": False,
-        "error_type": error_type,
-        "error_code": error_code,
-        "message": message,
-        "details": details or {},
-    }
-    correlation_id = _get_correlation_id(payload)
-    if correlation_id:
-        body["correlation_id"] = correlation_id
-    return body
-
-
-def _error_response(status_code: int, **kwargs):
-    return jsonify(_error_payload(**kwargs)), status_code
 
 
 @routes.route("/validate-policy", methods=["POST"])
 def validate_policy():
     """Validate policy payload received from policy-agent and return decision data."""
     data = request.get_json(silent=True) or {}
-    missing = [field for field in VALIDATION_REQUIRED_FIELDS if field not in data]
-
-    if missing:
-        return _error_response(
-            400,
-            error_type="contract_error",
-            error_code="missing_required_fields",
-            message="Required fields are missing.",
-            details={"missing_fields": missing},
-            payload=data,
-        )
-
-    try:
-        coordinator = Coordinator()
-        validation_result = coordinator.validate_policy(data)
-
-        if not validation_result.get("success", True):
-            return jsonify(validation_result), 502
-
-        response = {
-            "success": True,
-            "context_id": data["context_id"],
-            "language": validation_result.get("language", data.get("language", "")),
-            "policy_text": validation_result.get("policy_text", data["policy_text"]),
-            "structured_plan": data["structured_plan"],
-            "generated_at": validation_result.get("generated_at", data["generated_at"]),
-            "policy_agent_version": validation_result.get(
-                "policy_agent_version",
-                data.get("policy_agent_version", ""),
-            ),
-            "status": validation_result.get("status", "review"),
-            "reasons": validation_result.get("reasons", []),
-            "recommendations": validation_result.get("recommendations", []),
-        }
-
-        if "evaluator_analysis" in validation_result:
-            response["evaluator_analysis"] = validation_result["evaluator_analysis"]
-
-        return jsonify(response), 200
-
-    except Exception as exc:
-        logger.exception("Validator execution failed for context_id=%s", data.get("context_id"))
-        return _error_response(
-            500,
-            error_type="internal_error",
-            error_code="validation_execution_failed",
-            message="Validator execution failed.",
-            details={"operation": "validate_policy"},
-            payload=data,
-        )
+    result = run_validation_pipeline(data)
+    status_code = result.pop("status_code", 200)
+    if result.get("success"):
+        return jsonify(result["validation"]), status_code
+    return jsonify(result), status_code
 
 
 @routes.route("/validation/<context_id>", methods=["GET"])
@@ -111,14 +29,14 @@ def get_validations_by_context(context_id):
     try:
         ObjectId(context_id)
     except Exception:
-        return _error_response(
-            400,
-            error_type="contract_error",
-            error_code="invalid_context_id",
-            message="Invalid context_id format.",
-            details={"context_id": context_id},
-            payload={"context_id": context_id},
-        )
+        return jsonify({
+            "success": False,
+            "error_type": "contract_error",
+            "error_code": "invalid_context_id",
+            "message": "Invalid context_id format.",
+            "details": {"context_id": context_id},
+            "correlation_id": context_id,
+        }), 400
 
     validations = list(mongo.db.validations.find({"context_id": context_id}).sort("round", 1))
 
@@ -143,14 +61,14 @@ def delete_validations_by_context(context_id):
     try:
         ObjectId(context_id)
     except Exception:
-        return _error_response(
-            400,
-            error_type="contract_error",
-            error_code="invalid_context_id",
-            message="Invalid context_id format.",
-            details={"context_id": context_id},
-            payload={"context_id": context_id},
-        )
+        return jsonify({
+            "success": False,
+            "error_type": "contract_error",
+            "error_code": "invalid_context_id",
+            "message": "Invalid context_id format.",
+            "details": {"context_id": context_id},
+            "correlation_id": context_id,
+        }), 400
 
     result = mongo.db.validations.delete_many({"context_id": context_id})
 
