@@ -14,8 +14,6 @@ Use these playbooks when changing testing, lint-sensitive code, or security-sens
 - Associate each meaningful change with its own commit whenever practical.
 - Keep commits scoped to one coherent change set and explain the intent in the commit message, not only the mechanics.
 - Split documentation/governance commits from runtime-behavior commits unless the documentation is inseparable from the code change.
-- Record strategy or policy changes in `.local-workspace/decision-log/`.
-- If a validation step cannot run, record the blocker in `.local-workspace/proposed-actions/BACKLOG.md`.
 
 ## Cross-Service Validation Ladder
 
