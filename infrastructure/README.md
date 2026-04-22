@@ -88,6 +88,7 @@ All agents run on separate ports and use internal Docker DNS:
 | `make clean` | Stop and remove all data |
 | `make rebuild` | Force rebuild all containers |
 | `make logs` | View live logs from all services |
+| `make host-fast-tests` | Run fast host-side checks across services |
 | `make context-shell` | Access Context Agent shell |
 | `make context-tests` | Run Context Agent tests |
 | `make policy-shell` | Access Policy Agent shell |
@@ -95,6 +96,23 @@ All agents run on separate ports and use internal Docker DNS:
 | `make policy-vectorize` | Index PDFs to Chroma for RAG |
 | `make validator-shell` | Access Validator Agent shell |
 | `make validator-tests` | Run Validator Agent tests |
+| `make functional-smoke` | Run the end-to-end Docker smoke pipeline |
+
+## Recommended Docker Validation Sequence
+
+When a change affects container parity, service configuration, or cross-service orchestration, use this sequence from the repository root:
+
+```bash
+make up
+make policy-tests
+make validator-tests
+make functional-smoke
+```
+
+Notes:
+- The service test targets use non-interactive `docker exec`, so they work in automated terminal sessions and do not require `-it`.
+- `make functional-smoke` now resolves each service's effective `CONFIG_PATH` before swapping mock configs, so the smoke run exercises the same config entrypoints used by the containers themselves.
+- For host-only logic changes, run `make host-fast-tests` before or instead of the Docker sequence when container parity is not needed.
 
 ## Docker Compose Structure
 

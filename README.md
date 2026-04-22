@@ -57,12 +57,27 @@ make up              # Start all services
 make down            # Stop all services
 make clean           # Stop and remove all data
 make logs            # View live logs from all services
+make host-fast-tests # Run fast host-side checks
 make context-tests   # Run Context Agent tests
 make policy-tests    # Run Policy Agent tests
 make validator-tests # Run Validator Agent tests
+make functional-smoke # Run end-to-end Docker smoke validation
 ```
 
 See [infrastructure/README.md](infrastructure/README.md) for complete command reference.
+
+## Recommended Validation Flow
+
+For cross-service work, use this validation ladder and stop at the smallest level that proves the change unless the task affects runtime wiring:
+
+1. `make up`
+2. `make policy-tests`
+3. `make validator-tests`
+4. `make functional-smoke`
+
+Use `make host-fast-tests` earlier in the loop when the change is host-test friendly and does not depend on Docker parity. Use the Docker-backed sequence above when the change affects container wiring, service-to-service calls, bootstrap/configuration behavior, or the full context -> policy -> validation pipeline.
+
+The current Docker test targets are intentionally non-interactive so they work in terminal automation and CI-like environments without requiring a TTY.
 
 ## Project Structure
 
