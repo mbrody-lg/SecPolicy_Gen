@@ -12,9 +12,9 @@ CONTEXT_CONTAINER="context_agent_web"
 POLICY_CONTAINER="policy_agent_service"
 VALIDATOR_CONTAINER="validator_agent_service"
 COMPOSE_FILE="${INFRA_DIR}/docker-compose.yml"
-POLICY_CONTAINER_CONFIG="/config/policy_agent.yaml"
-POLICY_CONTAINER_SOURCE_CONFIG="/policy-agent/app/config/policy_agent.yaml"
 POLICY_MOCK_CONFIG="/policy-agent/app/config/examples/policy_agent.example.mock.yaml"
+POLICY_CONTAINER_CONFIG=""
+VALIDATOR_CONTAINER_CONFIG=""
 
 MOCK_MODE="${MIGRATION_SMOKE_MOCK:-1}"
 CLEAN_DB="${MIGRATION_SMOKE_CLEAN_DB:-1}"
@@ -24,6 +24,11 @@ GOLDEN_DIR="${MIGRATION_SMOKE_GOLDEN_DIR:-/migration/golden-contexts}"
 
 log() {
   printf "[functional-smoke] %s\n" "$*"
+}
+
+resolve_service_config_path() {
+  local container_name=$1
+  docker exec "$container_name" python -c "from app import create_app; app=create_app(); print(app.config['CONFIG_PATH'])"
 }
 
 if command -v docker-compose >/dev/null 2>&1; then
@@ -148,16 +153,16 @@ PY
 fi
 
 if [[ "$MOCK_MODE" == "1" || "$MOCK_MODE" == "true" ]]; then
+  POLICY_CONTAINER_CONFIG="$(resolve_service_config_path "$POLICY_CONTAINER")"
+  VALIDATOR_CONTAINER_CONFIG="$(resolve_service_config_path "$VALIDATOR_CONTAINER")"
   TMP_BACKUP_DIR="$(mktemp -d)"
   docker cp "$CONTEXT_CONTAINER:/context-agent/app/config/context_agent.yaml" "$TMP_BACKUP_DIR/context_agent.yaml"
-  if ! docker cp "$POLICY_CONTAINER:$POLICY_CONTAINER_CONFIG" "$TMP_BACKUP_DIR/policy_agent.yaml"; then
-    docker cp "$POLICY_CONTAINER:$POLICY_CONTAINER_SOURCE_CONFIG" "$TMP_BACKUP_DIR/policy_agent.yaml"
-  fi
-  docker cp "$VALIDATOR_CONTAINER:/validator-agent/app/config/validator_agent.yaml" "$TMP_BACKUP_DIR/validator_agent.yaml"
+  docker cp "$POLICY_CONTAINER:$POLICY_CONTAINER_CONFIG" "$TMP_BACKUP_DIR/policy_agent.yaml"
+  docker cp "$VALIDATOR_CONTAINER:$VALIDATOR_CONTAINER_CONFIG" "$TMP_BACKUP_DIR/validator_agent.yaml"
   log "using mock agent configs for deterministic execution"
   docker exec "$CONTEXT_CONTAINER" cp /context-agent/app/config/examples/context_agent.example.mock.yaml /context-agent/app/config/context_agent.yaml
-  docker exec "$POLICY_CONTAINER" sh -lc "mkdir -p /config && cp $POLICY_MOCK_CONFIG $POLICY_CONTAINER_CONFIG"
-  docker exec "$VALIDATOR_CONTAINER" cp /validator-agent/app/config/examples/validator_agent.example.mock.yaml /validator-agent/app/config/validator_agent.yaml
+  docker exec "$POLICY_CONTAINER" sh -lc "mkdir -p \"$(dirname "$POLICY_CONTAINER_CONFIG")\" && cp \"$POLICY_MOCK_CONFIG\" \"$POLICY_CONTAINER_CONFIG\""
+  docker exec "$VALIDATOR_CONTAINER" sh -lc "mkdir -p \"$(dirname "$VALIDATOR_CONTAINER_CONFIG")\" && cp /validator-agent/app/config/examples/validator_agent.example.mock.yaml \"$VALIDATOR_CONTAINER_CONFIG\""
 else
   log "using existing service configs (requires production-like API keys for model calls)"
 fi
