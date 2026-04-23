@@ -206,6 +206,50 @@ def test_run_validation_pipeline_returns_structured_contract_error(client):
     }
 
 
+def test_run_validation_pipeline_rejects_non_object_json_body(client):
+    with client.application.test_request_context("/validate-policy", method="POST"):
+        result = run_validation_pipeline(["not", "an", "object"])
+
+    assert result == {
+        "success": False,
+        "error_type": "contract_error",
+        "error_code": "invalid_json_body",
+        "message": "Request body must be a JSON object.",
+        "details": {
+            "stage": "contract_validation",
+            "expected_type": "object",
+        },
+        "status_code": 400,
+    }
+
+
+def test_run_validation_pipeline_rejects_invalid_field_types(client):
+    payload = {
+        "context_id": "ctx-1",
+        "policy_text": "policy",
+        "structured_plan": {"sections": []},
+        "generated_at": "2026-03-05T00:00:00+00:00",
+        "language": ["en"],
+    }
+
+    with client.application.test_request_context("/validate-policy", method="POST"):
+        result = run_validation_pipeline(payload)
+
+    assert result == {
+        "success": False,
+        "error_type": "contract_error",
+        "error_code": "invalid_field_type",
+        "message": "Field 'language' must be a string.",
+        "details": {
+            "stage": "contract_validation",
+            "field": "language",
+            "expected_type": "string",
+        },
+        "correlation_id": "ctx-1",
+        "status_code": 400,
+    }
+
+
 def test_run_validation_pipeline_returns_structured_dependency_error(client):
     payload = {
         "context_id": "ctx-dep",

@@ -112,6 +112,40 @@ def test_validate_policy_review_flow_updates_prompt_then_accepts():
     assert kwargs["recommendations"] == ["Add audit scope", "Add review cadence"]
 
 
+def test_validate_policy_review_flow_rejects_invalid_update_payload():
+    round_one = [
+        {
+            "role": "AWC",
+            "status": "review",
+            "reason": "Missing audit scope",
+            "recommendations": ["Add audit scope"],
+        },
+        {"role": "AWL", "status": "accepted"},
+        {"role": "AWT", "status": "accepted"},
+    ]
+    evaluator_results = [{"status": "review", "notes": "needs update"}]
+    coordinator = _build_coordinator([round_one], evaluator_results, rounds=1)
+
+    policy_input = {
+        "context_id": "ctx-invalid-update",
+        "policy_text": "original policy",
+        "language": "en",
+        "policy_agent_version": "0.1.0",
+        "generated_at": "2026-03-05T00:00:00+00:00",
+    }
+
+    with patch(
+        "app.services.logic.send_policy_update_to_policy_agent",
+        return_value={"policy_text": "   ", "generated_at": "2026-03-05T01:00:00+00:00"},
+    ):
+        try:
+            coordinator.validate_policy(policy_input)
+        except RuntimeError as exc:
+            assert str(exc) == "Policy update endpoint did not return revised policy text."
+        else:
+            raise AssertionError("Expected runtime validation failure for invalid policy update response")
+
+
 def test_validate_policy_uses_final_vote_when_no_consensus():
     round_one = [
         {"role": "AWC", "status": "review", "reason": "Needs detail", "recommendations": ["Expand scope"]},
@@ -250,6 +284,24 @@ def test_validate_policy_review_flow_accepts_reason_key_fallback():
 
     assert result["status"] == "accepted"
     assert update_policy.call_args.kwargs["reasons"] == ["Missing audit scope"]
+
+
+def test_validate_policy_update_response_rejects_mismatched_context_id():
+    coordinator = Coordinator.__new__(Coordinator)
+
+    try:
+        coordinator.validate_policy_update_response(
+            {
+                "context_id": "ctx-other",
+                "policy_text": "revised policy",
+                "generated_at": "2026-03-05T01:00:00+00:00",
+            },
+            "ctx-expected",
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "Policy update endpoint returned a mismatched context_id."
+    else:
+        raise AssertionError("Expected runtime validation failure for mismatched context id")
 
 
 def test_log_validation_persists_ownership_and_policy_reference():

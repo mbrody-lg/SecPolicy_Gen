@@ -109,8 +109,7 @@ class Coordinator:
                 )
                 if update_response.get("success") is False:
                     return update_response
-                if not update_response.get("policy_text"):
-                    raise RuntimeError("Policy update endpoint did not return revised policy text.")
+                update_response = self.validate_policy_update_response(update_response, context_id)
 
                 # Update prompt with returned policy revision
                 prompt = update_response.get("policy_text", prompt)
@@ -152,6 +151,29 @@ class Coordinator:
                     response["recommendations"].extend(res.get("recommendations", []))
 
         return response
+
+    def validate_policy_update_response(self, update_response: dict, context_id: str) -> dict:
+        """Ensure the policy-agent update response is usable before another round starts."""
+        if not isinstance(update_response, dict):
+            raise RuntimeError("Policy update endpoint returned an invalid response object.")
+
+        policy_text = update_response.get("policy_text")
+        if not isinstance(policy_text, str) or not policy_text.strip():
+            raise RuntimeError("Policy update endpoint did not return revised policy text.")
+
+        response_context_id = update_response.get("context_id")
+        if response_context_id is not None and str(response_context_id) != str(context_id):
+            raise RuntimeError("Policy update endpoint returned a mismatched context_id.")
+
+        generated_at = update_response.get("generated_at")
+        if generated_at is not None and not isinstance(generated_at, str):
+            raise RuntimeError("Policy update endpoint returned an invalid generated_at value.")
+
+        policy_agent_version = update_response.get("policy_agent_version")
+        if policy_agent_version is not None and not isinstance(policy_agent_version, str):
+            raise RuntimeError("Policy update endpoint returned an invalid policy_agent_version value.")
+
+        return update_response
 
     def collect_feedback(self, results: List[Dict], decision: str) -> tuple[list[str], list[str]]:
         """Normalize reason/recommendation fields from validator round outputs."""

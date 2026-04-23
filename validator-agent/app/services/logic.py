@@ -21,6 +21,11 @@ POLICY_UPDATE_REQUIRED_FIELDS = [
 ]
 VALIDATION_REQUIRED_FIELDS = ["context_id", "policy_text", "structured_plan", "generated_at"]
 logger = logging.getLogger(__name__)
+MAX_CONTEXT_ID_LENGTH = 128
+MAX_LANGUAGE_LENGTH = 16
+MAX_POLICY_TEXT_LENGTH = 50000
+MAX_POLICY_AGENT_VERSION_LENGTH = 64
+MAX_GENERATED_AT_LENGTH = 64
 
 
 def _error_payload(
@@ -137,10 +142,70 @@ def _pipeline_error(exc: PipelineStepError) -> dict:
     ) | {"status_code": exc.status_code}
 
 
-def validate_policy_payload(payload: dict) -> dict:
+def _ensure_payload_object(payload: dict | None, correlation_id: str | None) -> dict:
+    if not isinstance(payload, dict):
+        raise PipelineStepError(
+            stage="contract_validation",
+            message="Request body must be a JSON object.",
+            error_type="contract_error",
+            error_code="invalid_json_body",
+            status_code=400,
+            details={"expected_type": "object"},
+            correlation_id=correlation_id,
+        )
+    return payload
+
+
+def _require_string_field(
+    payload: dict,
+    *,
+    field: str,
+    max_length: int,
+    correlation_id: str | None,
+    allow_empty: bool = False,
+) -> str:
+    value = payload.get(field)
+    if not isinstance(value, str):
+        raise PipelineStepError(
+            stage="contract_validation",
+            message=f"Field '{field}' must be a string.",
+            error_type="contract_error",
+            error_code="invalid_field_type",
+            status_code=400,
+            details={"field": field, "expected_type": "string"},
+            correlation_id=correlation_id,
+        )
+
+    normalized = value.strip()
+    if not allow_empty and not normalized:
+        raise PipelineStepError(
+            stage="contract_validation",
+            message=f"Field '{field}' must not be empty.",
+            error_type="contract_error",
+            error_code="empty_required_field",
+            status_code=400,
+            details={"field": field},
+            correlation_id=correlation_id,
+        )
+
+    if len(normalized) > max_length:
+        raise PipelineStepError(
+            stage="contract_validation",
+            message=f"Field '{field}' exceeds the allowed size.",
+            error_type="contract_error",
+            error_code="field_too_large",
+            status_code=413,
+            details={"field": field, "max_length": max_length},
+            correlation_id=correlation_id,
+        )
+    return normalized
+
+
+def validate_policy_payload(payload: dict | None) -> dict:
     """Validate request contract, run coordinator orchestration, and normalize response."""
     correlation_id = _get_correlation_id(payload)
-    missing = [field for field in VALIDATION_REQUIRED_FIELDS if field not in payload]
+    data = _ensure_payload_object(payload, correlation_id)
+    missing = [field for field in VALIDATION_REQUIRED_FIELDS if field not in data]
     if missing:
         raise PipelineStepError(
             stage="contract_validation",
@@ -152,13 +217,51 @@ def validate_policy_payload(payload: dict) -> dict:
             correlation_id=correlation_id,
         )
 
+    normalized_payload = {
+        "context_id": _require_string_field(
+            data,
+            field="context_id",
+            max_length=MAX_CONTEXT_ID_LENGTH,
+            correlation_id=correlation_id,
+        ),
+        "policy_text": _require_string_field(
+            data,
+            field="policy_text",
+            max_length=MAX_POLICY_TEXT_LENGTH,
+            correlation_id=correlation_id,
+        ),
+        "generated_at": _require_string_field(
+            data,
+            field="generated_at",
+            max_length=MAX_GENERATED_AT_LENGTH,
+            correlation_id=correlation_id,
+        ),
+        "structured_plan": data["structured_plan"],
+    }
+    if "language" in data:
+        normalized_payload["language"] = _require_string_field(
+            data,
+            field="language",
+            max_length=MAX_LANGUAGE_LENGTH,
+            correlation_id=correlation_id,
+        )
+    if "policy_agent_version" in data:
+        normalized_payload["policy_agent_version"] = _require_string_field(
+            data,
+            field="policy_agent_version",
+            max_length=MAX_POLICY_AGENT_VERSION_LENGTH,
+            correlation_id=correlation_id,
+        )
+    if correlation_id:
+        normalized_payload["correlation_id"] = correlation_id
+
     try:
         coordinator = Coordinator()
-        validation_result = coordinator.validate_policy(payload)
+        validation_result = coordinator.validate_policy(normalized_payload)
     except PipelineStepError:
         raise
     except Exception as exc:
-        logger.exception("Validator execution failed for context_id=%s", payload.get("context_id"))
+        logger.exception("Validator execution failed for context_id=%s", normalized_payload.get("context_id"))
         raise PipelineStepError(
             stage="validation",
             message="Validator execution failed.",
@@ -182,14 +285,14 @@ def validate_policy_payload(payload: dict) -> dict:
         )
 
     response = {
-        "context_id": payload["context_id"],
-        "language": validation_result.get("language", payload.get("language", "")),
-        "policy_text": validation_result.get("policy_text", payload["policy_text"]),
-        "structured_plan": payload["structured_plan"],
-        "generated_at": validation_result.get("generated_at", payload["generated_at"]),
+        "context_id": normalized_payload["context_id"],
+        "language": validation_result.get("language", normalized_payload.get("language", "")),
+        "policy_text": validation_result.get("policy_text", normalized_payload["policy_text"]),
+        "structured_plan": normalized_payload["structured_plan"],
+        "generated_at": validation_result.get("generated_at", normalized_payload["generated_at"]),
         "policy_agent_version": validation_result.get(
             "policy_agent_version",
-            payload.get("policy_agent_version", ""),
+            normalized_payload.get("policy_agent_version", ""),
         ),
         "status": validation_result.get("status", "review"),
         "reasons": validation_result.get("reasons", []),
@@ -220,7 +323,11 @@ def send_policy_update_to_policy_agent(
     recommendations: list,
 ):
     """Send validator feedback to policy-agent and return the revised policy payload."""
-    policy_agent_url = os.getenv("POLICY_AGENT_URL", "http://policy-agent:5000")
+    policy_agent_url = (
+        current_app.config.get("POLICY_AGENT_URL", "http://policy-agent:5000")
+        if has_app_context()
+        else os.getenv("POLICY_AGENT_URL", "http://policy-agent:5000")
+    )
     update_endpoint = f"{policy_agent_url}/generate_policy/{context_id}/update"
 
     payload = {
