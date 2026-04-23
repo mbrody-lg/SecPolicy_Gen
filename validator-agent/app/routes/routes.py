@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 @routes.route("/validate-policy", methods=["POST"])
 def validate_policy():
     """Validate policy payload received from policy-agent and return decision data."""
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
     result = run_validation_pipeline(data)
     status_code = result.pop("status_code", 200)
     if result.get("success"):

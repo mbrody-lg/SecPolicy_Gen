@@ -125,3 +125,13 @@ def test_trigger_policy_generation_redirects_with_stage_flash_on_failure(client,
     with client.session_transaction() as session:
         flashes = session.get("_flashes", [])
     assert ("danger", "validation: Policy validation failed.") in flashes
+
+
+def test_dashboard_route_adds_security_headers(client, monkeypatch):
+    monkeypatch.setattr(routes_module.mongo, "db", FakeDB(), raising=False)
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["Cache-Control"] == "no-store"

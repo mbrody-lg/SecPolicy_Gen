@@ -43,6 +43,29 @@ def test_validate_policy_route_rejects_missing_required_fields(client):
         "correlation_id": "ctx-1",
     }
 
+
+def test_validate_policy_route_rejects_invalid_json_body(client):
+    response = client.post(
+        "/validate-policy",
+        data="[]",
+        content_type="application/json",
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "success": False,
+        "error_type": "contract_error",
+        "error_code": "invalid_json_body",
+        "message": "Request body must be a JSON object.",
+        "details": {
+            "stage": "contract_validation",
+            "expected_type": "object",
+        },
+    }
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["Cache-Control"] == "no-store"
+
+
 def test_validate_policy_route(client, default_context_id):
     payload = {
         "context_id": default_context_id,

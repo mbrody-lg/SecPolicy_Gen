@@ -92,6 +92,7 @@ def create_app():
     @app.after_request
     def apply_security_headers(response):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Cache-Control", "no-store")
         return response
 
     return app
