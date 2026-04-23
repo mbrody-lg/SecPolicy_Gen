@@ -79,6 +79,20 @@ def test_get_context_and_prompt_falls_back_to_legacy_interaction(monkeypatch):
     assert payload["model_version"] == "0.2.0"
 
 
+def test_get_context_and_prompt_normalizes_numeric_model_version(monkeypatch):
+    context_id = ObjectId()
+    fake_db = FakeDB(
+        contexts=[{"_id": context_id, "refined_prompt": "prompt", "language": "en", "version": 1}],
+        interactions=[],
+    )
+
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    payload = logic.get_context_and_prompt(str(context_id))
+
+    assert payload["model_version"] == "1"
+
+
 def test_store_validated_policy_inserts_agent_interaction(monkeypatch):
     context_id = ObjectId()
     fake_db = FakeDB()

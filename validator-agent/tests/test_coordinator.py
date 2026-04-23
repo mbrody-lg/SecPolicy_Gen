@@ -209,6 +209,49 @@ def test_validate_policy_returns_dependency_error_when_policy_update_fails():
     assert result == dependency_error
 
 
+def test_validate_policy_review_flow_accepts_reason_key_fallback():
+    round_one = [
+        {
+            "role": "AWC",
+            "status": "review",
+            "reasons": "Missing audit scope",
+            "recommendations": ["Add audit scope"],
+        },
+        {"role": "AWL", "status": "accepted"},
+        {"role": "AWT", "status": "accepted"},
+    ]
+    round_two = [
+        {"role": "AWC", "status": "accepted", "text": "revised accepted policy"},
+        {"role": "AWL", "status": "accepted"},
+        {"role": "AWT", "status": "accepted"},
+    ]
+    evaluator_results = [
+        {"status": "review", "notes": "needs update"},
+        {"status": "accepted", "notes": "ok"},
+    ]
+    coordinator = _build_coordinator([round_one, round_two], evaluator_results, rounds=3)
+
+    policy_input = {
+        "context_id": "ctx-review-fallback",
+        "policy_text": "original policy",
+        "language": "en",
+        "policy_agent_version": "0.1.0",
+        "generated_at": "2026-03-05T00:00:00+00:00",
+    }
+
+    update_response = {
+        "policy_text": "revised policy from policy-agent",
+        "policy_agent_version": "0.2.0",
+        "generated_at": "2026-03-05T01:00:00+00:00",
+    }
+
+    with patch("app.services.logic.send_policy_update_to_policy_agent", return_value=update_response) as update_policy:
+        result = coordinator.validate_policy(policy_input)
+
+    assert result["status"] == "accepted"
+    assert update_policy.call_args.kwargs["reasons"] == ["Missing audit scope"]
+
+
 def test_log_validation_persists_ownership_and_policy_reference():
     coordinator = Coordinator.__new__(Coordinator)
     coordinator.validation = {"rounds": 3, "consensus_threshold": 2, "vote_strategy": "majority"}

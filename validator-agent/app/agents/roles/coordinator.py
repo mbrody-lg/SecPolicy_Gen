@@ -96,6 +96,7 @@ class Coordinator:
                 if self.debug_mode:
                     print(f"\n→ {decision.upper()} — sending to policy-agent for revision")
 
+                reasons, recommendations = self.collect_feedback(round_results, decision)
                 update_response = send_policy_update_to_policy_agent(
                     context_id=context_id,
                     language=language,
@@ -103,11 +104,8 @@ class Coordinator:
                     policy_agent_version=version,
                     generated_at=generated_at,
                     status=decision,
-                    reasons=[r.get("reason") for r in round_results if r["status"] == decision],
-                    recommendations=[
-                        rec for r in round_results if r["status"] == decision
-                        for rec in r.get("recommendations", [])
-                    ]
+                    reasons=reasons,
+                    recommendations=recommendations,
                 )
                 if update_response.get("success") is False:
                     return update_response
@@ -154,6 +152,25 @@ class Coordinator:
                     response["recommendations"].extend(res.get("recommendations", []))
 
         return response
+
+    def collect_feedback(self, results: List[Dict], decision: str) -> tuple[list[str], list[str]]:
+        """Normalize reason/recommendation fields from validator round outputs."""
+        reasons = []
+        recommendations = []
+
+        for result in results:
+            if result["status"] != decision:
+                continue
+
+            reason_value = result.get("reason") or result.get("reasons")
+            if isinstance(reason_value, str) and reason_value.strip():
+                reasons.append(reason_value.strip())
+
+            for recommendation in result.get("recommendations", []):
+                if isinstance(recommendation, str) and recommendation.strip():
+                    recommendations.append(recommendation.strip())
+
+        return reasons, recommendations
 
     def vote(self, results: List[Dict]) -> str:
         """Compute final fallback decision using majority status vote."""
@@ -238,9 +255,9 @@ class Coordinator:
                 None
             )
         else:
-            for res in round_results:
-                if res["status"] == decision:
-                    response["reasons"].append(res.get("reason", ""))
-                    response["recommendations"].extend(res.get("recommendations", []))
+            response["reasons"], response["recommendations"] = self.collect_feedback(
+                round_results,
+                decision,
+            )
 
         return response

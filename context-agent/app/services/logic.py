@@ -160,7 +160,7 @@ def get_context_and_prompt(context_id: str) -> dict:
         "context_id": context_id,
         "refined_prompt": refined_prompt,
         "language": context.get("language", "en"),
-        "model_version": context.get("version", "0.1.0"),
+        "model_version": str(context.get("version", "0.1.0")),
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 

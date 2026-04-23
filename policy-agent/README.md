@@ -111,6 +111,10 @@ Runtime model downloads are disabled by default as a secure baseline. Preload em
 `make policy-vectorize` before using RAG, or set `POLICY_AGENT_ALLOW_MODEL_DOWNLOAD=1` only for
 an explicit one-time bootstrap in a controlled environment.
 
+The HTTP contract also keeps request bodies bounded by default via Flask `MAX_CONTENT_LENGTH` and
+service-layer validation of prompt and validator-feedback sizes. Override the body cap only
+deliberately with `MAX_CONTENT_LENGTH` when a deployment genuinely needs larger payloads.
+
 See `config/examples/` for complete configuration examples.
 
 ## API Endpoints
@@ -202,6 +206,12 @@ Run the test suite:
 
 ```bash
 make policy-tests
+```
+
+For the CI-aligned end-to-end evidence path across services, run:
+
+```bash
+make critical-path-validation
 ```
 
 Service-specific workflow notes live in [docs/playbooks/policy-agent.md](../docs/playbooks/policy-agent.md).
