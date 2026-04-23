@@ -41,3 +41,18 @@ def client():
             app = create_app()
             app.config["TESTING"] = True
             yield app.test_client()
+
+
+@pytest.fixture
+def app():
+    with patch.object(mongo, "cx", mongomock.MongoClient()):
+        with patch.object(mongo, "db", mongomock.MongoClient().db):
+            flask_app = create_app()
+            flask_app.config["TESTING"] = True
+            yield flask_app
+
+
+@pytest.fixture
+def app_context(app):
+    with app.app_context():
+        yield

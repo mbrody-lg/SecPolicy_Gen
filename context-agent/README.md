@@ -34,6 +34,13 @@ MONGO_URI=mongodb://mongodb:27017/context-agent-db
 FLASK_SECRET_KEY=your-secret-key-here
 FLASK_ENV=development
 CONFIG_PATH=config/context-agent.yaml
+POLICY_AGENT_URL=http://policy-agent:5000
+VALIDATOR_AGENT_URL=http://validator-agent:5000
+POLICY_AGENT_TIMEOUT_SECONDS=30
+VALIDATOR_AGENT_TIMEOUT_SECONDS=30
+MAX_CONTENT_LENGTH=262144
+SESSION_COOKIE_SECURE=false
+TRUSTED_HOSTS=localhost,context-agent
 ```
 
 ## Running the Service
@@ -50,6 +57,10 @@ python run.py
 ```
 
 The service runs on `http://localhost:5000`
+
+Outbound calls to `policy-agent` and `validator-agent` now use configurable request timeouts and
+propagate `X-Correlation-ID` when present, so dependency failures stay easier to trace across the
+pipeline.
 
 ## API Endpoints
 

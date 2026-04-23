@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import pytest
+import requests
 from bson import ObjectId
 
 from test_base import *
@@ -26,6 +27,21 @@ class FakeDB:
     def __init__(self, contexts=None, interactions=None):
         self.contexts = FakeCollection(contexts)
         self.interactions = FakeCollection(interactions)
+
+
+class FakeResponse:
+    def __init__(self, payload, status_code=200):
+        self._payload = payload
+        self.status_code = status_code
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            error = requests.exceptions.HTTPError(f"{self.status_code} error")
+            error.response = self
+            raise error
+
+    def json(self):
+        return self._payload
 
 
 def test_get_context_and_prompt_prefers_context_refined_prompt(monkeypatch):
@@ -224,4 +240,134 @@ def test_generate_full_policy_pipeline_returns_structured_stage_error(monkeypatc
         "message": "Policy generation failed.",
         "details": {"target_service": "policy-agent"},
         "status_code": 502,
+    }
+
+
+def test_call_policy_agent_propagates_timeout_and_correlation_headers(app_context, monkeypatch):
+    captured = {}
+
+    def fake_post(url, json, headers, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        return FakeResponse({"success": True, "policy_text": "generated"})
+
+    monkeypatch.setattr(logic.requests, "post", fake_post)
+    logic.current_app.config["POLICY_AGENT_TIMEOUT_SECONDS"] = 12.5
+
+    result = logic.call_policy_agent(
+        {
+            "context_id": "ctx-1",
+            "correlation_id": "corr-1",
+            "refined_prompt": "prompt",
+            "language": "en",
+            "model_version": "0.1.0",
+        }
+    )
+
+    assert result == {"success": True, "policy_text": "generated"}
+    assert captured["url"].endswith("/generate_policy")
+    assert captured["headers"] == {"X-Correlation-ID": "corr-1"}
+    assert captured["timeout"] == 12.5
+
+
+def test_call_policy_agent_surfaces_dependency_error_metadata(app_context, monkeypatch):
+    def fake_post(url, json, headers, timeout):
+        return FakeResponse(
+            {
+                "success": False,
+                "error_type": "contract_error",
+                "error_code": "invalid_field_type",
+                "correlation_id": "policy-corr",
+            },
+            status_code=400,
+        )
+
+    monkeypatch.setattr(logic.requests, "post", fake_post)
+
+    with pytest.raises(logic.PipelineStepError) as exc_info:
+        logic.call_policy_agent(
+            {
+                "context_id": "ctx-2",
+                "refined_prompt": "prompt",
+                "language": "en",
+                "model_version": "0.1.0",
+            }
+        )
+
+    assert exc_info.value.error_code == "policy_agent_request_failed"
+    assert exc_info.value.correlation_id == "ctx-2"
+    assert exc_info.value.details == {
+        "target_service": "policy-agent",
+        "operation": "generate_policy",
+        "dependency_status_code": 400,
+        "dependency_error_type": "contract_error",
+        "dependency_error_code": "invalid_field_type",
+        "dependency_correlation_id": "policy-corr",
+    }
+
+
+def test_call_validator_agent_propagates_timeout_and_correlation_headers(app_context, monkeypatch):
+    captured = {}
+
+    def fake_post(url, json, headers, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        return FakeResponse({"status": "accepted"})
+
+    monkeypatch.setattr(logic.requests, "post", fake_post)
+    logic.current_app.config["VALIDATOR_AGENT_TIMEOUT_SECONDS"] = 18.0
+
+    result = logic.call_validator_agent(
+        {
+            "context_id": "ctx-3",
+            "correlation_id": "corr-3",
+            "policy_text": "policy",
+            "structured_plan": [],
+            "generated_at": "2026-04-22T00:00:00+00:00",
+        }
+    )
+
+    assert result == {"status": "accepted"}
+    assert captured["url"].endswith("/validate-policy")
+    assert captured["headers"] == {"X-Correlation-ID": "corr-3"}
+    assert captured["timeout"] == 18.0
+
+
+def test_call_validator_agent_surfaces_dependency_error_metadata(app_context, monkeypatch):
+    def fake_post(url, json, headers, timeout):
+        return FakeResponse(
+            {
+                "success": False,
+                "error_type": "dependency_error",
+                "error_code": "policy_update_request_failed",
+                "correlation_id": "validator-corr",
+            },
+            status_code=502,
+        )
+
+    monkeypatch.setattr(logic.requests, "post", fake_post)
+
+    with pytest.raises(logic.PipelineStepError) as exc_info:
+        logic.call_validator_agent(
+            {
+                "context_id": "ctx-4",
+                "policy_text": "policy",
+                "structured_plan": [],
+                "generated_at": "2026-04-22T00:00:00+00:00",
+            }
+        )
+
+    assert exc_info.value.error_code == "validator_agent_request_failed"
+    assert exc_info.value.correlation_id == "ctx-4"
+    assert exc_info.value.details == {
+        "target_service": "validator-agent",
+        "operation": "validate_policy",
+        "dependency_status_code": 502,
+        "dependency_error_type": "dependency_error",
+        "dependency_error_code": "policy_update_request_failed",
+        "dependency_correlation_id": "validator-corr",
     }

@@ -6,7 +6,7 @@ import logging
 import requests
 import yaml
 from bson import ObjectId
-from flask import current_app
+from flask import current_app, has_request_context, request
 from markdown import markdown
 
 from app import mongo
@@ -27,6 +27,7 @@ class PipelineStepError(Exception):
         error_code: str,
         status_code: int,
         details: dict | None = None,
+        correlation_id: str | None = None,
     ):
         super().__init__(message)
         self.stage = stage
@@ -35,6 +36,7 @@ class PipelineStepError(Exception):
         self.error_code = error_code
         self.status_code = status_code
         self.details = details or {}
+        self.correlation_id = correlation_id
 
 
 def load_questions(config_path="app/config/context_questions.yaml"):
@@ -85,7 +87,7 @@ def _pipeline_success(*, stage: str, **payload) -> dict:
 
 
 def _pipeline_error(exc: PipelineStepError) -> dict:
-    return {
+    payload = {
         "success": False,
         "stage": exc.stage,
         "error_type": exc.error_type,
@@ -94,10 +96,75 @@ def _pipeline_error(exc: PipelineStepError) -> dict:
         "details": exc.details,
         "status_code": exc.status_code,
     }
+    if exc.correlation_id:
+        payload["correlation_id"] = exc.correlation_id
+    return payload
+
+
+def _get_correlation_id(payload: dict | None = None, context_id: str | None = None) -> str | None:
+    """Resolve correlation id from headers or current payload/context."""
+    header_correlation_id = request.headers.get("X-Correlation-ID") if has_request_context() else None
+    if header_correlation_id:
+        return header_correlation_id
+    if isinstance(payload, dict) and payload.get("correlation_id"):
+        return str(payload["correlation_id"])
+    if isinstance(payload, dict) and payload.get("context_id"):
+        return str(payload["context_id"])
+    if context_id:
+        return str(context_id)
+    return None
+
+
+def _dependency_headers(correlation_id: str | None) -> dict:
+    """Build outbound service headers with correlation metadata when available."""
+    if not correlation_id:
+        return {}
+    return {"X-Correlation-ID": correlation_id}
+
+
+def _dependency_timeout(config_name: str, default: float = 30.0) -> float:
+    """Read outbound dependency timeout from app config."""
+    timeout_value = current_app.config.get(config_name, default)
+    try:
+        timeout_seconds = float(timeout_value)
+    except (TypeError, ValueError):
+        return default
+    return timeout_seconds if timeout_seconds > 0 else default
+
+
+def _dependency_error_details(
+    *,
+    response: requests.Response | None,
+    target_service: str,
+    operation: str,
+) -> dict:
+    """Extract stable dependency error details without leaking raw response bodies."""
+    details = {
+        "target_service": target_service,
+        "operation": operation,
+    }
+    if response is None:
+        return details
+
+    details["dependency_status_code"] = response.status_code
+    try:
+        body = response.json()
+    except ValueError:
+        return details
+
+    if isinstance(body, dict):
+        if body.get("error_type"):
+            details["dependency_error_type"] = body["error_type"]
+        if body.get("error_code"):
+            details["dependency_error_code"] = body["error_code"]
+        if body.get("correlation_id"):
+            details["dependency_correlation_id"] = body["correlation_id"]
+    return details
 
 
 def get_context_and_prompt(context_id: str) -> dict:
     """Fetch context data and the refined prompt required by policy-agent."""
+    correlation_id = _get_correlation_id(context_id=context_id)
     try:
         context_obj_id = ObjectId(context_id)
     except Exception as exc:
@@ -108,6 +175,7 @@ def get_context_and_prompt(context_id: str) -> dict:
             error_code="invalid_context_id",
             status_code=400,
             details={"context_id": context_id},
+            correlation_id=correlation_id,
         ) from exc
 
     context = mongo.db.contexts.find_one({"_id": context_obj_id})
@@ -119,6 +187,7 @@ def get_context_and_prompt(context_id: str) -> dict:
             error_code="context_not_found",
             status_code=404,
             details={"context_id": context_id},
+            correlation_id=correlation_id,
         )
 
     refined_prompt = (context.get("refined_prompt") or "").strip()
@@ -135,6 +204,7 @@ def get_context_and_prompt(context_id: str) -> dict:
                     error_code="empty_refined_prompt",
                     status_code=400,
                     details={"context_id": context_id},
+                    correlation_id=correlation_id,
                 )
             raise PipelineStepError(
                 stage="context_fetch",
@@ -143,6 +213,7 @@ def get_context_and_prompt(context_id: str) -> dict:
                 error_code="refined_prompt_not_found",
                 status_code=404,
                 details={"context_id": context_id},
+                correlation_id=correlation_id,
             )
 
         refined_prompt = prompt_entry.get("answer", "").strip()
@@ -154,6 +225,7 @@ def get_context_and_prompt(context_id: str) -> dict:
                 error_code="empty_refined_prompt",
                 status_code=400,
                 details={"context_id": context_id},
+                correlation_id=correlation_id,
             )
 
     return {
@@ -162,17 +234,26 @@ def get_context_and_prompt(context_id: str) -> dict:
         "language": context.get("language", "en"),
         "model_version": str(context.get("version", "0.1.0")),
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "correlation_id": correlation_id,
     }
 
 
 def call_policy_agent(context_payload: dict) -> dict:
     """Call policy-agent and return parsed JSON response."""
     policy_agent_url = current_app.config.get("POLICY_AGENT_URL", "http://policy-agent:5000")
+    correlation_id = _get_correlation_id(context_payload)
+    timeout_seconds = _dependency_timeout("POLICY_AGENT_TIMEOUT_SECONDS")
     try:
-        response = requests.post(f"{policy_agent_url}/generate_policy", json=context_payload)
+        response = requests.post(
+            f"{policy_agent_url}/generate_policy",
+            json=context_payload,
+            headers=_dependency_headers(correlation_id),
+            timeout=timeout_seconds,
+        )
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as exc:
+        response = exc.response if isinstance(exc, requests.exceptions.HTTPError) else None
         logger.warning(
             "Policy-agent request failed for context_id=%s",
             context_payload.get("context_id"),
@@ -184,7 +265,12 @@ def call_policy_agent(context_payload: dict) -> dict:
             error_type="dependency_error",
             error_code="policy_agent_request_failed",
             status_code=502,
-            details={"target_service": "policy-agent"},
+            details=_dependency_error_details(
+                response=response,
+                target_service="policy-agent",
+                operation="generate_policy",
+            ),
+            correlation_id=correlation_id,
         ) from exc
 
 
@@ -213,11 +299,19 @@ def trigger_policy_generation(context_id: str) -> dict:
 def call_validator_agent(policy_data: dict) -> dict:
     """Call validator-agent and return parsed JSON response."""
     validator_agent_url = current_app.config.get("VALIDATOR_AGENT_URL", "http://validator-agent:5000")
+    correlation_id = _get_correlation_id(policy_data)
+    timeout_seconds = _dependency_timeout("VALIDATOR_AGENT_TIMEOUT_SECONDS")
     try:
-        response = requests.post(f"{validator_agent_url}/validate-policy", json=policy_data)
+        response = requests.post(
+            f"{validator_agent_url}/validate-policy",
+            json=policy_data,
+            headers=_dependency_headers(correlation_id),
+            timeout=timeout_seconds,
+        )
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as exc:
+        response = exc.response if isinstance(exc, requests.exceptions.HTTPError) else None
         logger.warning(
             "Validator-agent request failed for context_id=%s",
             policy_data.get("context_id"),
@@ -229,13 +323,19 @@ def call_validator_agent(policy_data: dict) -> dict:
             error_type="dependency_error",
             error_code="validator_agent_request_failed",
             status_code=502,
-            details={"target_service": "validator-agent"},
+            details=_dependency_error_details(
+                response=response,
+                target_service="validator-agent",
+                operation="validate_policy",
+            ),
+            correlation_id=correlation_id,
         ) from exc
 
 
 def store_validated_policy(context_id: str, validated_data: dict) -> dict:
     """Persist a validated policy payload in context interactions."""
     data = validated_data or {}
+    correlation_id = _get_correlation_id(data, context_id)
     required_fields = ["policy_text", "generated_at", "policy_agent_version", "language"]
     missing = [field for field in required_fields if field not in data]
     if missing:
@@ -246,6 +346,7 @@ def store_validated_policy(context_id: str, validated_data: dict) -> dict:
             error_code="validated_policy_missing_fields",
             status_code=400,
             details={"missing_fields": missing, "context_id": context_id},
+            correlation_id=correlation_id,
         )
 
     try:
@@ -258,6 +359,7 @@ def store_validated_policy(context_id: str, validated_data: dict) -> dict:
             error_code="invalid_context_id",
             status_code=400,
             details={"context_id": context_id},
+            correlation_id=correlation_id,
         ) from exc
 
     validated_at = datetime.now(timezone.utc)
