@@ -62,6 +62,7 @@ make context-tests   # Run Context Agent tests
 make policy-tests    # Run Policy Agent tests
 make validator-tests # Run Validator Agent tests
 make functional-smoke # Run end-to-end Docker smoke validation
+make critical-path-validation # Run the CI-aligned critical path ladder
 ```
 
 See [infrastructure/README.md](infrastructure/README.md) for complete command reference.
@@ -76,6 +77,8 @@ For cross-service work, use this validation ladder and stop at the smallest leve
 4. `make functional-smoke`
 
 Use `make host-fast-tests` earlier in the loop when the change is host-test friendly and does not depend on Docker parity. Use the Docker-backed sequence above when the change affects container wiring, service-to-service calls, bootstrap/configuration behavior, or the full context -> policy -> validation pipeline.
+
+When you need one reproducible command for the full critical loop, run `make critical-path-validation`. It executes `context-tests`, `policy-tests`, `validator-tests`, and the end-to-end smoke path in the same order we have been using as initiative evidence.
 
 The current Docker test targets are intentionally non-interactive so they work in terminal automation and CI-like environments without requiring a TTY.
 

@@ -97,6 +97,7 @@ All agents run on separate ports and use internal Docker DNS:
 | `make validator-shell` | Access Validator Agent shell |
 | `make validator-tests` | Run Validator Agent tests |
 | `make functional-smoke` | Run the end-to-end Docker smoke pipeline |
+| `make critical-path-validation` | Run the CI-aligned critical path ladder |
 
 ## Recommended Docker Validation Sequence
 
@@ -113,6 +114,7 @@ Notes:
 - The service test targets use non-interactive `docker exec`, so they work in automated terminal sessions and do not require `-it`.
 - `make functional-smoke` now resolves each service's effective `CONFIG_PATH` before swapping mock configs, so the smoke run exercises the same config entrypoints used by the containers themselves.
 - For host-only logic changes, run `make host-fast-tests` before or instead of the Docker sequence when container parity is not needed.
+- For one-command evidence of the critical Context -> Policy -> Validator path, use `make critical-path-validation`; it runs `context-tests`, `policy-tests`, `validator-tests`, and then the smoke sequence.
 
 ## Docker Compose Structure
 

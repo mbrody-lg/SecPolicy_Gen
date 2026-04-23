@@ -4,7 +4,7 @@ INFRA_DIR=infrastructure
 COMPOSE=docker-compose -f $(INFRA_DIR)/docker-compose.yml --env-file $(INFRA_DIR)/.env
 LINT_PYTHON=$(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi)
 
-.PHONY: all up down clean rebuild logs shell-context context-tests context-import policy-shell policy-tests policy-vectorize validator-shell validator-tests functional-smoke bootstrap-test-env host-fast-tests lint help
+.PHONY: all up down clean rebuild logs shell-context context-tests context-import policy-shell policy-tests policy-vectorize validator-shell validator-tests functional-smoke critical-path-validation bootstrap-test-env host-fast-tests lint help
 
 ## Start all infrastructure
 up:
@@ -62,6 +62,10 @@ validator-tests:
 functional-smoke:
 	./scripts/run_docker_functional_smoke.sh
 
+## Run the critical Context -> Policy -> Validator validation path with CI-aligned evidence
+critical-path-validation:
+	./scripts/run_critical_path_validation.sh
+
 ## Bootstrap a reproducible local test environment in .venv
 bootstrap-test-env:
 	bash scripts/bootstrap-test-env.sh
@@ -92,6 +96,7 @@ help:
 	@echo "make validator-shell 	-> Access validator-agent shell"
 	@echo "make validator-tests 	-> Run tests within validator-agent"
 	@echo "make functional-smoke 	-> Run full docker functional smoke pipeline"
+	@echo "make critical-path-validation -> Run context/policy/validator suites plus smoke"
 	@echo "make bootstrap-test-env -> Install local test dependencies into .venv"
 	@echo "make host-fast-tests 	-> Run fast/route host tests per service"
 	@echo "make lint 		-> Run pylint using root pyproject.toml config"

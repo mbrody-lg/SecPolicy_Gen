@@ -26,6 +26,8 @@ Use this ladder when the change crosses service boundaries, changes Docker/runti
 
 Use `make host-fast-tests` before the Docker ladder when the change is still local and deterministic enough to validate on the host. Move to the Docker ladder as soon as service wiring, config resolution, container bootstrap, or real service-to-service calls become part of the risk.
 
+When the work needs a single CI-aligned evidence command for the full critical loop, use `make critical-path-validation`. It runs the service suites for `context-agent`, `policy-agent`, and `validator-agent`, then resets into the Docker smoke run.
+
 ### Process Notes From The Current Initiative
 
 - Keep Docker test targets non-interactive so they work in automated terminals without `-it`.
