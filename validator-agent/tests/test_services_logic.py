@@ -42,6 +42,8 @@ def test_send_policy_update_to_policy_agent_posts_expected_payload():
             "reasons": ["Missing scope"],
             "recommendations": ["Add scope"],
         },
+        headers={"X-Correlation-ID": "ctx-1"},
+        timeout=30.0,
     )
 
 
@@ -69,6 +71,60 @@ def test_send_policy_update_to_policy_agent_returns_deterministic_error():
         "details": {
             "target_service": "policy-agent",
             "operation": "generate_policy_update",
+            "request_fields": [
+                "context_id",
+                "language",
+                "policy_text",
+                "policy_agent_version",
+                "generated_at",
+                "status",
+                "reasons",
+                "recommendations",
+            ],
+        },
+        "correlation_id": "ctx-1",
+    }
+
+
+def test_send_policy_update_to_policy_agent_surfaces_dependency_error_metadata(client):
+    response = MagicMock()
+    response.status_code = 400
+    response.json.return_value = {
+        "error_type": "contract_error",
+        "error_code": "invalid_field_type",
+        "correlation_id": "policy-corr",
+    }
+    http_error = requests.exceptions.HTTPError("boom")
+    http_error.response = response
+
+    with client.application.test_request_context("/validate-policy", method="POST"):
+        with patch(
+            "app.services.logic.requests.post",
+            side_effect=http_error,
+        ):
+            result = send_policy_update_to_policy_agent(
+                context_id="ctx-1",
+                language="en",
+                policy_text="current policy",
+                policy_agent_version="0.1.0",
+                generated_at="2026-03-05T00:00:00+00:00",
+                status="review",
+                reasons=["Missing scope"],
+                recommendations=["Add scope"],
+            )
+
+    assert result == {
+        "success": False,
+        "error_type": "dependency_error",
+        "error_code": "policy_update_request_failed",
+        "message": "Error sending policy update to policy-agent.",
+        "details": {
+            "target_service": "policy-agent",
+            "operation": "generate_policy_update",
+            "dependency_status_code": 400,
+            "dependency_error_type": "contract_error",
+            "dependency_error_code": "invalid_field_type",
+            "dependency_correlation_id": "policy-corr",
             "request_fields": [
                 "context_id",
                 "language",

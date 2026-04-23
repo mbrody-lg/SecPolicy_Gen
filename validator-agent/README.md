@@ -45,6 +45,10 @@ FLASK_SECRET_KEY=your-secret-key-here
 FLASK_ENV=development
 CONFIG_PATH=config/validator-agent.yaml
 POLICY_AGENT_URL=http://policy-agent:5000
+POLICY_AGENT_TIMEOUT_SECONDS=30
+MAX_CONTENT_LENGTH=262144
+SESSION_COOKIE_SECURE=false
+TRUSTED_HOSTS=localhost,validator-agent
 ```
 
 ## Running the Service
@@ -61,6 +65,9 @@ python run.py
 ```
 
 The service runs on `http://localhost:5000`
+
+Outbound policy revision requests now use configurable timeouts and propagate
+`X-Correlation-ID` when present so cross-service failures stay easier to trace.
 
 ## Configuration
 

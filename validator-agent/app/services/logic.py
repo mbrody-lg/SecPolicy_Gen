@@ -4,7 +4,7 @@ import logging
 import os
 
 import requests
-from flask import request
+from flask import current_app, has_app_context, has_request_context, request
 
 from app.agents.roles.coordinator import Coordinator
 
@@ -68,13 +68,57 @@ class PipelineStepError(Exception):
 
 
 def _get_correlation_id(payload: dict | None) -> str | None:
+    header_correlation_id = request.headers.get("X-Correlation-ID") if has_request_context() else None
     if not isinstance(payload, dict):
-        return request.headers.get("X-Correlation-ID")
-    return (
-        request.headers.get("X-Correlation-ID")
-        or payload.get("correlation_id")
-        or payload.get("context_id")
-    )
+        return header_correlation_id
+    return header_correlation_id or payload.get("correlation_id") or payload.get("context_id")
+
+
+def _dependency_headers(correlation_id: str | None) -> dict:
+    """Build outbound dependency headers with correlation metadata when available."""
+    if not correlation_id:
+        return {}
+    return {"X-Correlation-ID": correlation_id}
+
+
+def _dependency_timeout(config_name: str, default: float = 30.0) -> float:
+    """Read outbound dependency timeout from app config."""
+    timeout_value = current_app.config.get(config_name, default) if has_app_context() else default
+    try:
+        timeout_seconds = float(timeout_value)
+    except (TypeError, ValueError):
+        return default
+    return timeout_seconds if timeout_seconds > 0 else default
+
+
+def _dependency_error_details(
+    *,
+    response: requests.Response | None,
+    target_service: str,
+    operation: str,
+) -> dict:
+    """Extract stable dependency error details without leaking raw response bodies."""
+    details = {
+        "target_service": target_service,
+        "operation": operation,
+    }
+    if response is None:
+        return details
+
+    details["dependency_status_code"] = response.status_code
+    try:
+        body = response.json()
+    except ValueError:
+        return details
+
+    if isinstance(body, dict):
+        if body.get("error_type"):
+            details["dependency_error_type"] = body["error_type"]
+        if body.get("error_code"):
+            details["dependency_error_code"] = body["error_code"]
+        if body.get("correlation_id"):
+            details["dependency_correlation_id"] = body["correlation_id"]
+    return details
 
 
 def _pipeline_success(*, stage: str, **payload) -> dict:
@@ -189,12 +233,20 @@ def send_policy_update_to_policy_agent(
         "reasons": reasons,
         "recommendations": recommendations,
     }
+    correlation_id = _get_correlation_id(payload)
+    timeout_seconds = _dependency_timeout("POLICY_AGENT_TIMEOUT_SECONDS")
 
     try:
-        response = requests.post(update_endpoint, json=payload)
+        response = requests.post(
+            update_endpoint,
+            json=payload,
+            headers=_dependency_headers(correlation_id),
+            timeout=timeout_seconds,
+        )
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as exc:
+        response = exc.response if isinstance(exc, requests.exceptions.HTTPError) else None
         logger.warning(
             "Policy update request failed for context_id=%s target=%s",
             context_id,
@@ -205,10 +257,11 @@ def send_policy_update_to_policy_agent(
             error_type="dependency_error",
             error_code="policy_update_request_failed",
             message="Error sending policy update to policy-agent.",
-            details={
-                "target_service": "policy-agent",
-                "operation": "generate_policy_update",
-                "request_fields": POLICY_UPDATE_REQUIRED_FIELDS,
-            },
-            correlation_id=context_id,
+            details=_dependency_error_details(
+                response=response,
+                target_service="policy-agent",
+                operation="generate_policy_update",
+            )
+            | {"request_fields": POLICY_UPDATE_REQUIRED_FIELDS},
+            correlation_id=correlation_id or context_id,
         )
