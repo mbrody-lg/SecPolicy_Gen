@@ -1,7 +1,11 @@
 """Application bootstrap for validator-agent."""
 
 import os
+from uuid import uuid4
+
 from flask import Flask
+from flask import g
+from flask import has_request_context
 from flask_pymongo import PyMongo
 from dotenv import load_dotenv
 
@@ -9,6 +13,7 @@ from dotenv import load_dotenv
 mongo = PyMongo()
 
 TEST_ONLY_SECRET_KEY = "test-only-secret-key"
+CORRELATION_ID_HEADER = "X-Correlation-ID"
 
 
 def _get_env_bool(name: str, default: bool = False) -> bool:
@@ -49,6 +54,30 @@ def _get_env_list(name: str) -> list[str] | None:
     items = [item.strip() for item in value.split(",") if item.strip()]
     return items or None
 
+
+def _resolve_request_correlation_id() -> str:
+    """Preserve inbound correlation ids or create a request-scoped fallback."""
+    inbound = getattr(g, "correlation_id", None)
+    if inbound:
+        return inbound
+    return uuid4().hex
+
+
+def get_request_correlation_id() -> str | None:
+    """Return the current request correlation id when a request context is active."""
+    if not has_request_context():
+        return None
+    return getattr(g, "correlation_id", None)
+
+
+def _response_correlation_id(response) -> str:
+    """Prefer the response body correlation id when present, otherwise use request scope."""
+    if response.is_json:
+        payload = response.get_json(silent=True)
+        if isinstance(payload, dict) and payload.get("correlation_id"):
+            return str(payload["correlation_id"])
+    return _resolve_request_correlation_id()
+
 def create_app():
     """Create and configure the Flask application for validator-agent."""
     # Load environment variables
@@ -87,10 +116,21 @@ def create_app():
     from app.routes.routes import routes
     app.register_blueprint(routes)
 
+    @app.before_request
+    def attach_correlation_id():
+        inbound = g.get("correlation_id")
+        if inbound:
+            return
+        from flask import request
+
+        request_correlation_id = request.headers.get(CORRELATION_ID_HEADER)
+        g.correlation_id = request_correlation_id or uuid4().hex
+
     @app.after_request
     def apply_security_headers(response):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Cache-Control", "no-store")
+        response.headers.setdefault(CORRELATION_ID_HEADER, _response_correlation_id(response))
         return response
 
     return app

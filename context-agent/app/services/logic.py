@@ -6,11 +6,12 @@ import logging
 import requests
 import yaml
 from bson import ObjectId
-from flask import current_app, has_request_context, request
+from flask import current_app
 from markdown import markdown
 
-from app import mongo
+from app import get_request_correlation_id, mongo
 from app.agents.factory import create_agent_from_config
+from app.observability import build_log_event, log_event
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,62 @@ class PipelineStepError(Exception):
         self.status_code = status_code
         self.details = details or {}
         self.correlation_id = correlation_id
+
+
+def get_health_status() -> dict:
+    """Return a lightweight liveness payload without touching dependencies."""
+    return {
+        "status": "ok",
+        "service": "context-agent",
+    }
+
+
+def _required_readiness_config() -> dict[str, str]:
+    """Return the minimal config keys needed for this service to operate safely."""
+    return {
+        "SECRET_KEY": current_app.config.get("SECRET_KEY"),
+        "MONGO_URI": current_app.config.get("MONGO_URI"),
+    }
+
+
+def _config_readiness_check() -> dict:
+    """Validate essential runtime configuration."""
+    missing = sorted(
+        key for key, value in _required_readiness_config().items()
+        if value is None or str(value).strip() == ""
+    )
+    return {
+        "status": "ok" if not missing else "error",
+        "missing": missing,
+    }
+
+
+def _mongo_readiness_check() -> dict:
+    """Validate MongoDB connectivity with a safe ping."""
+    try:
+        mongo.cx.admin.command("ping")
+        return {"status": "ok"}
+    except Exception as exc:
+        return {
+            "status": "error",
+            "message": str(exc),
+        }
+
+
+def get_readiness_status() -> dict:
+    """Return service readiness based on essential config and Mongo reachability."""
+    config_check = _config_readiness_check()
+    mongo_check = _mongo_readiness_check()
+    checks = {
+        "config": config_check,
+        "mongo": mongo_check,
+    }
+    is_ready = all(check["status"] == "ok" for check in checks.values())
+    return {
+        "status": "ready" if is_ready else "not_ready",
+        "service": "context-agent",
+        "checks": checks,
+    }
 
 
 def load_questions(config_path="app/config/context_questions.yaml"):
@@ -96,16 +153,17 @@ def _pipeline_error(exc: PipelineStepError) -> dict:
         "details": exc.details,
         "status_code": exc.status_code,
     }
-    if exc.correlation_id:
-        payload["correlation_id"] = exc.correlation_id
+    correlation_id = exc.correlation_id or _get_correlation_id()
+    if correlation_id:
+        payload["correlation_id"] = correlation_id
     return payload
 
 
 def _get_correlation_id(payload: dict | None = None, context_id: str | None = None) -> str | None:
-    """Resolve correlation id from headers or current payload/context."""
-    header_correlation_id = request.headers.get("X-Correlation-ID") if has_request_context() else None
-    if header_correlation_id:
-        return header_correlation_id
+    """Resolve correlation id from the request boundary or current payload/context."""
+    request_correlation_id = get_request_correlation_id()
+    if request_correlation_id:
+        return request_correlation_id
     if isinstance(payload, dict) and payload.get("correlation_id"):
         return str(payload["correlation_id"])
     if isinstance(payload, dict) and payload.get("context_id"):
@@ -243,6 +301,17 @@ def call_policy_agent(context_payload: dict) -> dict:
     policy_agent_url = current_app.config.get("POLICY_AGENT_URL", "http://policy-agent:5000")
     correlation_id = _get_correlation_id(context_payload)
     timeout_seconds = _dependency_timeout("POLICY_AGENT_TIMEOUT_SECONDS")
+    log_event(
+        logger,
+        logging.INFO,
+        event="context.policy.request",
+        stage="policy_generation",
+        context_id=context_payload.get("context_id"),
+        correlation_id=correlation_id,
+        target_service="policy-agent",
+        operation="generate_policy",
+        timeout_seconds=timeout_seconds,
+    )
     try:
         response = requests.post(
             f"{policy_agent_url}/generate_policy",
@@ -251,12 +320,32 @@ def call_policy_agent(context_payload: dict) -> dict:
             timeout=timeout_seconds,
         )
         response.raise_for_status()
+        log_event(
+            logger,
+            logging.INFO,
+            event="context.policy.response",
+            stage="policy_generation",
+            context_id=context_payload.get("context_id"),
+            correlation_id=correlation_id,
+            target_service="policy-agent",
+            operation="generate_policy",
+            status_code=response.status_code,
+            result="success",
+        )
         return response.json()
     except requests.exceptions.RequestException as exc:
         response = exc.response if isinstance(exc, requests.exceptions.HTTPError) else None
         logger.warning(
-            "Policy-agent request failed for context_id=%s",
-            context_payload.get("context_id"),
+            build_log_event(
+                event="context.policy.response",
+                stage="policy_generation",
+                context_id=context_payload.get("context_id"),
+                correlation_id=correlation_id,
+                target_service="policy-agent",
+                operation="generate_policy",
+                status_code=response.status_code if response is not None else None,
+                result="failure",
+            ),
             exc_info=exc,
         )
         raise PipelineStepError(
@@ -276,9 +365,26 @@ def call_policy_agent(context_payload: dict) -> dict:
 
 def trigger_policy_generation(context_id: str) -> dict:
     """Generate policy data from stored context and refined prompt."""
+    log_event(
+        logger,
+        logging.INFO,
+        event="context.pipeline.policy_generation_started",
+        stage="policy_generation",
+        context_id=context_id,
+        correlation_id=_get_correlation_id(context_id=context_id),
+    )
     try:
         payload = get_context_and_prompt(context_id)
         policy_data = call_policy_agent(payload)
+        log_event(
+            logger,
+            logging.INFO,
+            event="context.pipeline.policy_generation_completed",
+            stage="policy_generation",
+            context_id=context_id,
+            correlation_id=_get_correlation_id(payload, context_id),
+            result="success",
+        )
         return _pipeline_success(stage="policy_generation", policy_data=policy_data)
     except PipelineStepError as exc:
         return _pipeline_error(exc)
@@ -292,6 +398,7 @@ def trigger_policy_generation(context_id: str) -> dict:
                 error_code="policy_generation_unexpected_failure",
                 status_code=500,
                 details={"operation": "trigger_policy_generation"},
+                correlation_id=_get_correlation_id(context_id=context_id),
             )
         )
 
@@ -301,6 +408,17 @@ def call_validator_agent(policy_data: dict) -> dict:
     validator_agent_url = current_app.config.get("VALIDATOR_AGENT_URL", "http://validator-agent:5000")
     correlation_id = _get_correlation_id(policy_data)
     timeout_seconds = _dependency_timeout("VALIDATOR_AGENT_TIMEOUT_SECONDS")
+    log_event(
+        logger,
+        logging.INFO,
+        event="context.validator.request",
+        stage="validation",
+        context_id=policy_data.get("context_id"),
+        correlation_id=correlation_id,
+        target_service="validator-agent",
+        operation="validate_policy",
+        timeout_seconds=timeout_seconds,
+    )
     try:
         response = requests.post(
             f"{validator_agent_url}/validate-policy",
@@ -309,12 +427,32 @@ def call_validator_agent(policy_data: dict) -> dict:
             timeout=timeout_seconds,
         )
         response.raise_for_status()
+        log_event(
+            logger,
+            logging.INFO,
+            event="context.validator.response",
+            stage="validation",
+            context_id=policy_data.get("context_id"),
+            correlation_id=correlation_id,
+            target_service="validator-agent",
+            operation="validate_policy",
+            status_code=response.status_code,
+            result="success",
+        )
         return response.json()
     except requests.exceptions.RequestException as exc:
         response = exc.response if isinstance(exc, requests.exceptions.HTTPError) else None
         logger.warning(
-            "Validator-agent request failed for context_id=%s",
-            policy_data.get("context_id"),
+            build_log_event(
+                event="context.validator.response",
+                stage="validation",
+                context_id=policy_data.get("context_id"),
+                correlation_id=correlation_id,
+                target_service="validator-agent",
+                operation="validate_policy",
+                status_code=response.status_code if response is not None else None,
+                result="failure",
+            ),
             exc_info=exc,
         )
         raise PipelineStepError(
@@ -391,6 +529,15 @@ def store_validated_policy(context_id: str, validated_data: dict) -> dict:
             "context_id": context_id,
         },
     })
+    log_event(
+        logger,
+        logging.INFO,
+        event="context.pipeline.persistence_completed",
+        stage="persistence",
+        context_id=context_id,
+        correlation_id=correlation_id,
+        result="success",
+    )
     return _pipeline_success(
         stage="persistence",
         context_id=context_id,
@@ -400,6 +547,14 @@ def store_validated_policy(context_id: str, validated_data: dict) -> dict:
 
 def generate_full_policy_pipeline(context_id: str) -> dict:
     """Execute policy generation, validation, and context persistence pipeline."""
+    log_event(
+        logger,
+        logging.INFO,
+        event="context.pipeline.started",
+        stage="pipeline",
+        context_id=context_id,
+        correlation_id=_get_correlation_id(context_id=context_id),
+    )
     try:
         policy_result = trigger_policy_generation(context_id)
         if not policy_result.get("success"):
@@ -408,12 +563,33 @@ def generate_full_policy_pipeline(context_id: str) -> dict:
         policy_data = policy_result["policy_data"]
         validated_data = call_validator_agent(policy_data)
         persistence_result = store_validated_policy(context_id, validated_data)
+        log_event(
+            logger,
+            logging.INFO,
+            event="context.pipeline.completed",
+            stage="pipeline",
+            context_id=context_id,
+            correlation_id=_get_correlation_id(validated_data, context_id),
+            result="success",
+            validation_status=validated_data.get("status"),
+        )
         return _pipeline_success(
             stage="completed",
             validated_data=validated_data,
             persistence=persistence_result,
         )
     except PipelineStepError as exc:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="context.pipeline.completed",
+            stage=exc.stage,
+            context_id=context_id,
+            correlation_id=exc.correlation_id or _get_correlation_id(context_id=context_id),
+            result="failure",
+            error_code=exc.error_code,
+            error_type=exc.error_type,
+        )
         return _pipeline_error(exc)
     except Exception:
         logger.exception("Unexpected pipeline failure for context_id=%s", context_id)
@@ -425,6 +601,7 @@ def generate_full_policy_pipeline(context_id: str) -> dict:
                 error_code="policy_pipeline_unexpected_failure",
                 status_code=500,
                 details={"context_id": context_id},
+                correlation_id=_get_correlation_id(context_id=context_id),
             )
         )
 

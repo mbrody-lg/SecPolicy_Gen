@@ -36,6 +36,12 @@ services:
       - mongo
     networks:
       - internal
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:5000/ready').status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
   policy-agent:
     build: ../policy-agent
     container_name: policy_agent_service
@@ -57,6 +63,12 @@ services:
       - chroma
     networks:
       - internal
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:5000/ready').status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
   validator-agent:
     build:
       context: ../validator-agent
@@ -78,6 +90,12 @@ services:
       - mongo
     networks:
       - internal
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:5000/ready').status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 volumes:
   mongo_data:
   chroma_data:

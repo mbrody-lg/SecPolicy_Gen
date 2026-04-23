@@ -1,5 +1,6 @@
 """OpenAI-backed validator agent implementation."""
 
+import logging
 from typing import List, Dict, Optional
 
 import yaml
@@ -7,6 +8,9 @@ from flask import current_app
 
 from app.agents.base import Agent
 from app.agents.openai.client import OpenAIClient
+from app.observability import build_log_event, log_event
+
+logger = logging.getLogger(__name__)
 
 class OpenAIAgent(Agent):
     """Execute validator roles using OpenAI chat completions."""
@@ -29,9 +33,6 @@ class OpenAIAgent(Agent):
     def run(self, prompt: str, context_id: str = None, only_roles: Optional[List[Dict]] = None) -> List[Dict]:
         """Run configured roles and return parsed validation outputs."""
         selected_roles = only_roles if only_roles else self.roles
-        
-        if self.debug_mode:
-            print(f"DEBUG_SELECTED_ROLES: {selected_roles}")
 
         results = []
         for role_config in selected_roles:
@@ -42,10 +43,15 @@ class OpenAIAgent(Agent):
             max_tokens = role_config.get("max_tokens", 1000)
 
             full_prompt = self._render_prompt(instructions, prompt)
-
-            if self.debug_mode:
-                print(f"[OpenAIAgent] Executing role: {role_key}")
-                print(f"[Prompt]\n{full_prompt}\n")
+            log_event(
+                logger,
+                logging.INFO,
+                event="validator.openai.role_started",
+                stage="validation",
+                context_id=context_id,
+                role=role_key,
+                prompt_length=len(full_prompt),
+            )
 
             try:
                 response = self.client.chat.completions.create(
@@ -66,11 +72,16 @@ class OpenAIAgent(Agent):
                 })
 
             except Exception as error:
-                if self.debug_mode:
-                    print(f"[LOGGING ERROR] {error}")
+                logger.warning(
+                    build_log_event(
+                        event="validator.openai.role_failed",
+                        stage="validation",
+                        context_id=context_id,
+                        role=role_key,
+                        error_type=error.__class__.__name__,
+                    ),
+                    exc_info=error,
+                )
                 continue
-
-        if self.debug_mode:
-            print(f"[RESULTS] {results}")
                 
         return results

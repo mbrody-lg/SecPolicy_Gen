@@ -67,7 +67,13 @@ python run.py
 The service runs on `http://localhost:5000`
 
 Outbound policy revision requests now use configurable timeouts and propagate
-`X-Correlation-ID` when present so cross-service failures stay easier to trace.
+`X-Correlation-ID`. The service preserves an inbound correlation id when present,
+generates one when absent, and returns it on HTTP responses so cross-service
+failures stay easier to trace.
+
+Operational diagnostics:
+- `GET /health` for lightweight liveness
+- `GET /ready` for readiness checks against Mongo and validator config loading
 
 ## Configuration
 

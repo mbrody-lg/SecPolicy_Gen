@@ -286,6 +286,35 @@ def test_validate_policy_review_flow_accepts_reason_key_fallback():
     assert update_policy.call_args.kwargs["reasons"] == ["Missing audit scope"]
 
 
+def test_validate_policy_emits_structured_round_logs(caplog):
+    round_results = [[
+        {"role": "AWC", "status": "accepted", "text": "accepted policy"},
+        {"role": "AWL", "status": "accepted"},
+        {"role": "AWT", "status": "accepted"},
+    ]]
+    evaluator_results = [{"status": "accepted", "confidence": 0.99}]
+    coordinator = _build_coordinator(round_results, evaluator_results, rounds=3)
+    coordinator.debug_mode = True
+
+    policy_input = {
+        "context_id": "ctx-log",
+        "policy_text": "initial policy",
+        "language": "en",
+        "policy_agent_version": "0.1.0",
+        "generated_at": "2026-03-05T00:00:00+00:00",
+        "correlation_id": "corr-log",
+    }
+
+    with patch("app.services.logic.send_policy_update_to_policy_agent"):
+        with caplog.at_level("DEBUG"):
+            result = coordinator.validate_policy(policy_input)
+
+    assert result["status"] == "accepted"
+    assert '"event": "validator.validation.round_started"' in caplog.text
+    assert '"event": "validator.validation.round_evaluated"' in caplog.text
+    assert '"correlation_id": "corr-log"' in caplog.text
+
+
 def test_validate_policy_update_response_rejects_mismatched_context_id():
     coordinator = Coordinator.__new__(Coordinator)
 

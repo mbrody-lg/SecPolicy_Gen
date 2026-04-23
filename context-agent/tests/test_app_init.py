@@ -1,4 +1,5 @@
 from unittest.mock import patch
+from uuid import UUID
 
 import pytest
 
@@ -96,3 +97,30 @@ def test_create_app_reads_timeout_and_trusted_host_overrides(monkeypatch):
     assert app.config["MAX_CONTENT_LENGTH"] == 4096
     assert app.config["SESSION_COOKIE_SECURE"] is True
     assert app.config["TRUSTED_HOSTS"] == ["localhost", "context-agent.internal"]
+
+
+def test_request_hook_preserves_inbound_correlation_id(monkeypatch):
+    _set_common_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "true")
+    monkeypatch.setenv("FLASK_SECRET_KEY", "configured-test-secret")
+
+    app = app_module.create_app()
+
+    with app.test_request_context("/", headers={"X-Correlation-ID": "corr-inbound"}):
+        app.preprocess_request()
+        assert app_module.get_request_correlation_id() == "corr-inbound"
+
+
+def test_request_hook_generates_correlation_id_when_missing(monkeypatch):
+    _set_common_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "true")
+    monkeypatch.setenv("FLASK_SECRET_KEY", "configured-test-secret")
+
+    app = app_module.create_app()
+
+    with app.test_request_context("/"):
+        app.preprocess_request()
+        generated = app_module.get_request_correlation_id()
+
+    assert generated
+    UUID(generated)

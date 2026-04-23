@@ -2,7 +2,57 @@ from unittest.mock import MagicMock, patch
 
 import requests
 
-from app.services.logic import run_validation_pipeline, send_policy_update_to_policy_agent
+from app.services.logic import (
+    get_health_status,
+    get_readiness_status,
+    run_validation_pipeline,
+    send_policy_update_to_policy_agent,
+)
+
+
+def test_get_health_status_returns_service_payload():
+    assert get_health_status() == {
+        "status": "ok",
+        "service": "validator-agent",
+    }
+
+
+def test_get_readiness_status_returns_ready_payload(app, monkeypatch):
+    ping_mock = MagicMock()
+    monkeypatch.setattr("app.services.logic.mongo.db.command", ping_mock)
+
+    with app.test_request_context("/ready", headers={"X-Correlation-ID": "corr-ready"}):
+        result = get_readiness_status()
+
+    ping_mock.assert_called_once_with("ping")
+    assert result == {
+        "success": True,
+        "status": "ready",
+        "service": "validator-agent",
+        "checks": {"mongo": "ok", "config": "ok"},
+        "correlation_id": "corr-ready",
+    }
+
+
+def test_get_readiness_status_returns_dependency_error_when_mongo_fails(app, monkeypatch):
+    command_mock = MagicMock(side_effect=RuntimeError("mongo down"))
+    monkeypatch.setattr("app.services.logic.mongo.db.command", command_mock)
+
+    with app.test_request_context("/ready", headers={"X-Correlation-ID": "corr-ready"}):
+        result = get_readiness_status()
+
+    assert result == {
+        "success": False,
+        "error_type": "dependency_error",
+        "error_code": "service_not_ready",
+        "message": "Validator-agent readiness checks failed.",
+        "details": {
+            "checks": {"mongo": "error", "config": "ok"},
+            "errors": ["mongo_unavailable"],
+        },
+        "correlation_id": "corr-ready",
+        "status_code": 503,
+    }
 
 
 def test_send_policy_update_to_policy_agent_posts_expected_payload():
@@ -138,6 +188,55 @@ def test_send_policy_update_to_policy_agent_surfaces_dependency_error_metadata(c
         },
         "correlation_id": "ctx-1",
     }
+
+
+def test_send_policy_update_to_policy_agent_prefers_request_correlation_id(client):
+    response = MagicMock()
+    response.raise_for_status.return_value = None
+    response.json.return_value = {"policy_text": "revised"}
+
+    with client.application.test_request_context(
+        "/validate-policy",
+        method="POST",
+        headers={"X-Correlation-ID": "corr-request"},
+    ):
+        with patch("app.services.logic.requests.post", return_value=response) as post:
+            send_policy_update_to_policy_agent(
+                context_id="ctx-1",
+                language="en",
+                policy_text="current policy",
+                policy_agent_version="0.1.0",
+                generated_at="2026-03-05T00:00:00+00:00",
+                status="review",
+                reasons=["Missing scope"],
+                recommendations=["Add scope"],
+            )
+
+    assert post.call_args.kwargs["headers"] == {"X-Correlation-ID": "corr-request"}
+
+
+def test_send_policy_update_to_policy_agent_emits_structured_logs(caplog):
+    response = MagicMock()
+    response.raise_for_status.return_value = None
+    response.status_code = 200
+    response.json.return_value = {"policy_text": "revised"}
+
+    with patch("app.services.logic.requests.post", return_value=response):
+        with caplog.at_level("INFO"):
+            send_policy_update_to_policy_agent(
+                context_id="ctx-log",
+                language="en",
+                policy_text="current policy",
+                policy_agent_version="0.1.0",
+                generated_at="2026-03-05T00:00:00+00:00",
+                status="review",
+                reasons=["Missing scope"],
+                recommendations=["Add scope"],
+            )
+
+    assert '"event": "validator.policy_update.request"' in caplog.text
+    assert '"event": "validator.policy_update.response"' in caplog.text
+    assert '"context_id": "ctx-log"' in caplog.text
 
 
 def test_run_validation_pipeline_returns_structured_success(client):

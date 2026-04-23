@@ -218,7 +218,7 @@ For production:
 3. **Enable HTTPS** - Add reverse proxy (Nginx, Traefik)
 4. **Set appropriate logging** - Configure log aggregation
 5. **Back up MongoDB** - Set up regular backup strategy
-6. **Monitor services** - Add health checks and monitoring
+6. **Monitor services** - Use the built-in `/health` and `/ready` endpoints plus the Docker Compose `healthcheck` probes now wired to `/ready` on each agent service
 
 ## Extensibility
 

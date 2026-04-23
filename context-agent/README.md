@@ -58,11 +58,24 @@ python run.py
 
 The service runs on `http://localhost:5000`
 
-Outbound calls to `policy-agent` and `validator-agent` now use configurable request timeouts and
-propagate `X-Correlation-ID` when present, so dependency failures stay easier to trace across the
-pipeline.
+Each request now has a stable correlation boundary:
+- inbound `X-Correlation-ID` is preserved when present
+- a new correlation id is generated when absent
+- the value is always returned in the response header as `X-Correlation-ID`
+- outbound calls to `policy-agent` and `validator-agent` reuse that same value
+- JSON error payloads keep their `correlation_id` aligned with the response header
 
 ## API Endpoints
+
+### Health Checks
+```
+GET /health
+GET /ready
+```
+
+`/health` is a lightweight liveness probe that does not touch external dependencies.
+
+`/ready` performs minimal readiness checks for essential runtime configuration and MongoDB connectivity. It returns `200` when the service is ready and `503` when a required dependency or configuration is not available.
 
 ### Create a New Context
 ```

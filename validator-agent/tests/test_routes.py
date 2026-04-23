@@ -11,6 +11,54 @@ import pytest
 pytestmark = [pytest.mark.route]
 
 
+def test_health_route_reports_service_status(client):
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "status": "ok",
+        "service": "validator-agent",
+    }
+    assert response.headers["X-Correlation-ID"]
+
+
+def test_ready_route_reports_ready_status(client):
+    response = client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "ready"
+    assert response.get_json()["service"] == "validator-agent"
+    assert response.get_json()["checks"] == {"mongo": "ok", "config": "ok"}
+    assert response.get_json()["correlation_id"] == response.headers["X-Correlation-ID"]
+
+
+def test_ready_route_reports_unready_when_dependency_check_fails(client):
+    with patch(
+        "app.routes.routes.get_readiness_status",
+        return_value={
+            "success": False,
+            "error_type": "dependency_error",
+            "error_code": "service_not_ready",
+            "message": "Validator-agent readiness checks failed.",
+            "details": {"checks": {"mongo": "error"}, "errors": ["mongo_unavailable"]},
+            "correlation_id": "corr-ready-fail",
+            "status_code": 503,
+        },
+    ):
+        response = client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.get_json() == {
+        "success": False,
+        "error_type": "dependency_error",
+        "error_code": "service_not_ready",
+        "message": "Validator-agent readiness checks failed.",
+        "details": {"checks": {"mongo": "error"}, "errors": ["mongo_unavailable"]},
+        "correlation_id": "corr-ready-fail",
+    }
+    assert response.headers["X-Correlation-ID"] == "corr-ready-fail"
+
+
 def test_validate_policy_route_rejects_missing_required_fields(client):
     with patch(
         "app.routes.routes.run_validation_pipeline",
@@ -42,6 +90,7 @@ def test_validate_policy_route_rejects_missing_required_fields(client):
         },
         "correlation_id": "ctx-1",
     }
+    assert response.headers["X-Correlation-ID"] == "ctx-1"
 
 
 def test_validate_policy_route_rejects_invalid_json_body(client):
@@ -52,7 +101,8 @@ def test_validate_policy_route_rejects_invalid_json_body(client):
     )
 
     assert response.status_code == 400
-    assert response.get_json() == {
+    payload = response.get_json()
+    assert payload == {
         "success": False,
         "error_type": "contract_error",
         "error_code": "invalid_json_body",
@@ -61,9 +111,11 @@ def test_validate_policy_route_rejects_invalid_json_body(client):
             "stage": "contract_validation",
             "expected_type": "object",
         },
+        "correlation_id": payload["correlation_id"],
     }
     assert response.headers["X-Content-Type-Options"] == "nosniff"
     assert response.headers["Cache-Control"] == "no-store"
+    assert response.headers["X-Correlation-ID"] == payload["correlation_id"]
 
 
 def test_validate_policy_route(client, default_context_id):
@@ -113,6 +165,38 @@ def test_validate_policy_route(client, default_context_id):
     assert data["reasons"] == ["Missing controls"]
     assert data["recommendations"] == ["Add controls"]
     assert data["evaluator_analysis"] == {"status": "review"}
+    assert response.headers["X-Correlation-ID"]
+
+
+def test_validate_policy_route_preserves_inbound_correlation_id(client, default_context_id):
+    payload = {
+        "context_id": default_context_id,
+        "policy_text": "This policy establishes the principles for asset management...",
+        "structured_plan": "Structured simulated security plan",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    with patch(
+        "app.routes.routes.run_validation_pipeline",
+        return_value={
+            "success": False,
+            "error_type": "contract_error",
+            "error_code": "missing_required_fields",
+            "message": "Required fields are missing.",
+            "details": {"stage": "contract_validation", "missing_fields": ["language"]},
+            "correlation_id": "corr-inbound",
+            "status_code": 400,
+        },
+    ):
+        response = client.post(
+            "/validate-policy",
+            data=json.dumps(payload),
+            content_type="application/json",
+            headers={"X-Correlation-ID": "corr-inbound"},
+        )
+
+    assert response.status_code == 400
+    assert response.headers["X-Correlation-ID"] == "corr-inbound"
 
 
 def test_validate_policy_route_propagates_dependency_error(client):
@@ -143,6 +227,7 @@ def test_validate_policy_route_propagates_dependency_error(client):
 
     assert response.status_code == 502
     assert response.get_json() == dependency_error
+    assert response.headers["X-Correlation-ID"] == "ctx-dep"
 
 
 def test_validate_policy_route_hides_internal_exception_details(client):
@@ -179,6 +264,7 @@ def test_validate_policy_route_hides_internal_exception_details(client):
         "details": {"stage": "validation", "operation": "validate_policy"},
         "correlation_id": "ctx-int",
     }
+    assert response.headers["X-Correlation-ID"] == "ctx-int"
 
 def test_delete_validation_by_context(client, app_context):
     context_id = str(ObjectId())

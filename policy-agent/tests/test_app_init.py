@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from flask import g, jsonify
 
 import app as app_module
 
@@ -91,3 +92,43 @@ def test_create_app_reads_trusted_hosts_and_cookie_secure_from_env(monkeypatch):
     assert app.config["TRUSTED_HOSTS"] == ["localhost", "policy-agent.internal"]
     assert app.config["SESSION_COOKIE_SECURE"] is True
     assert app.config["MAX_CONTENT_LENGTH"] == 4096
+
+
+def test_create_app_preserves_incoming_correlation_id(monkeypatch):
+    _set_common_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "true")
+    monkeypatch.setenv("FLASK_SECRET_KEY", "configured-test-secret")
+
+    app = app_module.create_app()
+
+    @app.route("/_correlation/preserved")
+    def preserved():
+        return jsonify({"success": True, "correlation_id": g.correlation_id})
+
+    response = app.test_client().get(
+        "/_correlation/preserved",
+        headers={app_module.CORRELATION_ID_HEADER: "incoming-correlation-id"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["correlation_id"] == "incoming-correlation-id"
+    assert response.headers[app_module.CORRELATION_ID_HEADER] == "incoming-correlation-id"
+
+
+def test_create_app_generates_correlation_id_when_missing(monkeypatch):
+    _set_common_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "true")
+    monkeypatch.setenv("FLASK_SECRET_KEY", "configured-test-secret")
+
+    app = app_module.create_app()
+
+    @app.route("/_correlation/generated")
+    def generated():
+        return jsonify({"success": False, "error": "boom"})
+
+    response = app.test_client().get("/_correlation/generated")
+
+    assert response.status_code == 200
+    correlation_id = response.headers[app_module.CORRELATION_ID_HEADER]
+    assert correlation_id
+    assert response.get_json()["correlation_id"] == correlation_id

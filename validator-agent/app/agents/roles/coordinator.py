@@ -1,5 +1,6 @@
 """Coordinator orchestration for multi-round validator decisions."""
 
+import logging
 import os
 from collections import Counter
 from datetime import datetime, timezone
@@ -11,6 +12,9 @@ from flask import current_app
 from app import mongo
 from app.agents.factory import create_agent_from_config
 from app.agents.roles.evaluator import Evaluator
+from app.observability import build_log_event, log_event
+
+logger = logging.getLogger(__name__)
 
 class Coordinator:
     """Runs multi-round worker validation and final decision orchestration."""
@@ -50,6 +54,7 @@ class Coordinator:
         from app.services.logic import send_policy_update_to_policy_agent
 
         context_id = policy_input.get("context_id")
+        correlation_id = policy_input.get("correlation_id") or context_id
         prompt = policy_input.get("policy_text", "")
         language = policy_input.get("language", "en")
         version = policy_input.get("policy_agent_version", "0.1.0")
@@ -65,24 +70,44 @@ class Coordinator:
 
         while rounds_done < self.max_rounds:
             rounds_done += 1
+            log_event(
+                logger,
+                logging.INFO,
+                event="validator.validation.round_started",
+                stage="validation",
+                context_id=context_id,
+                correlation_id=correlation_id,
+                round=rounds_done,
+            )
             round_results = self.agent.run(prompt, context_id, only_roles=validation_roles)
-
-            if self.debug_mode:
-                print(f"[DEBUG] Round {rounds_done} - Results:")
-                print(round_results)
 
             all_rounds.append(round_results)
 
             if self.debug_mode:
-                print(f"\n[Round {rounds_done}] Results:")
-                for res in round_results:
-                    print(f"  · [{res['role']}] → {res['status']}")
-                    if res['status'] != 'accepted':
-                        print(f"    Reason: {res.get('reason')}")
-                        print(f"    Recommendations: {res.get('recommendations')}")
+                status_counts = Counter(res["status"] for res in round_results)
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="validator.validation.round_results",
+                    stage="validation",
+                    context_id=context_id,
+                    correlation_id=correlation_id,
+                    round=rounds_done,
+                    status_counts=dict(status_counts),
+                )
 
             evaluator_feedback = self.evaluator.evaluate(round_results, context_id)
             decision = evaluator_feedback.get("status", "review")
+            log_event(
+                logger,
+                logging.INFO,
+                event="validator.validation.round_evaluated",
+                stage="validation",
+                context_id=context_id,
+                correlation_id=correlation_id,
+                round=rounds_done,
+                decision=decision,
+            )
 
             self.log_validation(
                 context_id, round_results, decision, rounds_done, True,
@@ -93,8 +118,16 @@ class Coordinator:
                 return self.build_response("accepted", round_results, context_id, language, prompt, version, generated_at, evaluator_feedback)
 
             if decision in ["rejected", "review"]:
-                if self.debug_mode:
-                    print(f"\n→ {decision.upper()} — sending to policy-agent for revision")
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="validator.validation.revision_requested",
+                    stage="policy_update",
+                    context_id=context_id,
+                    correlation_id=correlation_id,
+                    round=rounds_done,
+                    decision=decision,
+                )
 
                 reasons, recommendations = self.collect_feedback(round_results, decision)
                 update_response = send_policy_update_to_policy_agent(
@@ -116,8 +149,15 @@ class Coordinator:
                 version = update_response.get("policy_agent_version", version)
                 generated_at = update_response.get("generated_at", datetime.now(timezone.utc).isoformat())
 
-        if self.debug_mode:
-            print("\nNo consensus reached. Launching final vote...")
+        log_event(
+            logger,
+            logging.INFO,
+            event="validator.validation.final_vote_started",
+            stage="validation",
+            context_id=context_id,
+            correlation_id=correlation_id,
+            round=self.max_rounds,
+        )
 
         last_round = all_rounds[-1]
         final_decision = self.vote(last_round)
@@ -243,9 +283,14 @@ class Coordinator:
 
             mongo.db.validations.insert_one(log_data)
 
-        except Exception as e:
-            if self.debug_mode:
-                print(f"[LOGGING ERROR] {str(e)}")
+        except Exception:
+            logger.exception(
+                build_log_event(
+                    event="validator.validation.persistence_failed",
+                    stage="persistence",
+                    context_id=context_id,
+                )
+            )
                 
     def build_response(
         self,

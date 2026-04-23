@@ -1,7 +1,13 @@
 """Application factory and extensions for the policy-agent service."""
 
+import json
 import os
+from uuid import uuid4
+
 from flask import Flask
+from flask import g
+from flask import has_request_context
+from flask import request
 from flask_pymongo import PyMongo
 from dotenv import load_dotenv
 
@@ -9,6 +15,7 @@ from dotenv import load_dotenv
 mongo = PyMongo()
 
 TEST_ONLY_SECRET_KEY = "test-only-secret-key"
+CORRELATION_ID_HEADER = "X-Correlation-ID"
 
 
 def _get_env_bool(name: str, default: bool = False) -> bool:
@@ -37,6 +44,19 @@ def _get_env_list(name: str) -> list[str] | None:
         return None
     items = [item.strip() for item in value.split(",") if item.strip()]
     return items or None
+
+
+def get_request_correlation_id() -> str | None:
+    """Return the request correlation id when a request context is active."""
+    if not has_request_context():
+        return None
+
+    correlation_id = getattr(g, "correlation_id", None)
+    if correlation_id:
+        return correlation_id
+
+    header_value = request.headers.get(CORRELATION_ID_HEADER, "").strip()
+    return header_value or None
 
 
 def create_app():
@@ -77,10 +97,23 @@ def create_app():
     from app.routes.routes import routes
     app.register_blueprint(routes)
 
+    @app.before_request
+    def assign_correlation_id():
+        incoming_correlation_id = request.headers.get(CORRELATION_ID_HEADER, "").strip()
+        g.correlation_id = incoming_correlation_id or str(uuid4())
+
     @app.after_request
     def apply_security_headers(response):
+        correlation_id = get_request_correlation_id()
+        if response.is_json and correlation_id:
+            payload = response.get_json(silent=True)
+            if isinstance(payload, dict) and payload.get("success") is False:
+                payload.setdefault("correlation_id", correlation_id)
+                response.set_data(json.dumps(payload))
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Cache-Control", "no-store")
+        if correlation_id:
+            response.headers[CORRELATION_ID_HEADER] = correlation_id
         return response
 
     return app

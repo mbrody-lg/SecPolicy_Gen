@@ -8,6 +8,8 @@ from flask import Blueprint, render_template, request, redirect, url_for, abort,
 from app import mongo
 from app.services.logic import (
     PipelineStepError,
+    get_health_status,
+    get_readiness_status,
     generate_context_prompt,
     run_with_agent,
     load_questions,
@@ -24,6 +26,20 @@ def _pipeline_flash_message(result: dict) -> str:
     stage = result.get("stage", "pipeline")
     message = result.get("message") or result.get("error") or "Policy pipeline failed."
     return f"{stage}: {message}"
+
+
+@main.route("/health")
+def health():
+    """Expose a lightweight liveness probe."""
+    return jsonify(get_health_status())
+
+
+@main.route("/ready")
+def ready():
+    """Expose a minimal readiness probe for config and Mongo."""
+    payload = get_readiness_status()
+    status_code = 200 if payload.get("status") == "ready" else 503
+    return jsonify(payload), status_code
 
 @main.route("/")
 def index():

@@ -1,7 +1,12 @@
 """RAG role processor that enriches prompts with vector context."""
 
+import logging
+
 from app.agents.vector.factory import get_vector_clients
 from flask import current_app
+from app.observability import log_event
+
+logger = logging.getLogger(__name__)
 
 class RAGProcessor:
     """Apply retrieval-augmented generation over configured vector backends."""
@@ -36,14 +41,27 @@ class RAGProcessor:
         """Return prompt enriched with retrieved context from all clients."""
         results = []
         for client in self.vector_clients:
-            
             if current_app.config["DEBUG"]:
-                print(f"[DEBUG] Client: {client}, type: {type(client)}, callable search: {hasattr(client, 'search')}")
-                print(f"[DEBUG] Query: {query}")
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="policy.rag.search_started",
+                    stage="policy_generation",
+                    client_type=type(client).__name__,
+                    query_length=len(query),
+                    top_k=top_k,
+                )
                 
             documents = client.search(query, top_k=top_k)
             results.extend(documents)
 
+        log_event(
+            logger,
+            logging.INFO,
+            event="policy.rag.search_completed",
+            stage="policy_generation",
+            result_count=len(results),
+        )
         if not results:
             return f"{query}\n\nNo relevant context found."
 
