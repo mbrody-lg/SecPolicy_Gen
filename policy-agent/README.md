@@ -38,6 +38,10 @@ CHROMA_PORT=8000
 FLASK_SECRET_KEY=your-secret-key-here
 FLASK_ENV=development
 CONFIG_PATH=config/policy-agent.yaml
+MAX_CONTENT_LENGTH=262144
+SESSION_COOKIE_SECURE=false
+TRUSTED_HOSTS=localhost,policy-agent
+POLICY_AGENT_ALLOW_MODEL_DOWNLOAD=0
 ```
 
 ## Running the Service
