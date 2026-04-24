@@ -5,10 +5,11 @@ import os
 from datetime import datetime, timezone
 
 import yaml
-from flask import current_app, has_request_context, request
+from flask import current_app
 
-from app import mongo
+from app import CORRELATION_ID_HEADER, get_request_correlation_id, mongo
 from app.agents.factory import create_agent_from_config
+from app.observability import build_log_event, log_event
 
 
 POLICY_GENERATION_REQUIRED_FIELDS = ["context_id", "refined_prompt", "language", "model_version"]
@@ -34,6 +35,7 @@ MAX_FEEDBACK_ITEMS = 20
 MAX_FEEDBACK_ITEM_LENGTH = 1000
 
 logger = logging.getLogger(__name__)
+SERVICE_NAME = "policy-agent"
 
 
 class PipelineStepError(Exception):
@@ -97,10 +99,39 @@ def _pipeline_error(exc: PipelineStepError) -> dict:
 
 
 def _get_correlation_id(payload: dict | None) -> str | None:
-    header_correlation_id = request.headers.get("X-Correlation-ID") if has_request_context() else None
+    header_correlation_id = get_request_correlation_id()
     if not isinstance(payload, dict):
         return header_correlation_id
     return header_correlation_id or payload.get("correlation_id") or payload.get("context_id")
+
+
+def _apply_correlation_id_to_agent(agent, correlation_id: str | None) -> None:
+    """Attach request correlation headers to outbound OpenAI SDK calls when supported."""
+    if not correlation_id:
+        return
+
+    openai_wrapper = getattr(agent, "client", None)
+    sdk_client = getattr(openai_wrapper, "client", None)
+    if sdk_client is None:
+        return
+
+    header_value = {CORRELATION_ID_HEADER: correlation_id}
+    with_options = getattr(sdk_client, "with_options", None)
+    if callable(with_options):
+        configured_client = with_options(default_headers=header_value)
+        openai_wrapper.client = configured_client
+        if hasattr(openai_wrapper, "chat"):
+            openai_wrapper.chat = configured_client.chat
+        return
+
+    existing_headers = getattr(sdk_client, "_default_headers", None)
+    if isinstance(existing_headers, dict):
+        sdk_client._default_headers = existing_headers | header_value
+        return
+
+    existing_headers = getattr(sdk_client, "default_headers", None)
+    if isinstance(existing_headers, dict):
+        sdk_client.default_headers = existing_headers | header_value
 
 
 def _ensure_payload_object(payload: dict | None, correlation_id: str | None) -> dict:
@@ -249,6 +280,134 @@ def load_policy_config() -> dict:
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
     with open(config_path, "r", encoding="utf-8") as config_file:
         return yaml.safe_load(config_file)
+
+
+def get_health_status() -> dict:
+    """Return a lightweight liveness payload without touching external services."""
+    return {
+        "status": "ok",
+        "service": SERVICE_NAME,
+    }
+
+
+def _collect_chroma_vector_entries(config: dict) -> list[dict]:
+    """Extract configured Chroma vector entries from role definitions."""
+    entries: list[dict] = []
+    roles = config.get("roles", [])
+    if not isinstance(roles, list):
+        return entries
+
+    for role in roles:
+        if not isinstance(role, dict):
+            continue
+        vector_entries = role.get("vector", [])
+        if not isinstance(vector_entries, list):
+            continue
+        for vector_entry in vector_entries:
+            if not isinstance(vector_entry, dict):
+                continue
+            chroma_entry = vector_entry.get("chroma")
+            if isinstance(chroma_entry, dict):
+                entries.append(chroma_entry)
+
+    return entries
+
+
+def _validate_readiness_config(config: dict) -> None:
+    """Validate the minimal configuration shape required for safe startup."""
+    if not isinstance(config, dict):
+        raise ValueError("Configuration root must be a mapping.")
+
+    missing_keys = [key for key in ("type", "name", "model", "roles") if key not in config]
+    if missing_keys:
+        raise ValueError(f"Configuration missing required keys: {', '.join(missing_keys)}")
+
+    if not isinstance(config.get("roles"), list):
+        raise ValueError("Configuration field 'roles' must be a list.")
+
+
+def get_readiness_status() -> tuple[dict, int]:
+    """Run minimal safe readiness checks for config and critical dependencies."""
+    checks: dict[str, dict] = {}
+    ready = True
+    config = None
+
+    config_path = current_app.config["CONFIG_PATH"]
+    try:
+        config = load_policy_config()
+        _validate_readiness_config(config)
+        checks["config"] = {
+            "status": "ok",
+            "source": "loaded",
+        }
+    except FileNotFoundError:
+        ready = False
+        checks["config"] = {
+            "status": "error",
+            "reason": "not_found",
+        }
+    except yaml.YAMLError:
+        ready = False
+        checks["config"] = {
+            "status": "error",
+            "reason": "invalid_yaml",
+        }
+    except Exception:
+        ready = False
+        checks["config"] = {
+            "status": "error",
+            "reason": "invalid_config",
+        }
+
+    try:
+        mongo.cx.admin.command("ping")
+        checks["mongo"] = {"status": "ok"}
+    except Exception:
+        ready = False
+        checks["mongo"] = {
+            "status": "error",
+            "reason": "ping_failed",
+        }
+
+    chroma_entries = _collect_chroma_vector_entries(config or {})
+    if chroma_entries:
+        chroma_port = os.getenv("CHROMA_PORT", "8000")
+        try:
+            chroma_port_value = int(chroma_port)
+            first_entry = chroma_entries[0]
+            collections = first_entry.get("collection", [])
+            if not isinstance(collections, list) or not collections:
+                raise ValueError("Configured Chroma collections must be a non-empty list.")
+            checks["chroma"] = {
+                "status": "configured",
+                "mode": "config_only",
+                "collection_count": len(collections),
+            }
+        except Exception:
+            ready = False
+            checks["chroma"] = {
+                "status": "error",
+                "mode": "config_only",
+                "reason": "invalid_configuration",
+            }
+    else:
+        checks["chroma"] = {
+            "status": "skipped",
+            "reason": "not_configured",
+        }
+
+    if ready:
+        return {
+            "status": "ready",
+            "service": SERVICE_NAME,
+            "checks": checks,
+        }, 200
+
+    return {
+        "status": "not_ready",
+        "service": SERVICE_NAME,
+        "checks": checks,
+    }, 503
 
 
 def validate_generation_payload(payload: dict | None) -> dict:
@@ -415,12 +574,17 @@ def run_with_agent(refined_prompt: str, context_id: str, model_version: str) -> 
     _store_policy_config(model_version, config)
 
     agent = create_agent_from_config(config)
-    if current_app.config["DEBUG"]:
-        logger.info(
-            "Running policy-agent model_version=%s context_id=%s",
-            model_version,
-            context_id,
-        )
+    correlation_id = get_request_correlation_id() or context_id
+    _apply_correlation_id_to_agent(agent, correlation_id)
+    log_event(
+        logger,
+        logging.INFO,
+        event="policy.pipeline.generation_started",
+        stage="policy_generation",
+        context_id=context_id,
+        correlation_id=correlation_id,
+        model_version=model_version,
+    )
     return agent.run(prompt=refined_prompt, context_id=context_id)
 
 
@@ -428,17 +592,22 @@ def update_with_agent(prompt: str, context_id: str | None = None, model_version:
     """Run only update role pipeline to revise an existing policy text."""
     config = load_policy_config()
     agent = create_agent_from_config(config)
+    correlation_id = get_request_correlation_id() or context_id
+    _apply_correlation_id_to_agent(agent, correlation_id)
 
     last_role = [agent.roles[-1]]
     agent.roles = last_role
 
-    if current_app.config["DEBUG"]:
-        logger.info(
-            "Running policy-agent update model_version=%s context_id=%s role_count=%s",
-            model_version,
-            context_id,
-            len(last_role),
-        )
+    log_event(
+        logger,
+        logging.INFO,
+        event="policy.pipeline.update_started",
+        stage="policy_update",
+        context_id=context_id,
+        correlation_id=correlation_id,
+        model_version=model_version,
+        role_count=len(last_role),
+    )
     return agent.run(prompt, context_id)
 
 
@@ -455,9 +624,14 @@ def generate_policy_payload(payload: dict | None) -> dict:
         )
     except FileNotFoundError as exc:
         logger.exception(
-            "Policy-agent config missing for context_id=%s correlation_id=%s",
-            data["context_id"],
-            correlation_id,
+            build_log_event(
+                event="policy.pipeline.generation_failed",
+                stage="config_loading",
+                context_id=data["context_id"],
+                correlation_id=correlation_id,
+                error_code="policy_config_not_found",
+                model_version=data["model_version"],
+            )
         )
         raise PipelineStepError(
             stage="config_loading",
@@ -470,9 +644,14 @@ def generate_policy_payload(payload: dict | None) -> dict:
         ) from exc
     except yaml.YAMLError as exc:
         logger.exception(
-            "Policy-agent config invalid for context_id=%s correlation_id=%s",
-            data["context_id"],
-            correlation_id,
+            build_log_event(
+                event="policy.pipeline.generation_failed",
+                stage="config_loading",
+                context_id=data["context_id"],
+                correlation_id=correlation_id,
+                error_code="policy_config_invalid",
+                model_version=data["model_version"],
+            )
         )
         raise PipelineStepError(
             stage="config_loading",
@@ -485,9 +664,14 @@ def generate_policy_payload(payload: dict | None) -> dict:
         ) from exc
     except Exception as exc:
         logger.exception(
-            "Policy generation failed for context_id=%s correlation_id=%s",
-            data["context_id"],
-            correlation_id,
+            build_log_event(
+                event="policy.pipeline.generation_failed",
+                stage="policy_generation",
+                context_id=data["context_id"],
+                correlation_id=correlation_id,
+                error_code="policy_generation_failed",
+                model_version=data["model_version"],
+            )
         )
         raise PipelineStepError(
             stage="policy_generation",
@@ -502,6 +686,7 @@ def generate_policy_payload(payload: dict | None) -> dict:
     result = {
         "success": True,
         "context_id": data["context_id"],
+        "correlation_id": correlation_id,
         "language": data["language"],
         "policy_text": result_object["text"],
         "structured_plan": result_object.get("structured_plan", []),
@@ -517,6 +702,16 @@ def generate_policy_payload(payload: dict | None) -> dict:
         },
     }
     mongo.db.policies.insert_one(result)
+    log_event(
+        logger,
+        logging.INFO,
+        event="policy.pipeline.generation_completed",
+        stage="completed",
+        context_id=data["context_id"],
+        correlation_id=correlation_id,
+        model_version=data["model_version"],
+        lifecycle_status=result["lifecycle_status"],
+    )
     return _pipeline_success(stage="completed", policy=result)
 
 
@@ -555,9 +750,14 @@ def update_policy_payload(payload: dict | None, path_context_id: str) -> dict:
         )
     except FileNotFoundError as exc:
         logger.exception(
-            "Policy-agent config missing during update for context_id=%s correlation_id=%s",
-            path_context_id,
-            correlation_id,
+            build_log_event(
+                event="policy.pipeline.update_failed",
+                stage="config_loading",
+                context_id=str(path_context_id),
+                correlation_id=correlation_id,
+                error_code="policy_config_not_found",
+                model_version=policy.get("model_version"),
+            )
         )
         raise PipelineStepError(
             stage="config_loading",
@@ -570,9 +770,14 @@ def update_policy_payload(payload: dict | None, path_context_id: str) -> dict:
         ) from exc
     except yaml.YAMLError as exc:
         logger.exception(
-            "Policy-agent config invalid during update for context_id=%s correlation_id=%s",
-            path_context_id,
-            correlation_id,
+            build_log_event(
+                event="policy.pipeline.update_failed",
+                stage="config_loading",
+                context_id=str(path_context_id),
+                correlation_id=correlation_id,
+                error_code="policy_config_invalid",
+                model_version=policy.get("model_version"),
+            )
         )
         raise PipelineStepError(
             stage="config_loading",
@@ -585,9 +790,14 @@ def update_policy_payload(payload: dict | None, path_context_id: str) -> dict:
         ) from exc
     except Exception as exc:
         logger.exception(
-            "Policy update failed for context_id=%s correlation_id=%s",
-            path_context_id,
-            correlation_id,
+            build_log_event(
+                event="policy.pipeline.update_failed",
+                stage="policy_update",
+                context_id=str(path_context_id),
+                correlation_id=correlation_id,
+                error_code="policy_update_failed",
+                model_version=policy.get("model_version"),
+            )
         )
         raise PipelineStepError(
             stage="policy_update",
@@ -602,6 +812,7 @@ def update_policy_payload(payload: dict | None, path_context_id: str) -> dict:
     result = {
         "success": True,
         "context_id": data["context_id"],
+        "correlation_id": correlation_id,
         "language": data["language"],
         "policy_text": result_object["text"],
         "structured_plan": policy.get("structured_plan", []),
@@ -631,6 +842,7 @@ def update_policy_payload(payload: dict | None, path_context_id: str) -> dict:
                 "policy_text": result["policy_text"],
                 "structured_plan": result["structured_plan"],
                 "model_version": result["model_version"],
+                "correlation_id": result["correlation_id"],
                 "policy_agent_version": result["policy_agent_version"],
                 "generated_at": result["generated_at"],
                 "lifecycle_status": result["lifecycle_status"],
@@ -643,6 +855,17 @@ def update_policy_payload(payload: dict | None, path_context_id: str) -> dict:
         },
     )
 
+    log_event(
+        logger,
+        logging.INFO,
+        event="policy.pipeline.update_completed",
+        stage="completed",
+        context_id=data["context_id"],
+        correlation_id=correlation_id,
+        model_version=policy.get("model_version"),
+        lifecycle_status=result["lifecycle_status"],
+        revision_count=result["revision_count"],
+    )
     return _pipeline_success(stage="completed", policy=result)
 
 

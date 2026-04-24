@@ -1,5 +1,6 @@
 """Mistral-backed validator agent implementation."""
 
+import logging
 from typing import List, Dict, Optional
 
 import yaml
@@ -7,6 +8,9 @@ from flask import current_app
 
 from app.agents.base import Agent
 from app.agents.mistralai.client import MistralClient
+from app.observability import build_log_event, log_event
+
+logger = logging.getLogger(__name__)
 
 class MistralAIAgent(Agent):
     """Execute validator roles using the Mistral chat backend."""
@@ -29,9 +33,6 @@ class MistralAIAgent(Agent):
     def run(self, prompt: str, context_id: str = None, only_roles: Optional[List[Dict]] = None) -> List[Dict]:
         """Run configured roles and return parsed validation outputs."""
         selected_roles = only_roles if only_roles else self.roles
-        
-        if self.debug_mode:
-            print(f"DEBUG_SELECTED_ROLES: {selected_roles}")
 
         results = []
         
@@ -41,13 +42,17 @@ class MistralAIAgent(Agent):
             instructions = role_config.get("instructions", self.instructions)
             temperature = role_config.get("temperature", 0.7)
             max_tokens = role_config.get("max_tokens", 1000)
-            
-            if self.debug_mode:
-                print(f"[MistralAIAgent] Executing role: {role_key}\n")
-                print(f"[Prompt]\n{prompt}\n")
+            log_event(
+                logger,
+                logging.INFO,
+                event="validator.mistral.role_started",
+                stage="validation",
+                context_id=context_id,
+                role=role_key,
+                prompt_length=len(prompt),
+            )
 
             try:
-                
                 response = self.client.chat(
                     model=self.model,
                     prompt=prompt,
@@ -56,14 +61,9 @@ class MistralAIAgent(Agent):
                     max_tokens=max_tokens
                 )
 
-            
+
                 content = response.choices[0].message.content.strip()
                 parsed = self.parse_response_content(content)
-                
-                if self.debug_mode:
-                    print(f'RESPONSE: {response}')
-                    print(f"CONTENT: {content}")
-                    print(f"PARSED: {parsed}")
 
                 results.append({
                     "role": role_key,
@@ -73,12 +73,16 @@ class MistralAIAgent(Agent):
                     "recommendations": parsed["recommendations"]
                 })
             
-            except Exception as e:
-                if self.debug_mode:
-                    print(f"[LOGGING ERROR] {str(e)}")
-                    print(f'"role": {role_key},"status": {parsed["status"]},"text": {content},"reason": {parsed["reason"]},"recommendations": {parsed["recommendations"]}')
-
-        if self.debug_mode:
-            print(f"RESULTS: {results}")
+            except Exception as error:
+                logger.warning(
+                    build_log_event(
+                        event="validator.mistral.role_failed",
+                        stage="validation",
+                        context_id=context_id,
+                        role=role_key,
+                        error_type=error.__class__.__name__,
+                    ),
+                    exc_info=error,
+                )
 
         return results

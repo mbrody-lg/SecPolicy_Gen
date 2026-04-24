@@ -2,10 +2,28 @@
 
 from flask import Blueprint, jsonify, request
 
-from app.services.logic import run_generation_pipeline, run_policy_update_pipeline
+from app.services.logic import (
+    get_health_status,
+    get_readiness_status,
+    run_generation_pipeline,
+    run_policy_update_pipeline,
+)
 
 
 routes = Blueprint("routes", __name__)
+
+
+@routes.route("/health", methods=["GET"])
+def health():
+    """Return a lightweight liveness signal for the policy-agent service."""
+    return jsonify(get_health_status()), 200
+
+
+@routes.route("/ready", methods=["GET"])
+def ready():
+    """Return readiness based on minimal safe dependency and config checks."""
+    payload, status_code = get_readiness_status()
+    return jsonify(payload), status_code
 
 
 @routes.route("/generate_policy", methods=["POST"])

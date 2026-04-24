@@ -22,11 +22,38 @@ class FakeCollection:
         self.docs.append(document)
         return SimpleNamespace(inserted_id=document.get("_id"))
 
+    def update_one(self, query, update, upsert=False):
+        target = self.find_one(query)
+        if target is None:
+            if not upsert:
+                return SimpleNamespace(matched_count=0, modified_count=0)
+            target = {}
+            self.docs.append(target)
+
+        conflicting_paths = set(update.get("$setOnInsert", {})).intersection(update.get("$set", {}))
+        if conflicting_paths:
+            raise ValueError(f"conflicting update paths: {sorted(conflicting_paths)}")
+
+        for key, value in update.get("$setOnInsert", {}).items():
+            target.setdefault(key, value)
+        for key, value in update.get("$set", {}).items():
+            target[key] = value
+        for key, value in update.get("$push", {}).items():
+            target.setdefault(key, [])
+            if isinstance(value, dict) and "$each" in value:
+                target[key].extend(value["$each"])
+                if "$slice" in value:
+                    target[key] = target[key][value["$slice"]:]
+            else:
+                target[key].append(value)
+        return SimpleNamespace(matched_count=1, modified_count=1)
+
 
 class FakeDB:
-    def __init__(self, contexts=None, interactions=None):
+    def __init__(self, contexts=None, interactions=None, pipeline_diagnostics=None):
         self.contexts = FakeCollection(contexts)
         self.interactions = FakeCollection(interactions)
+        self.pipeline_diagnostics = FakeCollection(pipeline_diagnostics)
 
 
 class FakeResponse:
@@ -107,6 +134,89 @@ def test_get_context_and_prompt_normalizes_numeric_model_version(monkeypatch):
     payload = logic.get_context_and_prompt(str(context_id))
 
     assert payload["model_version"] == "1"
+
+
+def test_get_health_status_returns_static_liveness_payload():
+    assert logic.get_health_status() == {
+        "status": "ok",
+        "service": "context-agent",
+    }
+
+
+def test_get_readiness_status_returns_ready_when_config_and_mongo_are_ok(app_context, monkeypatch):
+    ping_calls = []
+
+    def fake_ping(command_name):
+        ping_calls.append(command_name)
+        return {"ok": 1}
+
+    monkeypatch.setattr(
+        logic.mongo,
+        "cx",
+        SimpleNamespace(admin=SimpleNamespace(command=fake_ping)),
+        raising=False,
+    )
+    logic.current_app.config["SECRET_KEY"] = "configured-test-secret"
+    logic.current_app.config["MONGO_URI"] = "mongodb://mongo:27017/context-testdb"
+
+    result = logic.get_readiness_status()
+
+    assert result == {
+        "status": "ready",
+        "service": "context-agent",
+        "checks": {
+            "config": {"status": "ok", "missing": []},
+            "mongo": {"status": "ok"},
+        },
+    }
+    assert ping_calls == ["ping"]
+
+
+def test_get_readiness_status_reports_missing_config_without_hiding_mongo_state(app_context, monkeypatch):
+    monkeypatch.setattr(
+        logic.mongo,
+        "cx",
+        SimpleNamespace(admin=SimpleNamespace(command=lambda command_name: {"ok": 1})),
+        raising=False,
+    )
+    logic.current_app.config["SECRET_KEY"] = ""
+    logic.current_app.config["MONGO_URI"] = ""
+
+    result = logic.get_readiness_status()
+
+    assert result == {
+        "status": "not_ready",
+        "service": "context-agent",
+        "checks": {
+            "config": {"status": "error", "missing": ["MONGO_URI", "SECRET_KEY"]},
+            "mongo": {"status": "ok"},
+        },
+    }
+
+
+def test_get_readiness_status_reports_mongo_failure(app_context, monkeypatch):
+    def failing_ping(command_name):
+        raise RuntimeError(f"{command_name} failed")
+
+    monkeypatch.setattr(
+        logic.mongo,
+        "cx",
+        SimpleNamespace(admin=SimpleNamespace(command=failing_ping)),
+        raising=False,
+    )
+    logic.current_app.config["SECRET_KEY"] = "configured-test-secret"
+    logic.current_app.config["MONGO_URI"] = "mongodb://mongo:27017/context-testdb"
+
+    result = logic.get_readiness_status()
+
+    assert result == {
+        "status": "not_ready",
+        "service": "context-agent",
+        "checks": {
+            "config": {"status": "ok", "missing": []},
+            "mongo": {"status": "error", "reason": "ping_failed"},
+        },
+    }
 
 
 def test_store_validated_policy_inserts_agent_interaction(monkeypatch):
@@ -213,6 +323,10 @@ def test_generate_full_policy_pipeline_stores_validated_policy_without_internal_
     assert result["persistence"]["stage"] == "persistence"
     assert len(fake_db.interactions.docs) == 1
     assert fake_db.interactions.docs[0]["answer"] == "Validated policy text"
+    assert len(fake_db.pipeline_diagnostics.docs) == 1
+    assert fake_db.pipeline_diagnostics.docs[0]["context_id"] == str(context_id)
+    assert fake_db.pipeline_diagnostics.docs[0]["status"] == "completed"
+    assert fake_db.pipeline_diagnostics.docs[0]["hops"][-1]["outcome"] == "success"
 
 
 def test_generate_full_policy_pipeline_returns_structured_stage_error(monkeypatch):
@@ -371,3 +485,127 @@ def test_call_validator_agent_surfaces_dependency_error_metadata(app_context, mo
         "dependency_error_code": "policy_update_request_failed",
         "dependency_correlation_id": "validator-corr",
     }
+
+
+def test_get_context_and_prompt_uses_request_correlation_id(monkeypatch, app):
+    context_id = ObjectId()
+    fake_db = FakeDB(
+        contexts=[{"_id": context_id, "refined_prompt": "prompt", "language": "en", "version": "0.2.0"}],
+        interactions=[],
+    )
+
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    with app.test_request_context("/", headers={"X-Correlation-ID": "corr-request"}):
+        app.preprocess_request()
+        payload = logic.get_context_and_prompt(str(context_id))
+
+    assert payload["correlation_id"] == "corr-request"
+
+
+def test_call_policy_agent_prefers_request_correlation_id_over_payload(app, monkeypatch):
+    captured = {}
+
+    def fake_post(url, json, headers, timeout):
+        captured["headers"] = headers
+        return FakeResponse({"success": True, "policy_text": "generated"})
+
+    monkeypatch.setattr(logic.requests, "post", fake_post)
+
+    with app.test_request_context("/", headers={"X-Correlation-ID": "corr-request"}):
+        app.preprocess_request()
+        result = logic.call_policy_agent(
+            {
+                "context_id": "ctx-1",
+                "correlation_id": "corr-payload",
+                "refined_prompt": "prompt",
+                "language": "en",
+                "model_version": "0.1.0",
+            }
+        )
+
+    assert result == {"success": True, "policy_text": "generated"}
+    assert captured["headers"] == {"X-Correlation-ID": "corr-request"}
+
+
+def test_call_policy_agent_emits_structured_logs(app_context, monkeypatch, caplog):
+    def fake_post(url, json, headers, timeout):
+        return FakeResponse({"success": True}, status_code=200)
+
+    monkeypatch.setattr(logic.requests, "post", fake_post)
+
+    with caplog.at_level("INFO"):
+        result = logic.call_policy_agent(
+            {
+                "context_id": "ctx-log",
+                "refined_prompt": "prompt",
+                "language": "en",
+                "model_version": "0.1.0",
+            }
+        )
+
+    assert result == {"success": True}
+    assert '"event": "context.policy.request"' in caplog.text
+    assert '"event": "context.policy.response"' in caplog.text
+    assert '"context_id": "ctx-log"' in caplog.text
+
+
+def test_get_pipeline_diagnostic_returns_serialized_document(monkeypatch):
+    fake_db = FakeDB(
+        pipeline_diagnostics=[
+            {
+                "_id": ObjectId(),
+                "correlation_id": "corr-1",
+                "context_id": "ctx-1",
+                "status": "completed",
+                "hops": [],
+            }
+        ]
+    )
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    result = logic.get_pipeline_diagnostic("corr-1")
+
+    assert result["correlation_id"] == "corr-1"
+    assert result["_id"]
+
+
+def test_upsert_pipeline_diagnostic_bounds_hop_history(monkeypatch):
+    fake_db = FakeDB()
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    for index in range(logic.MAX_PIPELINE_DIAGNOSTIC_HOPS + 5):
+        logic._upsert_pipeline_diagnostic(  # noqa: SLF001 - direct helper coverage
+            correlation_id="corr-bounded",
+            context_id="ctx-bounded",
+            status="in_progress",
+            hop={
+                "service": "context-agent",
+                "stage": "pipeline",
+                "operation": f"step-{index}",
+                "outcome": "success",
+            },
+        )
+
+    diagnostic = fake_db.pipeline_diagnostics.find_one({"correlation_id": "corr-bounded"})
+
+    assert len(diagnostic["hops"]) == logic.MAX_PIPELINE_DIAGNOSTIC_HOPS
+    assert diagnostic["hops"][0]["operation"] == "step-5"
+    assert diagnostic["hops"][-1]["operation"] == f"step-{logic.MAX_PIPELINE_DIAGNOSTIC_HOPS + 4}"
+
+
+def test_pipeline_error_adds_request_correlation_id_when_exception_lacks_one(app, monkeypatch):
+    with app.test_request_context("/", headers={"X-Correlation-ID": "corr-request"}):
+        app.preprocess_request()
+        result = logic._pipeline_error(  # noqa: SLF001 - direct helper coverage
+            logic.PipelineStepError(
+                stage="pipeline",
+                message="failed",
+                error_type="internal_error",
+                error_code="unexpected_failure",
+                status_code=500,
+                details={},
+            )
+        )
+
+    assert result["correlation_id"] == "corr-request"

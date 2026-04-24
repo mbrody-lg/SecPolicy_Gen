@@ -1,11 +1,13 @@
 """Helpers to cache, download, and load sentence-transformer models securely."""
 
+import logging
 import os
 from pathlib import Path
 from typing import Iterable
 
 from huggingface_hub import snapshot_download
 from huggingface_hub.utils import RepositoryNotFoundError, RevisionNotFoundError
+from app.observability import log_event
 
 SAFE_HUB_FILE_PATTERNS = [
     "*.json",
@@ -31,6 +33,7 @@ UNSAFE_MODEL_FILE_PATTERNS = [
     "flax_model.msgpack",
     "pytorch_model.bin",
 ]
+logger = logging.getLogger(__name__)
 
 
 def _allow_model_download() -> bool:
@@ -67,7 +70,14 @@ def download_model_if_needed(model_id: str, revision: str | None = None):
                 "The model is not cached locally. Preload it with scripts/index_pdfs_to_chroma.py "
                 "or set POLICY_AGENT_ALLOW_MODEL_DOWNLOAD=1 for an explicit one-time download."
             )
-        print(f"Model '{model_id}' not found locally. Downloading...")
+        log_event(
+            logger,
+            logging.INFO,
+            event="policy.model.download_started",
+            stage="model_loading",
+            model_id=model_id,
+            revision=revision,
+        )
         try:
             snapshot_download(
                 repo_id=model_id,
@@ -75,7 +85,14 @@ def download_model_if_needed(model_id: str, revision: str | None = None):
                 allow_patterns=SAFE_HUB_FILE_PATTERNS,
                 ignore_patterns=UNSAFE_MODEL_FILE_PATTERNS,
             )
-            print("Model downloaded successfully.")
+            log_event(
+                logger,
+                logging.INFO,
+                event="policy.model.download_completed",
+                stage="model_loading",
+                model_id=model_id,
+                revision=revision,
+            )
         except (RepositoryNotFoundError, RevisionNotFoundError) as error:
             raise RuntimeError(
                 f"Could not download model. '{model_id}': {error}"

@@ -8,6 +8,9 @@ from flask import Blueprint, render_template, request, redirect, url_for, abort,
 from app import mongo
 from app.services.logic import (
     PipelineStepError,
+    get_health_status,
+    get_pipeline_diagnostic,
+    get_readiness_status,
     generate_context_prompt,
     run_with_agent,
     load_questions,
@@ -24,6 +27,20 @@ def _pipeline_flash_message(result: dict) -> str:
     stage = result.get("stage", "pipeline")
     message = result.get("message") or result.get("error") or "Policy pipeline failed."
     return f"{stage}: {message}"
+
+
+@main.route("/health")
+def health():
+    """Expose a lightweight liveness probe."""
+    return jsonify(get_health_status())
+
+
+@main.route("/ready")
+def ready():
+    """Expose a minimal readiness probe for config and Mongo."""
+    payload = get_readiness_status()
+    status_code = 200 if payload.get("status") == "ready" else 503
+    return jsonify(payload), status_code
 
 @main.route("/")
 def index():
@@ -285,3 +302,19 @@ def trigger_policy_generation(context_id):
     else:
         flash(_pipeline_flash_message(result), "danger")
     return redirect(url_for("main.context_detail", context_id=context_id))
+
+
+@main.route("/diagnostics/<correlation_id>", methods=["GET"])
+def get_diagnostics(correlation_id):
+    """Return a bounded pipeline diagnostic document by correlation id."""
+    diagnostic = get_pipeline_diagnostic(correlation_id)
+    if not diagnostic:
+        return jsonify({
+            "success": False,
+            "error_type": "validation_error",
+            "error_code": "diagnostic_not_found",
+            "message": "Pipeline diagnostic not found.",
+            "details": {"correlation_id": correlation_id},
+            "correlation_id": correlation_id,
+        }), 404
+    return jsonify(diagnostic), 200

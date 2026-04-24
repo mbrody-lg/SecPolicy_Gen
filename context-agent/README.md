@@ -58,11 +58,28 @@ python run.py
 
 The service runs on `http://localhost:5000`
 
-Outbound calls to `policy-agent` and `validator-agent` now use configurable request timeouts and
-propagate `X-Correlation-ID` when present, so dependency failures stay easier to trace across the
-pipeline.
+Each request now has a stable correlation boundary:
+- inbound `X-Correlation-ID` is preserved when present and valid
+- unsafe or oversized inbound correlation ids are replaced with a generated value
+- a new correlation id is generated when absent
+- the value is always returned in the response header as `X-Correlation-ID`
+- outbound calls to `policy-agent` and `validator-agent` reuse that same value
+- JSON error payloads keep their `correlation_id` aligned with the response header
 
 ## API Endpoints
+
+### Health Checks
+```
+GET /health
+GET /ready
+GET /diagnostics/<correlation_id>
+```
+
+`/health` is a lightweight liveness probe that does not touch external dependencies.
+
+`/ready` performs minimal readiness checks for essential runtime configuration and MongoDB connectivity. It returns `200` when the service is ready and `503` when a required dependency or configuration is not available.
+
+`/diagnostics/<correlation_id>` returns the bounded pipeline diagnostic view for the critical Context -> Policy -> Validator loop. Use it together with `X-Correlation-ID` and `make logs` when triaging smoke or runtime failures.
 
 ### Create a New Context
 ```
@@ -159,6 +176,8 @@ make context-tests
 ```
 
 For the service-specific workflow guidance, see [docs/playbooks/context-agent.md](../docs/playbooks/context-agent.md).
+
+For the cross-service observability workflow, see [docs/playbooks/context-policy-validator-loop.md](../docs/playbooks/context-policy-validator-loop.md).
 
 ## Development
 

@@ -2,11 +2,15 @@
 
 import logging
 import os
+from pathlib import Path
 
 import requests
-from flask import current_app, has_app_context, has_request_context, request
+from flask import current_app, g, has_app_context, has_request_context, request
+import yaml
 
 from app.agents.roles.coordinator import Coordinator
+from app import mongo
+from app.observability import build_log_event, log_event
 
 
 POLICY_UPDATE_REQUIRED_FIELDS = [
@@ -26,6 +30,55 @@ MAX_LANGUAGE_LENGTH = 16
 MAX_POLICY_TEXT_LENGTH = 50000
 MAX_POLICY_AGENT_VERSION_LENGTH = 64
 MAX_GENERATED_AT_LENGTH = 64
+
+
+def get_health_status() -> dict:
+    """Return a lightweight liveness payload for validator-agent."""
+    return {
+        "status": "ok",
+        "service": "validator-agent",
+    }
+
+
+def get_readiness_status() -> dict:
+    """Validate the minimum dependencies needed to serve validator requests."""
+    checks = {}
+    errors = []
+
+    try:
+        mongo.db.command("ping")
+        checks["mongo"] = "ok"
+    except Exception:  # pragma: no cover - pymongo-specific failure shapes
+        logger.exception("Validator readiness failed while checking mongo.")
+        checks["mongo"] = "error"
+        errors.append("mongo_unavailable")
+
+    config_path = current_app.config.get("CONFIG_PATH", "")
+    try:
+        if not config_path or not Path(config_path).exists():
+            raise FileNotFoundError(config_path)
+        with open(config_path, "r", encoding="utf-8") as config_file:
+            yaml.safe_load(config_file)
+        checks["config"] = "ok"
+    except Exception:
+        logger.exception("Validator readiness failed while loading config path=%s", config_path)
+        checks["config"] = "error"
+        errors.append("config_unavailable")
+
+    if errors:
+        return _error_payload(
+            error_type="dependency_error",
+            error_code="service_not_ready",
+            message="Validator-agent readiness checks failed.",
+            details={"checks": checks, "errors": errors},
+        ) | {"status_code": 503}
+
+    return {
+        "success": True,
+        "status": "ready",
+        "service": "validator-agent",
+        "checks": checks,
+    }
 
 
 def _error_payload(
@@ -73,10 +126,11 @@ class PipelineStepError(Exception):
 
 
 def _get_correlation_id(payload: dict | None) -> str | None:
+    request_correlation_id = getattr(g, "correlation_id", None) if has_request_context() else None
     header_correlation_id = request.headers.get("X-Correlation-ID") if has_request_context() else None
     if not isinstance(payload, dict):
-        return header_correlation_id
-    return header_correlation_id or payload.get("correlation_id") or payload.get("context_id")
+        return request_correlation_id or header_correlation_id
+    return request_correlation_id or header_correlation_id or payload.get("correlation_id") or payload.get("context_id")
 
 
 def _dependency_headers(correlation_id: str | None) -> dict:
@@ -205,6 +259,14 @@ def validate_policy_payload(payload: dict | None) -> dict:
     """Validate request contract, run coordinator orchestration, and normalize response."""
     correlation_id = _get_correlation_id(payload)
     data = _ensure_payload_object(payload, correlation_id)
+    log_event(
+        logger,
+        logging.INFO,
+        event="validator.pipeline.started",
+        stage="validation",
+        context_id=data.get("context_id"),
+        correlation_id=correlation_id,
+    )
     missing = [field for field in VALIDATION_REQUIRED_FIELDS if field not in data]
     if missing:
         raise PipelineStepError(
@@ -261,7 +323,15 @@ def validate_policy_payload(payload: dict | None) -> dict:
     except PipelineStepError:
         raise
     except Exception as exc:
-        logger.exception("Validator execution failed for context_id=%s", normalized_payload.get("context_id"))
+        logger.exception(
+            build_log_event(
+                event="validator.pipeline.failed",
+                stage="validation",
+                context_id=normalized_payload.get("context_id"),
+                correlation_id=correlation_id,
+                error_code="validation_execution_failed",
+            )
+        )
         raise PipelineStepError(
             stage="validation",
             message="Validator execution failed.",
@@ -301,6 +371,16 @@ def validate_policy_payload(payload: dict | None) -> dict:
     if "evaluator_analysis" in validation_result:
         response["evaluator_analysis"] = validation_result["evaluator_analysis"]
 
+    log_event(
+        logger,
+        logging.INFO,
+        event="validator.pipeline.completed",
+        stage="completed",
+        context_id=normalized_payload["context_id"],
+        correlation_id=correlation_id,
+        result="success",
+        validation_status=response["status"],
+    )
     return _pipeline_success(stage="completed", validation=response)
 
 
@@ -342,6 +422,17 @@ def send_policy_update_to_policy_agent(
     }
     correlation_id = _get_correlation_id(payload)
     timeout_seconds = _dependency_timeout("POLICY_AGENT_TIMEOUT_SECONDS")
+    log_event(
+        logger,
+        logging.INFO,
+        event="validator.policy_update.request",
+        stage="policy_update",
+        context_id=context_id,
+        correlation_id=correlation_id,
+        target_service="policy-agent",
+        operation="generate_policy_update",
+        timeout_seconds=timeout_seconds,
+    )
 
     try:
         response = requests.post(
@@ -351,13 +442,33 @@ def send_policy_update_to_policy_agent(
             timeout=timeout_seconds,
         )
         response.raise_for_status()
+        log_event(
+            logger,
+            logging.INFO,
+            event="validator.policy_update.response",
+            stage="policy_update",
+            context_id=context_id,
+            correlation_id=correlation_id,
+            target_service="policy-agent",
+            operation="generate_policy_update",
+            status_code=response.status_code,
+            result="success",
+        )
         return response.json()
     except requests.exceptions.RequestException as exc:
         response = exc.response if isinstance(exc, requests.exceptions.HTTPError) else None
         logger.warning(
-            "Policy update request failed for context_id=%s target=%s",
-            context_id,
-            update_endpoint,
+            build_log_event(
+                event="validator.policy_update.response",
+                stage="policy_update",
+                context_id=context_id,
+                correlation_id=correlation_id,
+                target_service="policy-agent",
+                operation="generate_policy_update",
+                status_code=response.status_code if response is not None else None,
+                result="failure",
+                target=update_endpoint,
+            ),
             exc_info=exc,
         )
         return _error_payload(

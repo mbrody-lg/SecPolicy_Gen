@@ -2,9 +2,70 @@ import json
 from unittest.mock import patch
 
 import pytest
+from flask import g
 from app.routes import routes as routes_module
 
 pytestmark = [pytest.mark.route]
+
+
+def test_health_route_returns_lightweight_service_status(client):
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "status": "ok",
+        "service": "policy-agent",
+    }
+
+
+def test_ready_route_reports_success(client):
+    with patch(
+        "app.routes.routes.get_readiness_status",
+        return_value=(
+            {
+                "status": "ready",
+                "service": "policy-agent",
+                "checks": {
+                    "config": {"status": "ok", "source": "loaded"},
+                    "mongo": {"status": "ok"},
+                    "chroma": {"status": "configured", "mode": "config_only"},
+                },
+            },
+            200,
+        ),
+    ):
+        response = client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "ready"
+    assert response.get_json()["checks"]["mongo"] == {"status": "ok"}
+
+
+def test_ready_route_reports_controlled_failure(client):
+    with patch(
+        "app.routes.routes.get_readiness_status",
+        return_value=(
+            {
+                "status": "not_ready",
+                "service": "policy-agent",
+                "checks": {
+                    "config": {"status": "ok", "source": "loaded"},
+                    "mongo": {
+                        "status": "error",
+                        "reason": "ping_failed",
+                    },
+                    "chroma": {"status": "configured", "mode": "config_only"},
+                },
+            },
+            503,
+        ),
+    ):
+        response = client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.get_json()["status"] == "not_ready"
+    assert response.get_json()["checks"]["mongo"]["reason"] == "ping_failed"
+    assert "details" not in response.get_json()["checks"]["mongo"]
 
 
 def test_generate_policy_route_rejects_missing_required_fields(client):
@@ -188,3 +249,57 @@ def test_generate_policy_route_adds_security_headers(client):
     assert response.status_code == 400
     assert response.headers["X-Content-Type-Options"] == "nosniff"
     assert response.headers["Cache-Control"] == "no-store"
+
+
+def test_generate_policy_route_preserves_request_correlation_id(client):
+    captured = {}
+
+    def fake_run_generation_pipeline(payload):
+        captured["correlation_id"] = g.correlation_id
+        return {
+            "success": False,
+            "error_type": "contract_error",
+            "error_code": "invalid_json_body",
+            "message": "Request body must be a JSON object.",
+            "details": {"stage": "contract_validation", "expected_type": "object"},
+            "status_code": 400,
+        }
+
+    with patch("app.routes.routes.run_generation_pipeline", side_effect=fake_run_generation_pipeline):
+        response = client.post(
+            "/generate_policy",
+            data="[]",
+            content_type="application/json",
+            headers={"X-Correlation-ID": "request-correlation-id"},
+        )
+
+    assert captured["correlation_id"] == "request-correlation-id"
+    assert response.headers["X-Correlation-ID"] == "request-correlation-id"
+    assert response.get_json()["correlation_id"] == "request-correlation-id"
+
+
+def test_generate_policy_route_generates_request_correlation_id_when_missing(client):
+    captured = {}
+
+    def fake_run_generation_pipeline(payload):
+        captured["correlation_id"] = g.correlation_id
+        return {
+            "success": False,
+            "error_type": "contract_error",
+            "error_code": "invalid_json_body",
+            "message": "Request body must be a JSON object.",
+            "details": {"stage": "contract_validation", "expected_type": "object"},
+            "status_code": 400,
+        }
+
+    with patch("app.routes.routes.run_generation_pipeline", side_effect=fake_run_generation_pipeline):
+        response = client.post(
+            "/generate_policy",
+            data="[]",
+            content_type="application/json",
+        )
+
+    correlation_id = response.headers["X-Correlation-ID"]
+    assert correlation_id
+    assert captured["correlation_id"] == correlation_id
+    assert response.get_json()["correlation_id"] == correlation_id

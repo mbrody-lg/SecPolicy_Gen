@@ -1,4 +1,5 @@
 from bson import ObjectId
+from uuid import UUID
 
 from test_base import *
 import app.routes.routes as routes_module
@@ -41,6 +42,64 @@ def test_create_route_get(client):
     assert b"Create a new context" in response.data
 
 
+def test_health_route_returns_lightweight_ok_payload(client):
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "status": "ok",
+        "service": "context-agent",
+    }
+
+
+def test_ready_route_returns_ok_when_service_is_ready(client, monkeypatch):
+    monkeypatch.setattr(
+        routes_module,
+        "get_readiness_status",
+        lambda: {
+            "status": "ready",
+            "service": "context-agent",
+            "checks": {
+                "config": {"status": "ok", "missing": []},
+                "mongo": {"status": "ok"},
+            },
+        },
+    )
+
+    response = client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "ready"
+    assert response.get_json()["checks"]["mongo"]["status"] == "ok"
+
+
+def test_ready_route_returns_503_when_service_is_not_ready(client, monkeypatch):
+    monkeypatch.setattr(
+        routes_module,
+        "get_readiness_status",
+        lambda: {
+            "status": "not_ready",
+            "service": "context-agent",
+            "checks": {
+                "config": {"status": "error", "missing": ["MONGO_URI"]},
+                "mongo": {"status": "error", "message": "mongo unavailable"},
+            },
+        },
+    )
+
+    response = client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.get_json() == {
+        "status": "not_ready",
+        "service": "context-agent",
+        "checks": {
+            "config": {"status": "error", "missing": ["MONGO_URI"]},
+            "mongo": {"status": "error", "message": "mongo unavailable"},
+        },
+    }
+
+
 def test_send_policy_to_context_returns_400_when_required_fields_missing(client):
     context_id = str(ObjectId())
 
@@ -59,8 +118,23 @@ def test_send_policy_to_context_returns_400_when_required_fields_missing(client)
             "context_id": context_id,
             "missing_fields": ["generated_at", "policy_agent_version", "language"],
         },
-        "correlation_id": context_id,
+        "correlation_id": response.headers["X-Correlation-ID"],
     }
+    UUID(response.headers["X-Correlation-ID"])
+
+
+def test_send_policy_to_context_preserves_inbound_correlation_id_in_error_body_and_header(client):
+    context_id = str(ObjectId())
+
+    response = client.post(
+        f"/context/{context_id}/policy",
+        json={"policy_text": "Validated policy text"},
+        headers={"X-Correlation-ID": "corr-inbound"},
+    )
+
+    assert response.status_code == 400
+    assert response.headers["X-Correlation-ID"] == "corr-inbound"
+    assert response.get_json()["correlation_id"] == "corr-inbound"
 
 
 def test_send_policy_to_context_redirects_after_storage(client, monkeypatch):
@@ -86,6 +160,7 @@ def test_send_policy_to_context_redirects_after_storage(client, monkeypatch):
 
     assert response.status_code == 302
     assert response.headers["Location"].endswith(f"/context/{context_id}")
+    assert response.headers["X-Correlation-ID"]
     assert captured == {"context_id": context_id, "payload": payload}
 
 
@@ -127,6 +202,34 @@ def test_trigger_policy_generation_redirects_with_stage_flash_on_failure(client,
     assert ("danger", "validation: Policy validation failed.") in flashes
 
 
+def test_get_diagnostics_route_returns_document(client, monkeypatch):
+    monkeypatch.setattr(
+        routes_module,
+        "get_pipeline_diagnostic",
+        lambda correlation_id: {
+            "_id": "diag-1",
+            "correlation_id": correlation_id,
+            "context_id": "ctx-1",
+            "status": "completed",
+            "hops": [],
+        },
+    )
+
+    response = client.get("/diagnostics/corr-1")
+
+    assert response.status_code == 200
+    assert response.get_json()["correlation_id"] == "corr-1"
+
+
+def test_get_diagnostics_route_returns_404_when_missing(client, monkeypatch):
+    monkeypatch.setattr(routes_module, "get_pipeline_diagnostic", lambda correlation_id: None)
+
+    response = client.get("/diagnostics/corr-missing")
+
+    assert response.status_code == 404
+    assert response.get_json()["error_code"] == "diagnostic_not_found"
+
+
 def test_dashboard_route_adds_security_headers(client, monkeypatch):
     monkeypatch.setattr(routes_module.mongo, "db", FakeDB(), raising=False)
 
@@ -135,3 +238,4 @@ def test_dashboard_route_adds_security_headers(client, monkeypatch):
     assert response.status_code == 200
     assert response.headers["X-Content-Type-Options"] == "nosniff"
     assert response.headers["Cache-Control"] == "no-store"
+    assert response.headers["X-Correlation-ID"]

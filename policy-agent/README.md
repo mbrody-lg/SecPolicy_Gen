@@ -59,6 +59,13 @@ python run.py
 
 The service runs on `http://localhost:5000`
 
+Each request now has a stable correlation boundary:
+- inbound `X-Correlation-ID` is preserved when present and valid
+- unsafe or oversized inbound correlation ids are replaced with a generated value
+- a new correlation id is generated when absent
+- the value is always returned in the response header as `X-Correlation-ID`
+- the service keeps JSON error payloads aligned with that same correlation id
+
 ## Configuration
 
 The agent behavior is defined in `config/policy-agent.yaml`:
@@ -122,6 +129,17 @@ deliberately with `MAX_CONTENT_LENGTH` when a deployment genuinely needs larger 
 See `config/examples/` for complete configuration examples.
 
 ## API Endpoints
+
+### Health and Readiness
+
+```
+GET /health
+GET /ready
+```
+
+- `GET /health` is intentionally lightweight and only reports that the Flask service process is alive.
+- `GET /ready` runs minimal safe startup checks for the policy-agent: MongoDB ping, YAML config loading/basic shape validation, and Chroma configuration sanity when a Chroma-backed vector role is present.
+- The Chroma readiness check is deliberately `config_only`: it validates host/port and configured collections without forcing a remote query or model load during the probe.
 
 ### Generate a New Policy
 
@@ -204,6 +222,15 @@ Updates a policy based on feedback from the Validator Agent. Called when policy 
 - `400 Bad Request`: Missing required fields
 - `404 Not Found`: Context ID doesn't exist
 
+### Correlation IDs
+
+The policy-agent uses `X-Correlation-ID` as the request boundary identifier.
+
+- If a request already includes `X-Correlation-ID`, the service preserves it for the full request lifecycle.
+- If the header is missing, the service generates one and always returns it in the response headers.
+- Structured error responses include a matching `correlation_id` field.
+- Outbound OpenAI SDK calls reuse the same correlation id for downstream tracing.
+
 ## Testing
 
 Run the test suite:
@@ -219,6 +246,8 @@ make critical-path-validation
 ```
 
 Service-specific workflow notes live in [docs/playbooks/policy-agent.md](../docs/playbooks/policy-agent.md).
+
+For the cross-service observability workflow, see [docs/playbooks/context-policy-validator-loop.md](../docs/playbooks/context-policy-validator-loop.md).
 
 ## Development
 

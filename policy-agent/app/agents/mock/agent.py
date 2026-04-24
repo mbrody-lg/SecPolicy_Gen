@@ -1,17 +1,28 @@
 """Mock policy-agent backend used for deterministic local testing."""
 
+import logging
+
 from app.agents.base import Agent
 from app.agents.mock.roles.rag import MockRAGRetriever
 from app.agents.mock.roles.multi_path import MockMultiPathPlanner
 from app.agents.mock.roles.reflection import MockSelfReflection
 from app.agents.mock.roles.incremental_query import MockIncrementalQuery
+from app.observability import log_event
+
+logger = logging.getLogger(__name__)
 
 class MockAgent(Agent):
     """Simulate role-based policy generation without external APIs."""
 
     def create(self, context_id: str = None):
         """Return a simulated session descriptor for the context."""
-        print(f"[MOCK] Policy agent created by context_id={context_id}")
+        log_event(
+            logger,
+            logging.INFO,
+            event="policy.mock_agent.created",
+            stage="policy_generation",
+            context_id=context_id,
+        )
         return {"id": context_id or "openai-policy-session"}
 
     def run(self, prompt: str, context_id: str = None) -> str:
@@ -24,7 +35,14 @@ class MockAgent(Agent):
 
         for role in self.roles:
             role_key = next(iter(role.keys()))
-            print(f"[MOCK] Executing role:{role_key}")
+            log_event(
+                logger,
+                logging.INFO,
+                event="policy.mock_agent.role_started",
+                stage="policy_generation",
+                context_id=context_id,
+                role=role_key,
+            )
 
             if role_key == "RAG":
                 retriever = MockRAGRetriever()
@@ -44,7 +62,15 @@ class MockAgent(Agent):
                 current_prompt = refiner.refine(current_prompt)
 
             else:
-                print(f"[MOCK][WARNING] Unknown role '{role_key}', it is omitted.")
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="policy.mock_agent.role_skipped",
+                    stage="policy_generation",
+                    context_id=context_id,
+                    role=role_key,
+                    reason="unknown_role",
+                )
 
         structured_plan = plans if plans else "[Simulation] No plan generated"
 

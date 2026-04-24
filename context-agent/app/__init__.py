@@ -1,14 +1,19 @@
 """Application factory for the context-agent service."""
 
 import os
+import re
+from uuid import uuid4
 
-from flask import Flask
+from flask import Flask, g, has_request_context, request
 from flask_pymongo import PyMongo
 from dotenv import load_dotenv
 
 mongo = PyMongo()
 
 TEST_ONLY_SECRET_KEY = "test-only-secret-key"
+CORRELATION_ID_HEADER = "X-Correlation-ID"
+CORRELATION_ID_MAX_LENGTH = 128
+CORRELATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]+$")
 
 
 def _get_env_bool(name: str, default: bool = False) -> bool:
@@ -48,6 +53,31 @@ def _get_env_list(name: str) -> list[str] | None:
         return None
     items = [item.strip() for item in value.split(",") if item.strip()]
     return items or None
+
+
+def get_request_correlation_id() -> str | None:
+    """Return the request correlation id when available."""
+    if not has_request_context():
+        return None
+    return getattr(g, "correlation_id", None)
+
+
+def _ensure_correlation_id() -> str:
+    """Preserve a safe inbound correlation id or create one for the request lifecycle."""
+    correlation_id = request.headers.get(CORRELATION_ID_HEADER, "").strip()
+    if (
+        correlation_id
+        and len(correlation_id) <= CORRELATION_ID_MAX_LENGTH
+        and CORRELATION_ID_PATTERN.fullmatch(correlation_id)
+    ):
+        return correlation_id
+    return str(uuid4())
+
+
+def _is_json_response(response) -> bool:
+    """Check whether the response carries a JSON payload."""
+    content_type = (response.content_type or "").split(";", 1)[0].strip().lower()
+    return response.is_json or content_type == "application/json"
 
 def create_app():
     """Create and configure the Flask application instance."""
@@ -89,8 +119,23 @@ def create_app():
     from app.routes.routes import main
     app.register_blueprint(main)
 
+    @app.before_request
+    def bind_correlation_id():
+        g.correlation_id = _ensure_correlation_id()
+
     @app.after_request
     def apply_security_headers(response):
+        correlation_id = get_request_correlation_id()
+        if correlation_id:
+            response.headers[CORRELATION_ID_HEADER] = correlation_id
+            if _is_json_response(response):
+                payload = response.get_json(silent=True)
+                if isinstance(payload, dict) and payload.get("success") is False and "correlation_id" in payload:
+                    payload["correlation_id"] = correlation_id
+                    response.set_data(
+                        app.json.dumps(payload) + ("\n" if response.get_data(as_text=True).endswith("\n") else "")
+                    )
+
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Cache-Control", "no-store")
         return response

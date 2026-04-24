@@ -6,20 +6,70 @@ from bson import ObjectId
 from flask import Blueprint, abort, current_app, jsonify, request
 
 from app import mongo
-from app.services.logic import run_validation_pipeline
+from app.observability import log_event
+from app.services.logic import get_health_status, get_readiness_status, run_validation_pipeline
 
 routes = Blueprint("routes", __name__)
 logger = logging.getLogger(__name__)
+
+
+@routes.route("/health", methods=["GET"])
+def health():
+    """Return a lightweight liveness response for validator-agent."""
+    return jsonify(get_health_status()), 200
+
+
+@routes.route("/ready", methods=["GET"])
+def ready():
+    """Return readiness checks for validator-agent dependencies."""
+    result = get_readiness_status()
+    status_code = result.pop("status_code", 200)
+    return jsonify(result), status_code
 
 
 @routes.route("/validate-policy", methods=["POST"])
 def validate_policy():
     """Validate policy payload received from policy-agent and return decision data."""
     data = request.get_json(silent=True)
+    context_id = data.get("context_id") if isinstance(data, dict) else None
+    log_event(
+        logger,
+        logging.INFO,
+        event="validator.route.validate_policy_received",
+        stage="http_request",
+        context_id=context_id,
+        route="/validate-policy",
+        method="POST",
+    )
     result = run_validation_pipeline(data)
     status_code = result.pop("status_code", 200)
     if result.get("success"):
+        log_event(
+            logger,
+            logging.INFO,
+            event="validator.route.validate_policy_completed",
+            stage="http_response",
+            context_id=result["validation"].get("context_id"),
+            route="/validate-policy",
+            method="POST",
+            status_code=status_code,
+            result="success",
+            validation_status=result["validation"].get("status"),
+        )
         return jsonify(result["validation"]), status_code
+    log_event(
+        logger,
+        logging.WARNING,
+        event="validator.route.validate_policy_completed",
+        stage="http_response",
+        context_id=context_id or result.get("correlation_id"),
+        correlation_id=result.get("correlation_id"),
+        route="/validate-policy",
+        method="POST",
+        status_code=status_code,
+        result="failure",
+        error_code=result.get("error_code"),
+    )
     return jsonify(result), status_code
 
 

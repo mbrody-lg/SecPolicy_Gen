@@ -1,9 +1,14 @@
 """OpenAI-backed policy generation agent implementation."""
 
+import logging
+
 from app.agents.base import Agent
 from app.agents.openai.client import OpenAIClient
 from app.agents.roles.rag import RAGProcessor
 from flask import current_app
+from app.observability import build_log_event, log_event
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIAgent(Agent):
@@ -33,10 +38,25 @@ class OpenAIAgent(Agent):
             max_tokens = role.get("max_tokens", 1000)
 
             if not instructions:
-                print(f"[WARNING] Role '{role_key}' has no instructions. It is skipped.")
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="policy.openai.role_skipped",
+                    stage="policy_generation",
+                    context_id=context_id,
+                    role=role_key,
+                    reason="missing_instructions",
+                )
                 continue
 
-            print(f"[INFO] Running role: {role_key}")
+            log_event(
+                logger,
+                logging.INFO,
+                event="policy.openai.role_started",
+                stage="policy_generation",
+                context_id=context_id,
+                role=role_key,
+            )
             
             if role_key == "RAG":
                 rag_processor = RAGProcessor(role)
@@ -67,14 +87,31 @@ class OpenAIAgent(Agent):
                 )
 
             if current_app.config["DEBUG"]:
-                print(current_prompt)
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="policy.openai.role_completed",
+                    stage="policy_generation",
+                    context_id=context_id,
+                    role=role_key,
+                    prompt_length=len(current_prompt),
+                )
 
         return {'text': current_prompt.strip(), 'structured_plan': structured_plan, "context_id": context_id}
 
     def _chat(self, prompt: str, instructions: str, temperature: float, max_tokens: int) -> str:
         """Run a chat completion call with role-specific instructions."""
         if current_app.config["DEBUG"]:
-            print(f"prompt: {prompt}\n instructions:{instructions}\n temperature: {temperature}\n max_tokens: {max_tokens}")
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="policy.openai.chat_started",
+                stage="policy_generation",
+                prompt_length=len(prompt),
+                instructions_length=len(instructions),
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
 
         try:
             response = self.client.chat.completions.create(
@@ -87,10 +124,22 @@ class OpenAIAgent(Agent):
                 max_tokens=max_tokens
             )
         except Exception as error:
-            print({"error": str(error)})
-            return ""
+            logger.exception(
+                build_log_event(
+                    event="policy.openai.chat_failed",
+                    stage="policy_generation",
+                    error_type=error.__class__.__name__,
+                )
+            )
+            raise
 
         if current_app.config["DEBUG"]:
-            print(f"response: {response}")
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="policy.openai.chat_completed",
+                stage="policy_generation",
+                choice_count=len(getattr(response, "choices", []) or []),
+            )
 
         return response.choices[0].message.content.strip()

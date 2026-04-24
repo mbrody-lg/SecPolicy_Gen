@@ -1,18 +1,29 @@
 """Mock agent backend for deterministic local context testing."""
 
+import logging
+
 from bson import ObjectId
 
 from app import mongo
 from app.agents.base import Agent
 from app.agents.mock.roles.proactive import MockProactiveGoalCreator
 from app.agents.mock.roles.optimiser import MockPromptResponseOptimiser
+from app.observability import log_event
+
+logger = logging.getLogger(__name__)
 
 class MockAgent(Agent):
     """Mock implementation that simulates prompt processing pipeline."""
 
     def create(self, context_id: str = None):
         """Simulate backend initialization for a context."""
-        print(f"[MOCK] Agent created by context_id={context_id}")
+        log_event(
+            logger,
+            logging.INFO,
+            event="context.mock_agent.created",
+            stage="context_generation",
+            context_id=context_id,
+        )
         return {"id": context_id or "mock-session"}
 
     def run(self, prompt: str, context_id: str = None) -> str:
