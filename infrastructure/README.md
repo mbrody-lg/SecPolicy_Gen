@@ -113,6 +113,7 @@ make functional-smoke
 Notes:
 - The service test targets use non-interactive `docker exec`, so they work in automated terminal sessions and do not require `-it`.
 - `make functional-smoke` now resolves each service's effective `CONFIG_PATH` before swapping mock configs, so the smoke run exercises the same config entrypoints used by the containers themselves.
+- `make functional-smoke` also checks `/health` and `/ready` on `context-agent`, `policy-agent`, and `validator-agent`, and records minimal loop observability evidence through `X-Correlation-ID` plus a `/diagnostics/<correlation_id>` lookup.
 - For host-only logic changes, run `make host-fast-tests` before or instead of the Docker sequence when container parity is not needed.
 - For one-command evidence of the critical Context -> Policy -> Validator path, use `make critical-path-validation`; it runs `context-tests`, `policy-tests`, `validator-tests`, and then the smoke sequence.
 

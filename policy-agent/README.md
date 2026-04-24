@@ -246,6 +246,8 @@ make critical-path-validation
 
 Service-specific workflow notes live in [docs/playbooks/policy-agent.md](../docs/playbooks/policy-agent.md).
 
+For the cross-service observability workflow, see [docs/playbooks/context-policy-validator-loop.md](../docs/playbooks/context-policy-validator-loop.md).
+
 ## Development
 
 1. Create a feature branch: `git checkout -b feat/your-feature`

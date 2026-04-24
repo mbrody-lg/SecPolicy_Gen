@@ -244,7 +244,6 @@ def _upsert_pipeline_diagnostic(
     update_doc = {
         "$setOnInsert": {
             "correlation_id": correlation_id,
-            "context_id": context_id,
             "created_at": now,
             "ownership": {
                 "owner_service": "context-agent",

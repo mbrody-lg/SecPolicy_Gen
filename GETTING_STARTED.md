@@ -37,8 +37,16 @@ Wait for all services to be ready (usually 30-60 seconds).
 
 ### Step 4: Access the System
 
-- **Web Interface:** http://localhost:3000
+- **Web Interface:** http://localhost:5003
 - **Start creating policies!**
+
+Optional readiness check:
+
+```bash
+curl -fsS http://localhost:5003/ready
+curl -fsS http://localhost:5002/ready
+curl -fsS http://localhost:5001/ready
+```
 
 ### Step 5: Stop Everything
 

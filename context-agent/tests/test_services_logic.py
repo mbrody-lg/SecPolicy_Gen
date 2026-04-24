@@ -30,6 +30,10 @@ class FakeCollection:
             target = {}
             self.docs.append(target)
 
+        conflicting_paths = set(update.get("$setOnInsert", {})).intersection(update.get("$set", {}))
+        if conflicting_paths:
+            raise ValueError(f"conflicting update paths: {sorted(conflicting_paths)}")
+
         for key, value in update.get("$setOnInsert", {}).items():
             target.setdefault(key, value)
         for key, value in update.get("$set", {}).items():

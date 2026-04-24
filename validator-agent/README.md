@@ -74,6 +74,7 @@ failures stay easier to trace.
 Operational diagnostics:
 - `GET /health` for lightweight liveness
 - `GET /ready` for readiness checks against Mongo and validator config loading
+- cross-service trace lookup and failure triage guidance in [docs/playbooks/context-policy-validator-loop.md](../docs/playbooks/context-policy-validator-loop.md)
 
 ## Configuration
 

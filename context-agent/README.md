@@ -71,11 +71,14 @@ Each request now has a stable correlation boundary:
 ```
 GET /health
 GET /ready
+GET /diagnostics/<correlation_id>
 ```
 
 `/health` is a lightweight liveness probe that does not touch external dependencies.
 
 `/ready` performs minimal readiness checks for essential runtime configuration and MongoDB connectivity. It returns `200` when the service is ready and `503` when a required dependency or configuration is not available.
+
+`/diagnostics/<correlation_id>` returns the bounded pipeline diagnostic view for the critical Context -> Policy -> Validator loop. Use it together with `X-Correlation-ID` and `make logs` when triaging smoke or runtime failures.
 
 ### Create a New Context
 ```
@@ -172,6 +175,8 @@ make context-tests
 ```
 
 For the service-specific workflow guidance, see [docs/playbooks/context-agent.md](../docs/playbooks/context-agent.md).
+
+For the cross-service observability workflow, see [docs/playbooks/context-policy-validator-loop.md](../docs/playbooks/context-policy-validator-loop.md).
 
 ## Development
 

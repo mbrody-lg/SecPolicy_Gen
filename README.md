@@ -50,6 +50,8 @@ See [infrastructure/README.md](infrastructure/README.md) for detailed setup inst
 
 Tracked execution playbooks for service-specific testing, lint, and security workflows live in [docs/playbooks/README.md](docs/playbooks/README.md).
 
+For the shared operational view of the critical loop, use the [Context -> Policy -> Validator runbook](docs/playbooks/context-policy-validator-loop.md). It covers `/health` and `/ready`, `X-Correlation-ID`, structured logs, diagnostics lookup, smoke evidence, and failure triage.
+
 ## Useful Commands
 
 ```bash
@@ -79,6 +81,8 @@ For cross-service work, use this validation ladder and stop at the smallest leve
 Use `make host-fast-tests` earlier in the loop when the change is host-test friendly and does not depend on Docker parity. Use the Docker-backed sequence above when the change affects container wiring, service-to-service calls, bootstrap/configuration behavior, or the full context -> policy -> validation pipeline.
 
 When you need one reproducible command for the full critical loop, run `make critical-path-validation`. It executes `context-tests`, `policy-tests`, `validator-tests`, and the end-to-end smoke path in the same order we have been using as initiative evidence.
+
+The smoke evidence artifact is `migration/functional-smoke-result.json`. For loop failures, pair that report with the context-agent diagnostics lookup at `GET /diagnostics/<correlation_id>`.
 
 The current Docker test targets are intentionally non-interactive so they work in terminal automation and CI-like environments without requiring a TTY.
 
