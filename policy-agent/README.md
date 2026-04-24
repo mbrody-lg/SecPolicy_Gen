@@ -38,6 +38,10 @@ CHROMA_PORT=8000
 FLASK_SECRET_KEY=your-secret-key-here
 FLASK_ENV=development
 CONFIG_PATH=config/policy-agent.yaml
+MAX_CONTENT_LENGTH=262144
+SESSION_COOKIE_SECURE=false
+TRUSTED_HOSTS=localhost,policy-agent
+POLICY_AGENT_ALLOW_MODEL_DOWNLOAD=0
 ```
 
 ## Running the Service
@@ -106,6 +110,14 @@ To set up regulatory data for RAG:
    ```
 4. **Wait**: Processing takes time depending on file size
 5. **Configure**: Update `policy-agent.yaml` with collection names (normativa, guia, sector, etc.)
+
+Runtime model downloads are disabled by default as a secure baseline. Preload embeddings with
+`make policy-vectorize` before using RAG, or set `POLICY_AGENT_ALLOW_MODEL_DOWNLOAD=1` only for
+an explicit one-time bootstrap in a controlled environment.
+
+The HTTP contract also keeps request bodies bounded by default via Flask `MAX_CONTENT_LENGTH` and
+service-layer validation of prompt and validator-feedback sizes. Override the body cap only
+deliberately with `MAX_CONTENT_LENGTH` when a deployment genuinely needs larger payloads.
 
 See `config/examples/` for complete configuration examples.
 
@@ -198,6 +210,12 @@ Run the test suite:
 
 ```bash
 make policy-tests
+```
+
+For the CI-aligned end-to-end evidence path across services, run:
+
+```bash
+make critical-path-validation
 ```
 
 Service-specific workflow notes live in [docs/playbooks/policy-agent.md](../docs/playbooks/policy-agent.md).

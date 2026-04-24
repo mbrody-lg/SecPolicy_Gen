@@ -4,6 +4,8 @@ import importlib
 
 from app.agents.vector.base import VECTOR_CLIENT_REGISTRY
 from app.agents.vector.model_loader import download_model_if_needed, load_model
+
+
 def import_all_vector_modules(module_name):
     """Import backend client modules required for a vector provider."""
 
@@ -43,13 +45,14 @@ def get_vector_clients(vector_config: list):
                 raise ValueError(f"Missing '{key}' in configuration {module_name}")
 
         model_id = entry["model"]
+        revision = entry.get("revision")
         collections = entry["collection"]
 
         if not isinstance(collections, list):
             raise ValueError(f"'collection' must be a list for {module_name}")
 
-        download_model_if_needed(model_id)
-        model = load_model(model_id)
+        download_model_if_needed(model_id, revision=revision)
+        model = load_model(model_id, revision=revision)
 
         vector_clients = []
 

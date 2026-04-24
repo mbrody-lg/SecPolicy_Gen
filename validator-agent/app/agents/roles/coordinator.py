@@ -96,6 +96,7 @@ class Coordinator:
                 if self.debug_mode:
                     print(f"\n→ {decision.upper()} — sending to policy-agent for revision")
 
+                reasons, recommendations = self.collect_feedback(round_results, decision)
                 update_response = send_policy_update_to_policy_agent(
                     context_id=context_id,
                     language=language,
@@ -103,16 +104,12 @@ class Coordinator:
                     policy_agent_version=version,
                     generated_at=generated_at,
                     status=decision,
-                    reasons=[r.get("reason") for r in round_results if r["status"] == decision],
-                    recommendations=[
-                        rec for r in round_results if r["status"] == decision
-                        for rec in r.get("recommendations", [])
-                    ]
+                    reasons=reasons,
+                    recommendations=recommendations,
                 )
                 if update_response.get("success") is False:
                     return update_response
-                if not update_response.get("policy_text"):
-                    raise RuntimeError("Policy update endpoint did not return revised policy text.")
+                update_response = self.validate_policy_update_response(update_response, context_id)
 
                 # Update prompt with returned policy revision
                 prompt = update_response.get("policy_text", prompt)
@@ -155,6 +152,48 @@ class Coordinator:
 
         return response
 
+    def validate_policy_update_response(self, update_response: dict, context_id: str) -> dict:
+        """Ensure the policy-agent update response is usable before another round starts."""
+        if not isinstance(update_response, dict):
+            raise RuntimeError("Policy update endpoint returned an invalid response object.")
+
+        policy_text = update_response.get("policy_text")
+        if not isinstance(policy_text, str) or not policy_text.strip():
+            raise RuntimeError("Policy update endpoint did not return revised policy text.")
+
+        response_context_id = update_response.get("context_id")
+        if response_context_id is not None and str(response_context_id) != str(context_id):
+            raise RuntimeError("Policy update endpoint returned a mismatched context_id.")
+
+        generated_at = update_response.get("generated_at")
+        if generated_at is not None and not isinstance(generated_at, str):
+            raise RuntimeError("Policy update endpoint returned an invalid generated_at value.")
+
+        policy_agent_version = update_response.get("policy_agent_version")
+        if policy_agent_version is not None and not isinstance(policy_agent_version, str):
+            raise RuntimeError("Policy update endpoint returned an invalid policy_agent_version value.")
+
+        return update_response
+
+    def collect_feedback(self, results: List[Dict], decision: str) -> tuple[list[str], list[str]]:
+        """Normalize reason/recommendation fields from validator round outputs."""
+        reasons = []
+        recommendations = []
+
+        for result in results:
+            if result["status"] != decision:
+                continue
+
+            reason_value = result.get("reason") or result.get("reasons")
+            if isinstance(reason_value, str) and reason_value.strip():
+                reasons.append(reason_value.strip())
+
+            for recommendation in result.get("recommendations", []):
+                if isinstance(recommendation, str) and recommendation.strip():
+                    recommendations.append(recommendation.strip())
+
+        return reasons, recommendations
+
     def vote(self, results: List[Dict]) -> str:
         """Compute final fallback decision using majority status vote."""
         statuses = [r["status"] for r in results if r["role"] != "EVA"]
@@ -180,6 +219,16 @@ class Coordinator:
                 "consensus_achieved": consensus,
                 "final_decision": decision,
                 "last_round_results": results,
+                "ownership": {
+                    "owner_service": "validator-agent",
+                    "source_of_truth": True,
+                    "collection": "validations",
+                },
+                "policy_ref": {
+                    "owner_service": "policy-agent",
+                    "source_collection": "policies",
+                    "context_id": context_id,
+                },
                 "config_used": {
                     "rounds": self.max_rounds,
                     "threshold": self.consensus_threshold,
@@ -228,9 +277,9 @@ class Coordinator:
                 None
             )
         else:
-            for res in round_results:
-                if res["status"] == decision:
-                    response["reasons"].append(res.get("reason", ""))
-                    response["recommendations"].extend(res.get("recommendations", []))
+            response["reasons"], response["recommendations"] = self.collect_feedback(
+                round_results,
+                decision,
+            )
 
         return response

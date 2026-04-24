@@ -3,21 +3,8 @@ from unittest.mock import patch
 
 from bson import ObjectId
 
-from app import mongo
-from app.routes import routes as routes_module
-
 def test_update_policy_with_openaiagent(client):
     context_id = ObjectId()
-    mongo.db.policies.insert_one({
-        "context_id": str(context_id),
-        "language": "ca",
-        "policy_text": "previous policy",
-        "structured_plan": [],
-        "model_version": "gpt-4",
-        "policy_agent_version": "0.1.0",
-        "generated_at": datetime.now(timezone.utc),
-    })
-
     data = {
         "context_id": str(context_id),
         "language": "ca",
@@ -39,18 +26,47 @@ def test_update_policy_with_openaiagent(client):
     }
 
     with patch(
-        "app.routes.routes.update_with_agent",
-        return_value={"text": "Updated policy with incident response and access controls."},
-    ) as update_with_agent:
+        "app.routes.routes.run_policy_update_pipeline",
+        return_value={
+            "success": True,
+            "stage": "completed",
+            "policy": {
+                "success": True,
+                "context_id": str(context_id),
+                "language": "ca",
+                "policy_text": "Updated policy with incident response and access controls.",
+                "structured_plan": [],
+                "model_version": "gpt-4",
+                "policy_agent_version": "0.1.0",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "lifecycle_status": "revised",
+                "revision_count": 1,
+                "ownership": {
+                    "owner_service": "policy-agent",
+                    "source_of_truth": True,
+                    "collection": "policies",
+                },
+                "last_validation_status": "not_accepted",
+                "last_validation_reasons": data["reasons"],
+                "last_validation_recommendations": data["recommendations"],
+            },
+        },
+    ) as run_policy_update_pipeline:
         response = client.post(f"/generate_policy/{context_id}/update", json=data)
 
     assert response.status_code == 200
     json_data = response.get_json()
-    stored_policy = mongo.db.policies.find_one({"context_id": str(context_id)})
-    assert stored_policy is not None
-    assert stored_policy["policy_text"] == json_data["policy_text"]
-    assert mongo.db.contexts.find_one({"context_id": context_id}) is None
-    update_with_agent.assert_called_once()
+    run_policy_update_pipeline.assert_called_once()
+    assert json_data["ownership"] == {
+        "owner_service": "policy-agent",
+        "source_of_truth": True,
+        "collection": "policies",
+    }
+    assert json_data["lifecycle_status"] == "revised"
+    assert json_data["revision_count"] == 1
+    assert json_data["last_validation_status"] == "not_accepted"
+    assert json_data["last_validation_reasons"] == data["reasons"]
+    assert json_data["last_validation_recommendations"] == data["recommendations"]
 
     assert "incident" in json_data["policy_text"].lower() or "access" in json_data["policy_text"].lower()
 
@@ -68,7 +84,19 @@ def test_update_policy_returns_404_when_canonical_policy_is_missing(client):
         "recommendations": ["recommendation"],
     }
 
-    response = client.post(f"/generate_policy/{context_id}/update", json=data)
+    with patch(
+        "app.routes.routes.run_policy_update_pipeline",
+        return_value={
+            "success": False,
+            "error_type": "validation_error",
+            "error_code": "policy_not_found",
+            "message": "Policy not found.",
+            "details": {"stage": "persistence_lookup", "context_id": str(context_id)},
+            "correlation_id": str(context_id),
+            "status_code": 404,
+        },
+    ):
+        response = client.post(f"/generate_policy/{context_id}/update", json=data)
 
     assert response.status_code == 404
     assert response.get_json() == {
@@ -76,7 +104,7 @@ def test_update_policy_returns_404_when_canonical_policy_is_missing(client):
         "error_type": "validation_error",
         "error_code": "policy_not_found",
         "message": "Policy not found.",
-        "details": {"context_id": str(context_id)},
+        "details": {"stage": "persistence_lookup", "context_id": str(context_id)},
         "correlation_id": str(context_id),
     }
 
@@ -94,7 +122,23 @@ def test_update_policy_returns_contract_error_when_context_id_mismatches(client)
         "recommendations": ["recommendation"],
     }
 
-    response = client.post(f"/generate_policy/{context_id}/update", json=data)
+    with patch(
+        "app.routes.routes.run_policy_update_pipeline",
+        return_value={
+            "success": False,
+            "error_type": "contract_error",
+            "error_code": "context_id_mismatch",
+            "message": "Context ID mismatch.",
+            "details": {
+                "stage": "contract_validation",
+                "path_context_id": str(context_id),
+                "payload_context_id": data["context_id"],
+            },
+            "correlation_id": data["context_id"],
+            "status_code": 400,
+        },
+    ):
+        response = client.post(f"/generate_policy/{context_id}/update", json=data)
 
     assert response.status_code == 400
     assert response.get_json() == {
@@ -103,6 +147,7 @@ def test_update_policy_returns_contract_error_when_context_id_mismatches(client)
         "error_code": "context_id_mismatch",
         "message": "Context ID mismatch.",
         "details": {
+            "stage": "contract_validation",
             "path_context_id": str(context_id),
             "payload_context_id": data["context_id"],
         },
@@ -112,15 +157,6 @@ def test_update_policy_returns_contract_error_when_context_id_mismatches(client)
 
 def test_update_policy_hides_internal_exception_details(client):
     context_id = ObjectId()
-    mongo.db.policies.insert_one({
-        "context_id": str(context_id),
-        "language": "en",
-        "policy_text": "previous policy",
-        "structured_plan": [],
-        "model_version": "gpt-4",
-        "policy_agent_version": "0.1.0",
-        "generated_at": datetime.now(timezone.utc),
-    })
     data = {
         "context_id": str(context_id),
         "language": "en",
@@ -132,7 +168,18 @@ def test_update_policy_hides_internal_exception_details(client):
         "recommendations": ["recommendation"],
     }
 
-    with patch("app.routes.routes.update_with_agent", side_effect=RuntimeError("secret backend detail")):
+    with patch(
+        "app.routes.routes.run_policy_update_pipeline",
+        return_value={
+            "success": False,
+            "error_type": "internal_error",
+            "error_code": "policy_update_failed",
+            "message": "Policy update failed.",
+            "details": {"stage": "policy_update", "operation": "update_policy"},
+            "correlation_id": str(context_id),
+            "status_code": 500,
+        },
+    ):
         response = client.post(f"/generate_policy/{context_id}/update", json=data)
 
     assert response.status_code == 500
@@ -141,6 +188,6 @@ def test_update_policy_hides_internal_exception_details(client):
         "error_type": "internal_error",
         "error_code": "policy_update_failed",
         "message": "Policy update failed.",
-        "details": {"operation": "update_policy"},
+        "details": {"stage": "policy_update", "operation": "update_policy"},
         "correlation_id": str(context_id),
     }

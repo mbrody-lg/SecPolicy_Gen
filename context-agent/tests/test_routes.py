@@ -53,9 +53,12 @@ def test_send_policy_to_context_returns_400_when_required_fields_missing(client)
     assert response.get_json() == {
         "success": False,
         "error_type": "contract_error",
-        "error_code": "invalid_request_payload",
-        "message": "Invalid request payload.",
-        "details": {"context_id": context_id},
+        "error_code": "validated_policy_missing_fields",
+        "message": "Validated policy payload is incomplete.",
+        "details": {
+            "context_id": context_id,
+            "missing_fields": ["generated_at", "policy_agent_version", "language"],
+        },
         "correlation_id": context_id,
     }
 
@@ -84,3 +87,51 @@ def test_send_policy_to_context_redirects_after_storage(client, monkeypatch):
     assert response.status_code == 302
     assert response.headers["Location"].endswith(f"/context/{context_id}")
     assert captured == {"context_id": context_id, "payload": payload}
+
+
+def test_trigger_policy_generation_redirects_with_success_flash(client, monkeypatch):
+    context_id = str(ObjectId())
+    monkeypatch.setattr(
+        routes_module,
+        "generate_full_policy_pipeline",
+        lambda current_context_id: {"success": True, "stage": "completed"},
+    )
+
+    response = client.post(f"/context/{context_id}/generate_policy", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith(f"/context/{context_id}")
+    with client.session_transaction() as session:
+        flashes = session.get("_flashes", [])
+    assert ("success", "Policy successfully generated and validated.") in flashes
+
+
+def test_trigger_policy_generation_redirects_with_stage_flash_on_failure(client, monkeypatch):
+    context_id = str(ObjectId())
+    monkeypatch.setattr(
+        routes_module,
+        "generate_full_policy_pipeline",
+        lambda current_context_id: {
+            "success": False,
+            "stage": "validation",
+            "message": "Policy validation failed.",
+        },
+    )
+
+    response = client.post(f"/context/{context_id}/generate_policy", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith(f"/context/{context_id}")
+    with client.session_transaction() as session:
+        flashes = session.get("_flashes", [])
+    assert ("danger", "validation: Policy validation failed.") in flashes
+
+
+def test_dashboard_route_adds_security_headers(client, monkeypatch):
+    monkeypatch.setattr(routes_module.mongo, "db", FakeDB(), raising=False)
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["Cache-Control"] == "no-store"

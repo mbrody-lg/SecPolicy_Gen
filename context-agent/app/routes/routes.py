@@ -7,6 +7,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, abort,
 
 from app import mongo
 from app.services.logic import (
+    PipelineStepError,
     generate_context_prompt,
     run_with_agent,
     load_questions,
@@ -16,6 +17,13 @@ from app.services.logic import (
 )
 
 main = Blueprint("main", __name__)
+
+
+def _pipeline_flash_message(result: dict) -> str:
+    """Build a user-facing summary from a structured pipeline result."""
+    stage = result.get("stage", "pipeline")
+    message = result.get("message") or result.get("error") or "Policy pipeline failed."
+    return f"{stage}: {message}"
 
 @main.route("/")
 def index():
@@ -246,26 +254,16 @@ def send_policy_to_context(context_id):
         data = request.get_json(force=True) or {}
         store_validated_policy(context_id, data)
         return redirect(url_for("main.context_detail", context_id=context_id))
-    except ValueError:
+    except PipelineStepError as exc:
         correlation_id = request.headers.get("X-Correlation-ID") or context_id
         return jsonify({
             "success": False,
-            "error_type": "contract_error",
-            "error_code": "invalid_request_payload",
-            "message": "Invalid request payload.",
-            "details": {"context_id": context_id},
+            "error_type": exc.error_type,
+            "error_code": exc.error_code,
+            "message": exc.message,
+            "details": exc.details,
             "correlation_id": correlation_id,
-        }), 400
-    except LookupError:
-        correlation_id = request.headers.get("X-Correlation-ID") or context_id
-        return jsonify({
-            "success": False,
-            "error_type": "validation_error",
-            "error_code": "context_not_found",
-            "message": "Context not found.",
-            "details": {"context_id": context_id},
-            "correlation_id": correlation_id,
-        }), 404
+        }), exc.status_code
     except Exception:
         correlation_id = request.headers.get("X-Correlation-ID") or context_id
         return jsonify({
@@ -285,5 +283,5 @@ def trigger_policy_generation(context_id):
     if result.get("success"):
         flash("Policy successfully generated and validated.", "success")
     else:
-        flash(f"Error in generation or validation: {result.get('error')} - {result.get('details')}", "danger")
+        flash(_pipeline_flash_message(result), "danger")
     return redirect(url_for("main.context_detail", context_id=context_id))

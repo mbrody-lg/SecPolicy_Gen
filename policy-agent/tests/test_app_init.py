@@ -60,3 +60,34 @@ def test_create_app_reads_debug_flag_from_env(monkeypatch, debug_value, expected
     app = app_module.create_app()
 
     assert app.config["DEBUG"] is expected
+
+
+def test_create_app_sets_secure_defaults(monkeypatch):
+    _set_common_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "true")
+    monkeypatch.setenv("FLASK_SECRET_KEY", "configured-test-secret")
+    monkeypatch.delenv("TRUSTED_HOSTS", raising=False)
+    monkeypatch.delenv("MAX_CONTENT_LENGTH", raising=False)
+    monkeypatch.delenv("SESSION_COOKIE_SECURE", raising=False)
+
+    app = app_module.create_app()
+
+    assert app.config["MAX_CONTENT_LENGTH"] == 256 * 1024
+    assert app.config["SESSION_COOKIE_HTTPONLY"] is True
+    assert app.config["SESSION_COOKIE_SAMESITE"] == "Lax"
+    assert app.config["SESSION_COOKIE_SECURE"] is False
+
+
+def test_create_app_reads_trusted_hosts_and_cookie_secure_from_env(monkeypatch):
+    _set_common_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "true")
+    monkeypatch.setenv("FLASK_SECRET_KEY", "configured-test-secret")
+    monkeypatch.setenv("TRUSTED_HOSTS", "localhost,policy-agent.internal")
+    monkeypatch.setenv("SESSION_COOKIE_SECURE", "true")
+    monkeypatch.setenv("MAX_CONTENT_LENGTH", "4096")
+
+    app = app_module.create_app()
+
+    assert app.config["TRUSTED_HOSTS"] == ["localhost", "policy-agent.internal"]
+    assert app.config["SESSION_COOKIE_SECURE"] is True
+    assert app.config["MAX_CONTENT_LENGTH"] == 4096

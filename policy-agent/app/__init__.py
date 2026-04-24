@@ -19,6 +19,26 @@ def _get_env_bool(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _get_env_int(name: str, default: int) -> int:
+    """Parse integer environment flags with a safe fallback."""
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def _get_env_list(name: str) -> list[str] | None:
+    """Parse comma-separated configuration values."""
+    value = os.getenv(name)
+    if value is None:
+        return None
+    items = [item.strip() for item in value.split(",") if item.strip()]
+    return items or None
+
+
 def create_app():
     """Build and configure the Flask app and register routes."""
     # Load environment variables from .env
@@ -42,12 +62,25 @@ def create_app():
     app.config["CONFIG_PATH"] = os.getenv("CONFIG_PATH", "/config/policy_agent.yaml")
     app.config["TESTING"] = is_testing
     app.config["DEBUG"] = _get_env_bool("DEBUG", default=False)
+    app.config["MAX_CONTENT_LENGTH"] = _get_env_int("MAX_CONTENT_LENGTH", 256 * 1024)
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["SESSION_COOKIE_SECURE"] = _get_env_bool("SESSION_COOKIE_SECURE", default=False)
+    trusted_hosts = _get_env_list("TRUSTED_HOSTS")
+    if trusted_hosts is not None:
+        app.config["TRUSTED_HOSTS"] = trusted_hosts
 
     # Initialize Mongo with app
     mongo.init_app(app)
-    
+
     # Import and register blueprints
     from app.routes.routes import routes
     app.register_blueprint(routes)
+
+    @app.after_request
+    def apply_security_headers(response):
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Cache-Control", "no-store")
+        return response
 
     return app

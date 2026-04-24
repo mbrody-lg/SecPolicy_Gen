@@ -18,6 +18,37 @@ def _get_env_bool(name: str, default: bool = False) -> bool:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
+
+def _get_env_float(name: str, default: float) -> float:
+    """Parse float environment values with a safe fallback."""
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
+def _get_env_int(name: str, default: int) -> int:
+    """Parse integer environment values with a safe fallback."""
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def _get_env_list(name: str) -> list[str] | None:
+    """Parse comma-separated environment values."""
+    value = os.getenv(name)
+    if value is None:
+        return None
+    items = [item.strip() for item in value.split(",") if item.strip()]
+    return items or None
+
 def create_app():
     """Create and configure the Flask application instance."""
     load_dotenv()
@@ -37,6 +68,15 @@ def create_app():
     app.config["MONGO_URI"] = os.getenv("MONGO_URI", "mongodb://mongo:27017/contextdb")
     app.config["POLICY_AGENT_URL"] = os.getenv("POLICY_AGENT_URL", "http://policy-agent:5000")
     app.config["VALIDATOR_AGENT_URL"] = os.getenv("VALIDATOR_AGENT_URL", "http://validator-agent:5000")
+    app.config["POLICY_AGENT_TIMEOUT_SECONDS"] = _get_env_float("POLICY_AGENT_TIMEOUT_SECONDS", 30.0)
+    app.config["VALIDATOR_AGENT_TIMEOUT_SECONDS"] = _get_env_float("VALIDATOR_AGENT_TIMEOUT_SECONDS", 30.0)
+    app.config["MAX_CONTENT_LENGTH"] = _get_env_int("MAX_CONTENT_LENGTH", 256 * 1024)
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["SESSION_COOKIE_SECURE"] = _get_env_bool("SESSION_COOKIE_SECURE", default=False)
+    trusted_hosts = _get_env_list("TRUSTED_HOSTS")
+    if trusted_hosts is not None:
+        app.config["TRUSTED_HOSTS"] = trusted_hosts
     mongo.init_app(app)
 
 
@@ -48,5 +88,11 @@ def create_app():
 
     from app.routes.routes import main
     app.register_blueprint(main)
+
+    @app.after_request
+    def apply_security_headers(response):
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Cache-Control", "no-store")
+        return response
 
     return app

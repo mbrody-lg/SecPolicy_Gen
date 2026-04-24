@@ -14,8 +14,26 @@ Use these playbooks when changing testing, lint-sensitive code, or security-sens
 - Associate each meaningful change with its own commit whenever practical.
 - Keep commits scoped to one coherent change set and explain the intent in the commit message, not only the mechanics.
 - Split documentation/governance commits from runtime-behavior commits unless the documentation is inseparable from the code change.
-- Record strategy or policy changes in `.local-workspace/decision-log/`.
-- If a validation step cannot run, record the blocker in `.local-workspace/proposed-actions/BACKLOG.md`.
+
+## Cross-Service Validation Ladder
+
+Use this ladder when the change crosses service boundaries, changes Docker/runtime configuration, or touches the end-to-end pipeline:
+
+1. `make up`
+2. `make policy-tests`
+3. `make validator-tests`
+4. `make functional-smoke`
+
+Use `make host-fast-tests` before the Docker ladder when the change is still local and deterministic enough to validate on the host. Move to the Docker ladder as soon as service wiring, config resolution, container bootstrap, or real service-to-service calls become part of the risk.
+
+When the work needs a single CI-aligned evidence command for the full critical loop, use `make critical-path-validation`. It runs the service suites for `context-agent`, `policy-agent`, and `validator-agent`, then resets into the Docker smoke run.
+
+### Process Notes From The Current Initiative
+
+- Keep Docker test targets non-interactive so they work in automated terminals without `-it`.
+- For `policy-agent`, prefer CPU-only model bootstrap plus local-only model loading when container size and security posture both matter.
+- For end-to-end smoke runs, do not assume config paths like `/config/...`; resolve each service's effective `CONFIG_PATH` at runtime before swapping mock configs.
+- When a route returns a redirect, inspect the structured pipeline result or service logs before assuming the pipeline succeeded.
 
 ## Service Playbooks
 

@@ -1,7 +1,7 @@
 """Mistral API client wrapper for validator-agent backends."""
 
 import os
-from mistralai import Mistral
+from mistralai.client import Mistral
 
 class MistralClient:
     """Provide configured Mistral chat API access."""

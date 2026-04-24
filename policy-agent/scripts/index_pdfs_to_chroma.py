@@ -5,9 +5,11 @@ from pypdf import PdfReader
 from tqdm import tqdm
 from dotenv import load_dotenv
 import chromadb
-from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
-from sentence_transformers import SentenceTransformer
-from app.agents.vector.model_loader import download_model_if_needed, load_model
+from app.agents.vector.model_loader import (
+    LocalSentenceTransformerEmbeddingFunction,
+    download_model_if_needed,
+    load_model,
+)
 
 def extract_text_from_pdf(path):
     reader = PdfReader(path)
@@ -35,6 +37,7 @@ def load_config_from_policy_yaml():
                     model = entry.get("model")
                     chunk_size = entry.get("chunk_size", 500)
                     chunk_overlap = entry.get("chunk_overlap", 100)
+                    revision = entry.get("revision")
 
                     if not model or not collections:
                         raise ValueError("The model and collections must be defined within 'Chroma'")
@@ -44,6 +47,7 @@ def load_config_from_policy_yaml():
                             "name": col,
                             "path": f"data/{col}",
                             "model": model,
+                            "revision": revision,
                             "chunk_size": chunk_size,
                             "chunk_overlap": chunk_overlap
                         })
@@ -61,6 +65,7 @@ def process_collection(config):
     log(f"== Starting indexing for collection: {collection_name} ==")
 
     model_name = config["model"]
+    revision = config.get("revision")
     chunk_size = config["chunk_size"]
     chunk_overlap = config["chunk_overlap"]
     path = Path(config["path"])
@@ -69,9 +74,18 @@ def process_collection(config):
         log(f"[ERROR] Non-existent route: {path}")
         return
 
-    download_model_if_needed(model_name)
-    model = load_model(model_name)
-    embedding_fn = SentenceTransformerEmbeddingFunction(model_name=model_name)
+    original_allow_download = os.getenv("POLICY_AGENT_ALLOW_MODEL_DOWNLOAD")
+    os.environ["POLICY_AGENT_ALLOW_MODEL_DOWNLOAD"] = "1"
+    try:
+        download_model_if_needed(model_name, revision=revision)
+    finally:
+        if original_allow_download is None:
+            os.environ.pop("POLICY_AGENT_ALLOW_MODEL_DOWNLOAD", None)
+        else:
+            os.environ["POLICY_AGENT_ALLOW_MODEL_DOWNLOAD"] = original_allow_download
+
+    model = load_model(model_name, revision=revision)
+    embedding_fn = LocalSentenceTransformerEmbeddingFunction(model)
     client = chromadb.HttpClient(
         host=os.getenv("CHROMA_HOST", "localhost"),
         port=int(os.getenv("CHROMA_PORT", 8000))

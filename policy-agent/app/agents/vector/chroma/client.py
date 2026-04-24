@@ -1,11 +1,11 @@
 """Chroma vector backend client implementation."""
 
 import chromadb
-from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 from flask import current_app
 
 from app.agents.vector.base import VectorClient
 from app.agents.vector.chroma.http_client import get_chroma_http_client
+from app.agents.vector.model_loader import LocalSentenceTransformerEmbeddingFunction
         
 class ChromaVectorClient(VectorClient):
     """Vector client backed by a Chroma collection."""
@@ -15,7 +15,7 @@ class ChromaVectorClient(VectorClient):
         super().__init__()
         self.model = model
         self.client = get_chroma_http_client()
-        self.embedding_fn = SentenceTransformerEmbeddingFunction(model_name="intfloat/e5-base")
+        self.embedding_fn = LocalSentenceTransformerEmbeddingFunction(model)
         self.collection = None
         
     def load_collection(self, name: str):
