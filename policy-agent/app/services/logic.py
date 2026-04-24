@@ -694,6 +694,7 @@ def generate_policy_payload(payload: dict | None) -> dict:
     result = {
         "success": True,
         "context_id": data["context_id"],
+        "correlation_id": correlation_id,
         "language": data["language"],
         "policy_text": result_object["text"],
         "structured_plan": result_object.get("structured_plan", []),
@@ -819,6 +820,7 @@ def update_policy_payload(payload: dict | None, path_context_id: str) -> dict:
     result = {
         "success": True,
         "context_id": data["context_id"],
+        "correlation_id": correlation_id,
         "language": data["language"],
         "policy_text": result_object["text"],
         "structured_plan": policy.get("structured_plan", []),
@@ -848,6 +850,7 @@ def update_policy_payload(payload: dict | None, path_context_id: str) -> dict:
                 "policy_text": result["policy_text"],
                 "structured_plan": result["structured_plan"],
                 "model_version": result["model_version"],
+                "correlation_id": result["correlation_id"],
                 "policy_agent_version": result["policy_agent_version"],
                 "generated_at": result["generated_at"],
                 "lifecycle_status": result["lifecycle_status"],

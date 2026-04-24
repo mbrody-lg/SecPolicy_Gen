@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 import logging
+from time import perf_counter
 
 import requests
 import yaml
@@ -14,6 +15,7 @@ from app.agents.factory import create_agent_from_config
 from app.observability import build_log_event, log_event
 
 logger = logging.getLogger(__name__)
+MAX_PIPELINE_DIAGNOSTIC_HOPS = 25
 
 
 class PipelineStepError(Exception):
@@ -220,6 +222,85 @@ def _dependency_error_details(
     return details
 
 
+def _pipeline_diagnostics_collection():
+    """Return the collection used for bounded pipeline diagnostics."""
+    return mongo.db.pipeline_diagnostics
+
+
+def _upsert_pipeline_diagnostic(
+    *,
+    correlation_id: str | None,
+    context_id: str | None,
+    hop: dict,
+    status: str | None = None,
+    last_error: dict | None = None,
+    completed: bool = False,
+) -> None:
+    """Persist a bounded cross-service diagnostic view keyed by correlation id."""
+    if not correlation_id:
+        return
+
+    now = datetime.now(timezone.utc)
+    update_doc = {
+        "$setOnInsert": {
+            "correlation_id": correlation_id,
+            "context_id": context_id,
+            "created_at": now,
+            "ownership": {
+                "owner_service": "context-agent",
+                "source_of_truth": False,
+                "collection": "pipeline_diagnostics",
+                "view_type": "pipeline_diagnostic",
+            },
+        },
+        "$set": {
+            "context_id": context_id,
+            "updated_at": now,
+        },
+        "$push": {"hops": {"$each": [hop], "$slice": -MAX_PIPELINE_DIAGNOSTIC_HOPS}},
+    }
+    if status is not None:
+        update_doc["$set"]["status"] = status
+    if last_error is not None:
+        update_doc["$set"]["last_error"] = last_error
+    if completed:
+        update_doc["$set"]["completed_at"] = now
+
+    try:
+        _pipeline_diagnostics_collection().update_one(
+            {"correlation_id": correlation_id},
+            update_doc,
+            upsert=True,
+        )
+    except Exception:
+        logger.warning(
+            build_log_event(
+                event="context.pipeline_diagnostic.persistence_failed",
+                stage="diagnostics",
+                context_id=context_id,
+                correlation_id=correlation_id,
+            ),
+            exc_info=True,
+        )
+
+
+def get_pipeline_diagnostic(correlation_id: str) -> dict | None:
+    """Return a persisted pipeline diagnostic document by correlation id."""
+    diagnostic = _pipeline_diagnostics_collection().find_one({"correlation_id": correlation_id})
+    if not diagnostic:
+        return None
+    if "_id" in diagnostic:
+        diagnostic["_id"] = str(diagnostic["_id"])
+    for field in ("created_at", "updated_at", "completed_at"):
+        if field in diagnostic and hasattr(diagnostic[field], "isoformat"):
+            diagnostic[field] = diagnostic[field].isoformat()
+    for hop in diagnostic.get("hops", []):
+        for field in ("started_at", "completed_at"):
+            if field in hop and hasattr(hop[field], "isoformat"):
+                hop[field] = hop[field].isoformat()
+    return diagnostic
+
+
 def get_context_and_prompt(context_id: str) -> dict:
     """Fetch context data and the refined prompt required by policy-agent."""
     correlation_id = _get_correlation_id(context_id=context_id)
@@ -301,6 +382,8 @@ def call_policy_agent(context_payload: dict) -> dict:
     policy_agent_url = current_app.config.get("POLICY_AGENT_URL", "http://policy-agent:5000")
     correlation_id = _get_correlation_id(context_payload)
     timeout_seconds = _dependency_timeout("POLICY_AGENT_TIMEOUT_SECONDS")
+    started_at = datetime.now(timezone.utc)
+    started_perf = perf_counter()
     log_event(
         logger,
         logging.INFO,
@@ -320,6 +403,23 @@ def call_policy_agent(context_payload: dict) -> dict:
             timeout=timeout_seconds,
         )
         response.raise_for_status()
+        completed_at = datetime.now(timezone.utc)
+        _upsert_pipeline_diagnostic(
+            correlation_id=correlation_id,
+            context_id=context_payload.get("context_id"),
+            status="in_progress",
+            hop={
+                "service": "context-agent",
+                "stage": "policy_generation",
+                "operation": "generate_policy",
+                "target_service": "policy-agent",
+                "outcome": "success",
+                "started_at": started_at,
+                "completed_at": completed_at,
+                "duration_ms": round((perf_counter() - started_perf) * 1000, 3),
+                "status_code": response.status_code,
+            },
+        )
         log_event(
             logger,
             logging.INFO,
@@ -335,6 +435,30 @@ def call_policy_agent(context_payload: dict) -> dict:
         return response.json()
     except requests.exceptions.RequestException as exc:
         response = exc.response if isinstance(exc, requests.exceptions.HTTPError) else None
+        completed_at = datetime.now(timezone.utc)
+        _upsert_pipeline_diagnostic(
+            correlation_id=correlation_id,
+            context_id=context_payload.get("context_id"),
+            status="failed",
+            last_error={
+                "stage": "policy_generation",
+                "error_type": "dependency_error",
+                "error_code": "policy_agent_request_failed",
+            },
+            hop={
+                "service": "context-agent",
+                "stage": "policy_generation",
+                "operation": "generate_policy",
+                "target_service": "policy-agent",
+                "outcome": "failure",
+                "started_at": started_at,
+                "completed_at": completed_at,
+                "duration_ms": round((perf_counter() - started_perf) * 1000, 3),
+                "status_code": response.status_code if response is not None else None,
+                "error_type": "dependency_error",
+                "error_code": "policy_agent_request_failed",
+            },
+        )
         logger.warning(
             build_log_event(
                 event="context.policy.response",
@@ -408,6 +532,8 @@ def call_validator_agent(policy_data: dict) -> dict:
     validator_agent_url = current_app.config.get("VALIDATOR_AGENT_URL", "http://validator-agent:5000")
     correlation_id = _get_correlation_id(policy_data)
     timeout_seconds = _dependency_timeout("VALIDATOR_AGENT_TIMEOUT_SECONDS")
+    started_at = datetime.now(timezone.utc)
+    started_perf = perf_counter()
     log_event(
         logger,
         logging.INFO,
@@ -427,6 +553,25 @@ def call_validator_agent(policy_data: dict) -> dict:
             timeout=timeout_seconds,
         )
         response.raise_for_status()
+        completed_at = datetime.now(timezone.utc)
+        response_body = response.json()
+        _upsert_pipeline_diagnostic(
+            correlation_id=correlation_id,
+            context_id=policy_data.get("context_id"),
+            status="in_progress",
+            hop={
+                "service": "context-agent",
+                "stage": "validation",
+                "operation": "validate_policy",
+                "target_service": "validator-agent",
+                "outcome": "success",
+                "started_at": started_at,
+                "completed_at": completed_at,
+                "duration_ms": round((perf_counter() - started_perf) * 1000, 3),
+                "status_code": response.status_code,
+                "validation_status": response_body.get("status") if isinstance(response_body, dict) else None,
+            },
+        )
         log_event(
             logger,
             logging.INFO,
@@ -439,9 +584,33 @@ def call_validator_agent(policy_data: dict) -> dict:
             status_code=response.status_code,
             result="success",
         )
-        return response.json()
+        return response_body
     except requests.exceptions.RequestException as exc:
         response = exc.response if isinstance(exc, requests.exceptions.HTTPError) else None
+        completed_at = datetime.now(timezone.utc)
+        _upsert_pipeline_diagnostic(
+            correlation_id=correlation_id,
+            context_id=policy_data.get("context_id"),
+            status="failed",
+            last_error={
+                "stage": "validation",
+                "error_type": "dependency_error",
+                "error_code": "validator_agent_request_failed",
+            },
+            hop={
+                "service": "context-agent",
+                "stage": "validation",
+                "operation": "validate_policy",
+                "target_service": "validator-agent",
+                "outcome": "failure",
+                "started_at": started_at,
+                "completed_at": completed_at,
+                "duration_ms": round((perf_counter() - started_perf) * 1000, 3),
+                "status_code": response.status_code if response is not None else None,
+                "error_type": "dependency_error",
+                "error_code": "validator_agent_request_failed",
+            },
+        )
         logger.warning(
             build_log_event(
                 event="context.validator.response",
@@ -503,6 +672,7 @@ def store_validated_policy(context_id: str, validated_data: dict) -> dict:
     validated_at = datetime.now(timezone.utc)
     mongo.db.interactions.insert_one({
         "context_id": context_obj_id,
+        "correlation_id": correlation_id,
         "question_id": "validated_policy",
         "question_text": "Agent-generated policy",
         "answer": data["policy_text"],
@@ -529,6 +699,20 @@ def store_validated_policy(context_id: str, validated_data: dict) -> dict:
             "context_id": context_id,
         },
     })
+    _upsert_pipeline_diagnostic(
+        correlation_id=correlation_id,
+        context_id=context_id,
+        status="in_progress",
+        hop={
+            "service": "context-agent",
+            "stage": "persistence",
+            "operation": "store_validated_policy",
+            "outcome": "success",
+            "started_at": validated_at,
+            "completed_at": validated_at,
+            "duration_ms": 0.0,
+        },
+    )
     log_event(
         logger,
         logging.INFO,
@@ -547,22 +731,70 @@ def store_validated_policy(context_id: str, validated_data: dict) -> dict:
 
 def generate_full_policy_pipeline(context_id: str) -> dict:
     """Execute policy generation, validation, and context persistence pipeline."""
+    correlation_id = _get_correlation_id(context_id=context_id)
+    started_at = datetime.now(timezone.utc)
+    _upsert_pipeline_diagnostic(
+        correlation_id=correlation_id,
+        context_id=context_id,
+        status="in_progress",
+        hop={
+            "service": "context-agent",
+            "stage": "pipeline",
+            "operation": "generate_full_policy_pipeline",
+            "outcome": "started",
+            "started_at": started_at,
+        },
+    )
     log_event(
         logger,
         logging.INFO,
         event="context.pipeline.started",
         stage="pipeline",
         context_id=context_id,
-        correlation_id=_get_correlation_id(context_id=context_id),
+        correlation_id=correlation_id,
     )
     try:
         policy_result = trigger_policy_generation(context_id)
         if not policy_result.get("success"):
+            _upsert_pipeline_diagnostic(
+                correlation_id=policy_result.get("correlation_id", correlation_id),
+                context_id=context_id,
+                status="failed",
+                last_error={
+                    "stage": policy_result.get("stage", "policy_generation"),
+                    "error_type": policy_result.get("error_type"),
+                    "error_code": policy_result.get("error_code"),
+                },
+                completed=True,
+                hop={
+                    "service": "context-agent",
+                    "stage": policy_result.get("stage", "policy_generation"),
+                    "operation": "generate_full_policy_pipeline",
+                    "outcome": "failure",
+                    "completed_at": datetime.now(timezone.utc),
+                    "error_type": policy_result.get("error_type"),
+                    "error_code": policy_result.get("error_code"),
+                },
+            )
             return policy_result
 
         policy_data = policy_result["policy_data"]
         validated_data = call_validator_agent(policy_data)
         persistence_result = store_validated_policy(context_id, validated_data)
+        _upsert_pipeline_diagnostic(
+            correlation_id=_get_correlation_id(validated_data, context_id),
+            context_id=context_id,
+            status="completed",
+            completed=True,
+            hop={
+                "service": "context-agent",
+                "stage": "pipeline",
+                "operation": "generate_full_policy_pipeline",
+                "outcome": "success",
+                "completed_at": datetime.now(timezone.utc),
+                "validation_status": validated_data.get("status"),
+            },
+        )
         log_event(
             logger,
             logging.INFO,
@@ -579,6 +811,26 @@ def generate_full_policy_pipeline(context_id: str) -> dict:
             persistence=persistence_result,
         )
     except PipelineStepError as exc:
+        _upsert_pipeline_diagnostic(
+            correlation_id=exc.correlation_id or correlation_id,
+            context_id=context_id,
+            status="failed",
+            last_error={
+                "stage": exc.stage,
+                "error_type": exc.error_type,
+                "error_code": exc.error_code,
+            },
+            completed=True,
+            hop={
+                "service": "context-agent",
+                "stage": exc.stage,
+                "operation": "generate_full_policy_pipeline",
+                "outcome": "failure",
+                "completed_at": datetime.now(timezone.utc),
+                "error_type": exc.error_type,
+                "error_code": exc.error_code,
+            },
+        )
         log_event(
             logger,
             logging.WARNING,

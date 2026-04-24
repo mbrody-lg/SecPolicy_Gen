@@ -9,6 +9,7 @@ from app import mongo
 from app.services.logic import (
     PipelineStepError,
     get_health_status,
+    get_pipeline_diagnostic,
     get_readiness_status,
     generate_context_prompt,
     run_with_agent,
@@ -301,3 +302,19 @@ def trigger_policy_generation(context_id):
     else:
         flash(_pipeline_flash_message(result), "danger")
     return redirect(url_for("main.context_detail", context_id=context_id))
+
+
+@main.route("/diagnostics/<correlation_id>", methods=["GET"])
+def get_diagnostics(correlation_id):
+    """Return a bounded pipeline diagnostic document by correlation id."""
+    diagnostic = get_pipeline_diagnostic(correlation_id)
+    if not diagnostic:
+        return jsonify({
+            "success": False,
+            "error_type": "validation_error",
+            "error_code": "diagnostic_not_found",
+            "message": "Pipeline diagnostic not found.",
+            "details": {"correlation_id": correlation_id},
+            "correlation_id": correlation_id,
+        }), 404
+    return jsonify(diagnostic), 200

@@ -22,11 +22,34 @@ class FakeCollection:
         self.docs.append(document)
         return SimpleNamespace(inserted_id=document.get("_id"))
 
+    def update_one(self, query, update, upsert=False):
+        target = self.find_one(query)
+        if target is None:
+            if not upsert:
+                return SimpleNamespace(matched_count=0, modified_count=0)
+            target = {}
+            self.docs.append(target)
+
+        for key, value in update.get("$setOnInsert", {}).items():
+            target.setdefault(key, value)
+        for key, value in update.get("$set", {}).items():
+            target[key] = value
+        for key, value in update.get("$push", {}).items():
+            target.setdefault(key, [])
+            if isinstance(value, dict) and "$each" in value:
+                target[key].extend(value["$each"])
+                if "$slice" in value:
+                    target[key] = target[key][value["$slice"]:]
+            else:
+                target[key].append(value)
+        return SimpleNamespace(matched_count=1, modified_count=1)
+
 
 class FakeDB:
-    def __init__(self, contexts=None, interactions=None):
+    def __init__(self, contexts=None, interactions=None, pipeline_diagnostics=None):
         self.contexts = FakeCollection(contexts)
         self.interactions = FakeCollection(interactions)
+        self.pipeline_diagnostics = FakeCollection(pipeline_diagnostics)
 
 
 class FakeResponse:
@@ -296,6 +319,10 @@ def test_generate_full_policy_pipeline_stores_validated_policy_without_internal_
     assert result["persistence"]["stage"] == "persistence"
     assert len(fake_db.interactions.docs) == 1
     assert fake_db.interactions.docs[0]["answer"] == "Validated policy text"
+    assert len(fake_db.pipeline_diagnostics.docs) == 1
+    assert fake_db.pipeline_diagnostics.docs[0]["context_id"] == str(context_id)
+    assert fake_db.pipeline_diagnostics.docs[0]["status"] == "completed"
+    assert fake_db.pipeline_diagnostics.docs[0]["hops"][-1]["outcome"] == "success"
 
 
 def test_generate_full_policy_pipeline_returns_structured_stage_error(monkeypatch):
@@ -517,6 +544,50 @@ def test_call_policy_agent_emits_structured_logs(app_context, monkeypatch, caplo
     assert '"event": "context.policy.request"' in caplog.text
     assert '"event": "context.policy.response"' in caplog.text
     assert '"context_id": "ctx-log"' in caplog.text
+
+
+def test_get_pipeline_diagnostic_returns_serialized_document(monkeypatch):
+    fake_db = FakeDB(
+        pipeline_diagnostics=[
+            {
+                "_id": ObjectId(),
+                "correlation_id": "corr-1",
+                "context_id": "ctx-1",
+                "status": "completed",
+                "hops": [],
+            }
+        ]
+    )
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    result = logic.get_pipeline_diagnostic("corr-1")
+
+    assert result["correlation_id"] == "corr-1"
+    assert result["_id"]
+
+
+def test_upsert_pipeline_diagnostic_bounds_hop_history(monkeypatch):
+    fake_db = FakeDB()
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    for index in range(logic.MAX_PIPELINE_DIAGNOSTIC_HOPS + 5):
+        logic._upsert_pipeline_diagnostic(  # noqa: SLF001 - direct helper coverage
+            correlation_id="corr-bounded",
+            context_id="ctx-bounded",
+            status="in_progress",
+            hop={
+                "service": "context-agent",
+                "stage": "pipeline",
+                "operation": f"step-{index}",
+                "outcome": "success",
+            },
+        )
+
+    diagnostic = fake_db.pipeline_diagnostics.find_one({"correlation_id": "corr-bounded"})
+
+    assert len(diagnostic["hops"]) == logic.MAX_PIPELINE_DIAGNOSTIC_HOPS
+    assert diagnostic["hops"][0]["operation"] == "step-5"
+    assert diagnostic["hops"][-1]["operation"] == f"step-{logic.MAX_PIPELINE_DIAGNOSTIC_HOPS + 4}"
 
 
 def test_pipeline_error_adds_request_correlation_id_when_exception_lacks_one(app, monkeypatch):

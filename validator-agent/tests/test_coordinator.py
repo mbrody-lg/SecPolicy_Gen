@@ -354,8 +354,10 @@ def test_log_validation_persists_ownership_and_policy_reference():
             decision="accepted",
             round_num=1,
             consensus=True,
+            correlation_id="corr-ownership",
         )
 
+    assert inserted["document"]["correlation_id"] == "corr-ownership"
     assert inserted["document"]["ownership"] == {
         "owner_service": "validator-agent",
         "source_of_truth": True,

@@ -168,6 +168,7 @@ def test_run_generation_pipeline_persists_policy(app_context, monkeypatch):
     stored_policy = mongo.db.policies.find_one({"context_id": "ctx-1"})
     assert stored_policy is not None
     assert stored_policy["ownership"]["owner_service"] == "policy-agent"
+    assert stored_policy["correlation_id"] == "ctx-1"
 
 
 def test_run_generation_pipeline_emits_structured_logs(app_context, monkeypatch, caplog):
@@ -273,6 +274,7 @@ def test_run_policy_update_pipeline_updates_existing_policy(app_context, monkeyp
     stored_policy = mongo.db.policies.find_one({"context_id": context_id})
     assert stored_policy["policy_text"] == "Updated policy body"
     assert stored_policy["last_validation_status"] == "review"
+    assert stored_policy["correlation_id"] == context_id
 
 
 def test_build_policy_update_prompt_is_deterministic():

@@ -111,7 +111,7 @@ class Coordinator:
 
             self.log_validation(
                 context_id, round_results, decision, rounds_done, True,
-                all_rounds=all_rounds, evaluator_result=evaluator_feedback
+                all_rounds=all_rounds, evaluator_result=evaluator_feedback, correlation_id=correlation_id
             )
 
             if decision == "accepted":
@@ -165,7 +165,7 @@ class Coordinator:
 
         self.log_validation(
             context_id, last_round, final_decision, self.max_rounds, False,
-            all_rounds=all_rounds, evaluator_result=evaluator_feedback
+            all_rounds=all_rounds, evaluator_result=evaluator_feedback, correlation_id=correlation_id
         )
 
         return self.build_response(final_decision, last_round, context_id, language, prompt, version, generated_at, evaluator_feedback)
@@ -249,11 +249,13 @@ class Coordinator:
         consensus: bool,
         all_rounds: List[List[Dict]] = None,
         evaluator_result: Optional[Dict] = None,
+        correlation_id: str | None = None,
     ):
         """Persist validation trace and metadata in MongoDB."""
         try:
             log_data = {
                 "context_id": context_id,
+                "correlation_id": correlation_id or context_id,
                 "timestamp": datetime.now(timezone.utc),
                 "round": round_num,
                 "consensus_achieved": consensus,

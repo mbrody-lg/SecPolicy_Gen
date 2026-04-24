@@ -202,6 +202,34 @@ def test_trigger_policy_generation_redirects_with_stage_flash_on_failure(client,
     assert ("danger", "validation: Policy validation failed.") in flashes
 
 
+def test_get_diagnostics_route_returns_document(client, monkeypatch):
+    monkeypatch.setattr(
+        routes_module,
+        "get_pipeline_diagnostic",
+        lambda correlation_id: {
+            "_id": "diag-1",
+            "correlation_id": correlation_id,
+            "context_id": "ctx-1",
+            "status": "completed",
+            "hops": [],
+        },
+    )
+
+    response = client.get("/diagnostics/corr-1")
+
+    assert response.status_code == 200
+    assert response.get_json()["correlation_id"] == "corr-1"
+
+
+def test_get_diagnostics_route_returns_404_when_missing(client, monkeypatch):
+    monkeypatch.setattr(routes_module, "get_pipeline_diagnostic", lambda correlation_id: None)
+
+    response = client.get("/diagnostics/corr-missing")
+
+    assert response.status_code == 404
+    assert response.get_json()["error_code"] == "diagnostic_not_found"
+
+
 def test_dashboard_route_adds_security_headers(client, monkeypatch):
     monkeypatch.setattr(routes_module.mongo, "db", FakeDB(), raising=False)
 

@@ -122,7 +122,7 @@ def create_app():
             response.headers["X-Correlation-ID"] = correlation_id
             if _is_json_response(response):
                 payload = response.get_json(silent=True)
-                if isinstance(payload, dict) and "correlation_id" in payload:
+                if isinstance(payload, dict) and payload.get("success") is False and "correlation_id" in payload:
                     payload["correlation_id"] = correlation_id
                     response.set_data(
                         app.json.dumps(payload) + ("\n" if response.get_data(as_text=True).endswith("\n") else "")
