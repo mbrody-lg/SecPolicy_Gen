@@ -1,6 +1,7 @@
 """Application factory for the context-agent service."""
 
 import os
+import re
 from uuid import uuid4
 
 from flask import Flask, g, has_request_context, request
@@ -10,6 +11,9 @@ from dotenv import load_dotenv
 mongo = PyMongo()
 
 TEST_ONLY_SECRET_KEY = "test-only-secret-key"
+CORRELATION_ID_HEADER = "X-Correlation-ID"
+CORRELATION_ID_MAX_LENGTH = 128
+CORRELATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]+$")
 
 
 def _get_env_bool(name: str, default: bool = False) -> bool:
@@ -59,9 +63,13 @@ def get_request_correlation_id() -> str | None:
 
 
 def _ensure_correlation_id() -> str:
-    """Preserve inbound correlation id or create one for the request lifecycle."""
-    correlation_id = request.headers.get("X-Correlation-ID")
-    if correlation_id:
+    """Preserve a safe inbound correlation id or create one for the request lifecycle."""
+    correlation_id = request.headers.get(CORRELATION_ID_HEADER, "").strip()
+    if (
+        correlation_id
+        and len(correlation_id) <= CORRELATION_ID_MAX_LENGTH
+        and CORRELATION_ID_PATTERN.fullmatch(correlation_id)
+    ):
         return correlation_id
     return str(uuid4())
 
@@ -119,7 +127,7 @@ def create_app():
     def apply_security_headers(response):
         correlation_id = get_request_correlation_id()
         if correlation_id:
-            response.headers["X-Correlation-ID"] = correlation_id
+            response.headers[CORRELATION_ID_HEADER] = correlation_id
             if _is_json_response(response):
                 payload = response.get_json(silent=True)
                 if isinstance(payload, dict) and payload.get("success") is False and "correlation_id" in payload:

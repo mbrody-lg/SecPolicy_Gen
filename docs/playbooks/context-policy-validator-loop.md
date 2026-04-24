@@ -38,7 +38,8 @@ Expected behavior:
 ## Correlation And Structured Logs
 
 The loop uses `X-Correlation-ID` as the shared trace key:
-- an inbound `X-Correlation-ID` is preserved when present
+- an inbound `X-Correlation-ID` is preserved when present and valid
+- unsafe or oversized inbound correlation ids are replaced with generated values
 - a new correlation id is generated when absent
 - the correlation id is returned on HTTP responses
 - JSON error payloads keep `correlation_id` aligned with the response header

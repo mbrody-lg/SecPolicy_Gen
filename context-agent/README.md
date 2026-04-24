@@ -59,7 +59,8 @@ python run.py
 The service runs on `http://localhost:5000`
 
 Each request now has a stable correlation boundary:
-- inbound `X-Correlation-ID` is preserved when present
+- inbound `X-Correlation-ID` is preserved when present and valid
+- unsafe or oversized inbound correlation ids are replaced with a generated value
 - a new correlation id is generated when absent
 - the value is always returned in the response header as `X-Correlation-ID`
 - outbound calls to `policy-agent` and `validator-agent` reuse that same value

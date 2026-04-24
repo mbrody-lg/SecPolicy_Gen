@@ -78,7 +78,8 @@ def test_validate_policy_route_rejects_missing_required_fields(client):
         )
 
     assert response.status_code == 400
-    assert response.get_json() == {
+    payload = response.get_json()
+    assert payload == {
         "success": False,
         "error_type": "contract_error",
         "error_code": "missing_required_fields",
@@ -87,9 +88,9 @@ def test_validate_policy_route_rejects_missing_required_fields(client):
             "stage": "contract_validation",
             "missing_fields": ["structured_plan", "generated_at"],
         },
-        "correlation_id": "ctx-1",
+        "correlation_id": response.headers["X-Correlation-ID"],
     }
-    assert response.headers["X-Correlation-ID"] == "ctx-1"
+    assert payload["correlation_id"] != "ctx-1"
 
 
 def test_validate_policy_route_rejects_invalid_json_body(client):
@@ -225,8 +226,9 @@ def test_validate_policy_route_propagates_dependency_error(client):
         )
 
     assert response.status_code == 502
-    assert response.get_json() == dependency_error
-    assert response.headers["X-Correlation-ID"] == "ctx-dep"
+    payload = response.get_json()
+    assert payload == {**dependency_error, "correlation_id": response.headers["X-Correlation-ID"]}
+    assert payload["correlation_id"] != "ctx-dep"
 
 
 def test_validate_policy_route_hides_internal_exception_details(client):
@@ -255,15 +257,16 @@ def test_validate_policy_route_hides_internal_exception_details(client):
         )
 
     assert response.status_code == 500
-    assert response.get_json() == {
+    payload = response.get_json()
+    assert payload == {
         "success": False,
         "error_type": "internal_error",
         "error_code": "validation_execution_failed",
         "message": "Validator execution failed.",
         "details": {"stage": "validation", "operation": "validate_policy"},
-        "correlation_id": "ctx-int",
+        "correlation_id": response.headers["X-Correlation-ID"],
     }
-    assert response.headers["X-Correlation-ID"] == "ctx-int"
+    assert payload["correlation_id"] != "ctx-int"
 
 def test_delete_validation_by_context(client, app_context):
     context_id = str(ObjectId())

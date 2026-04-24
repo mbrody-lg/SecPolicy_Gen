@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 from uuid import uuid4
 
 from flask import Flask
@@ -16,6 +17,8 @@ mongo = PyMongo()
 
 TEST_ONLY_SECRET_KEY = "test-only-secret-key"
 CORRELATION_ID_HEADER = "X-Correlation-ID"
+CORRELATION_ID_MAX_LENGTH = 128
+CORRELATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]+$")
 
 
 def _get_env_bool(name: str, default: bool = False) -> bool:
@@ -56,7 +59,18 @@ def get_request_correlation_id() -> str | None:
         return correlation_id
 
     header_value = request.headers.get(CORRELATION_ID_HEADER, "").strip()
-    return header_value or None
+    if (
+        header_value
+        and len(header_value) <= CORRELATION_ID_MAX_LENGTH
+        and CORRELATION_ID_PATTERN.fullmatch(header_value)
+    ):
+        return header_value
+    return None
+
+
+def _resolve_request_correlation_id() -> str:
+    """Preserve a safe inbound correlation id or create a request-scoped fallback."""
+    return get_request_correlation_id() or str(uuid4())
 
 
 def create_app():
@@ -99,8 +113,7 @@ def create_app():
 
     @app.before_request
     def assign_correlation_id():
-        incoming_correlation_id = request.headers.get(CORRELATION_ID_HEADER, "").strip()
-        g.correlation_id = incoming_correlation_id or str(uuid4())
+        g.correlation_id = _resolve_request_correlation_id()
 
     @app.after_request
     def apply_security_headers(response):

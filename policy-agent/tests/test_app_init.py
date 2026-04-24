@@ -115,6 +115,37 @@ def test_create_app_preserves_incoming_correlation_id(monkeypatch):
     assert response.headers[app_module.CORRELATION_ID_HEADER] == "incoming-correlation-id"
 
 
+@pytest.mark.parametrize(
+    "unsafe_correlation_id",
+    [
+        "incoming correlation id",
+        "<script>alert(1)</script>",
+        "x" * (app_module.CORRELATION_ID_MAX_LENGTH + 1),
+    ],
+)
+def test_create_app_regenerates_unsafe_incoming_correlation_id(monkeypatch, unsafe_correlation_id):
+    _set_common_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "true")
+    monkeypatch.setenv("FLASK_SECRET_KEY", "configured-test-secret")
+
+    app = app_module.create_app()
+
+    @app.route("/_correlation/safe")
+    def safe():
+        return jsonify({"success": True, "correlation_id": g.correlation_id})
+
+    response = app.test_client().get(
+        "/_correlation/safe",
+        headers={app_module.CORRELATION_ID_HEADER: unsafe_correlation_id},
+    )
+
+    assert response.status_code == 200
+    generated = response.headers[app_module.CORRELATION_ID_HEADER]
+    assert generated
+    assert generated != unsafe_correlation_id
+    assert response.get_json()["correlation_id"] == generated
+
+
 def test_create_app_generates_correlation_id_when_missing(monkeypatch):
     _set_common_env(monkeypatch)
     monkeypatch.setenv("TESTING", "true")

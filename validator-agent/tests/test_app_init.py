@@ -113,6 +113,37 @@ def test_create_app_preserves_inbound_correlation_id(monkeypatch):
     assert response.headers["X-Correlation-ID"] == "corr-inbound"
 
 
+@pytest.mark.parametrize(
+    "unsafe_correlation_id",
+    [
+        "corr inbound",
+        "<script>alert(1)</script>",
+        "x" * (app_module.CORRELATION_ID_MAX_LENGTH + 1),
+    ],
+)
+def test_create_app_regenerates_unsafe_inbound_correlation_id(monkeypatch, unsafe_correlation_id):
+    _set_common_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "true")
+    monkeypatch.setenv("FLASK_SECRET_KEY", "configured-test-secret")
+
+    app = app_module.create_app()
+
+    @app.route("/_unsafe-correlation-check")
+    def unsafe_correlation_check():
+        return "", 204
+
+    response = app.test_client().get(
+        "/_unsafe-correlation-check",
+        headers={"X-Correlation-ID": unsafe_correlation_id},
+    )
+
+    assert response.status_code == 204
+    generated = response.headers["X-Correlation-ID"]
+    assert generated
+    assert generated != unsafe_correlation_id
+    assert len(generated) == 32
+
+
 def test_create_app_generates_correlation_id_when_missing(monkeypatch):
     _set_common_env(monkeypatch)
     monkeypatch.setenv("TESTING", "true")
