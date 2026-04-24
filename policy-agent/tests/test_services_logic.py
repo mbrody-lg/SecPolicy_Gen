@@ -58,9 +58,7 @@ def test_get_readiness_status_returns_ready_when_dependencies_are_available(app,
     assert payload["checks"]["chroma"] == {
         "status": "configured",
         "mode": "config_only",
-        "host": "chroma",
-        "port": 8000,
-        "collections": ["normativa"],
+        "collection_count": 1,
     }
 
 
@@ -106,6 +104,8 @@ def test_get_readiness_status_reports_controlled_failure(app, monkeypatch):
     assert payload["checks"]["mongo"]["reason"] == "ping_failed"
     assert payload["checks"]["chroma"]["status"] == "error"
     assert payload["checks"]["chroma"]["mode"] == "config_only"
+    assert "details" not in payload["checks"]["mongo"]
+    assert "details" not in payload["checks"]["chroma"]
 
 
 def test_run_generation_pipeline_rejects_invalid_json_body(app_context):

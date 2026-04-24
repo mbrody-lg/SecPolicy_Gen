@@ -42,7 +42,6 @@ def get_health_status() -> dict:
 
 def get_readiness_status() -> dict:
     """Validate the minimum dependencies needed to serve validator requests."""
-    correlation_id = _get_correlation_id(None)
     checks = {}
     errors = []
 
@@ -72,7 +71,6 @@ def get_readiness_status() -> dict:
             error_code="service_not_ready",
             message="Validator-agent readiness checks failed.",
             details={"checks": checks, "errors": errors},
-            correlation_id=correlation_id,
         ) | {"status_code": 503}
 
     return {
@@ -80,7 +78,6 @@ def get_readiness_status() -> dict:
         "status": "ready",
         "service": "validator-agent",
         "checks": checks,
-        "correlation_id": correlation_id,
     }
 
 

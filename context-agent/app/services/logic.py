@@ -75,10 +75,10 @@ def _mongo_readiness_check() -> dict:
     try:
         mongo.cx.admin.command("ping")
         return {"status": "ok"}
-    except Exception as exc:
+    except Exception:
         return {
             "status": "error",
-            "message": str(exc),
+            "reason": "ping_failed",
         }
 
 

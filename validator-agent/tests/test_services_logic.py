@@ -30,7 +30,6 @@ def test_get_readiness_status_returns_ready_payload(app, monkeypatch):
         "status": "ready",
         "service": "validator-agent",
         "checks": {"mongo": "ok", "config": "ok"},
-        "correlation_id": "corr-ready",
     }
 
 
@@ -50,7 +49,6 @@ def test_get_readiness_status_returns_dependency_error_when_mongo_fails(app, mon
             "checks": {"mongo": "error", "config": "ok"},
             "errors": ["mongo_unavailable"],
         },
-        "correlation_id": "corr-ready",
         "status_code": 503,
     }
 

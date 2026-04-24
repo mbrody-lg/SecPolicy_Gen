@@ -338,40 +338,35 @@ def get_readiness_status() -> tuple[dict, int]:
         _validate_readiness_config(config)
         checks["config"] = {
             "status": "ok",
-            "path": config_path,
+            "source": "loaded",
         }
     except FileNotFoundError:
         ready = False
         checks["config"] = {
             "status": "error",
-            "path": config_path,
             "reason": "not_found",
         }
     except yaml.YAMLError:
         ready = False
         checks["config"] = {
             "status": "error",
-            "path": config_path,
             "reason": "invalid_yaml",
         }
-    except Exception as exc:
+    except Exception:
         ready = False
         checks["config"] = {
             "status": "error",
-            "path": config_path,
             "reason": "invalid_config",
-            "details": str(exc),
         }
 
     try:
         mongo.cx.admin.command("ping")
         checks["mongo"] = {"status": "ok"}
-    except Exception as exc:
+    except Exception:
         ready = False
         checks["mongo"] = {
             "status": "error",
             "reason": "ping_failed",
-            "details": str(exc),
         }
 
     chroma_entries = _collect_chroma_vector_entries(config or {})
@@ -386,17 +381,14 @@ def get_readiness_status() -> tuple[dict, int]:
             checks["chroma"] = {
                 "status": "configured",
                 "mode": "config_only",
-                "host": os.getenv("CHROMA_HOST", "chroma"),
-                "port": chroma_port_value,
-                "collections": collections,
+                "collection_count": len(collections),
             }
-        except Exception as exc:
+        except Exception:
             ready = False
             checks["chroma"] = {
                 "status": "error",
                 "mode": "config_only",
                 "reason": "invalid_configuration",
-                "details": str(exc),
             }
     else:
         checks["chroma"] = {

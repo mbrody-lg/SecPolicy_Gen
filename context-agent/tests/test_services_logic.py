@@ -214,7 +214,7 @@ def test_get_readiness_status_reports_mongo_failure(app_context, monkeypatch):
         "service": "context-agent",
         "checks": {
             "config": {"status": "ok", "missing": []},
-            "mongo": {"status": "error", "message": "ping failed"},
+            "mongo": {"status": "error", "reason": "ping_failed"},
         },
     }
 

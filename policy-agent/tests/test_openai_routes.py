@@ -26,7 +26,7 @@ def test_ready_route_reports_success(client):
                 "status": "ready",
                 "service": "policy-agent",
                 "checks": {
-                    "config": {"status": "ok", "path": "/tmp/policy_agent.yaml"},
+                    "config": {"status": "ok", "source": "loaded"},
                     "mongo": {"status": "ok"},
                     "chroma": {"status": "configured", "mode": "config_only"},
                 },
@@ -49,11 +49,10 @@ def test_ready_route_reports_controlled_failure(client):
                 "status": "not_ready",
                 "service": "policy-agent",
                 "checks": {
-                    "config": {"status": "ok", "path": "/tmp/policy_agent.yaml"},
+                    "config": {"status": "ok", "source": "loaded"},
                     "mongo": {
                         "status": "error",
                         "reason": "ping_failed",
-                        "details": "mongo unavailable",
                     },
                     "chroma": {"status": "configured", "mode": "config_only"},
                 },
@@ -66,6 +65,7 @@ def test_ready_route_reports_controlled_failure(client):
     assert response.status_code == 503
     assert response.get_json()["status"] == "not_ready"
     assert response.get_json()["checks"]["mongo"]["reason"] == "ping_failed"
+    assert "details" not in response.get_json()["checks"]["mongo"]
 
 
 def test_generate_policy_route_rejects_missing_required_fields(client):

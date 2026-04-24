@@ -29,7 +29,8 @@ def test_ready_route_reports_ready_status(client):
     assert response.get_json()["status"] == "ready"
     assert response.get_json()["service"] == "validator-agent"
     assert response.get_json()["checks"] == {"mongo": "ok", "config": "ok"}
-    assert response.get_json()["correlation_id"] == response.headers["X-Correlation-ID"]
+    assert "correlation_id" not in response.get_json()
+    assert response.headers["X-Correlation-ID"]
 
 
 def test_ready_route_reports_unready_when_dependency_check_fails(client):
@@ -41,11 +42,10 @@ def test_ready_route_reports_unready_when_dependency_check_fails(client):
             "error_code": "service_not_ready",
             "message": "Validator-agent readiness checks failed.",
             "details": {"checks": {"mongo": "error"}, "errors": ["mongo_unavailable"]},
-            "correlation_id": "corr-ready-fail",
             "status_code": 503,
         },
     ):
-        response = client.get("/ready")
+        response = client.get("/ready", headers={"X-Correlation-ID": "corr-ready-fail"})
 
     assert response.status_code == 503
     assert response.get_json() == {
@@ -54,7 +54,6 @@ def test_ready_route_reports_unready_when_dependency_check_fails(client):
         "error_code": "service_not_ready",
         "message": "Validator-agent readiness checks failed.",
         "details": {"checks": {"mongo": "error"}, "errors": ["mongo_unavailable"]},
-        "correlation_id": "corr-ready-fail",
     }
     assert response.headers["X-Correlation-ID"] == "corr-ready-fail"
 
