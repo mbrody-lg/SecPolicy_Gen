@@ -5,6 +5,7 @@ import logging
 from app.agents.vector.factory import get_vector_clients
 from flask import current_app
 from app.observability import log_event
+from app.rag.evidence import format_evidence_context, normalize_evidence
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ class RAGProcessor:
 
     def apply(self, query: str, top_k: int = 3) -> str:
         """Return prompt enriched with retrieved context from all clients."""
-        results = []
+        evidence_items = []
         for client in self.vector_clients:
             if current_app.config["DEBUG"]:
                 log_event(
@@ -36,19 +37,26 @@ class RAGProcessor:
                     top_k=top_k,
                 )
                 
-            documents = client.search(query, top_k=top_k)
-            results.extend(documents)
+            search_evidence = getattr(client, "search_evidence", None)
+            if callable(search_evidence):
+                documents = search_evidence(query, top_k=top_k)
+            else:
+                documents = client.search(query, top_k=top_k)
+            evidence_items.extend(
+                normalize_evidence(item, fallback_collection=type(client).__name__)
+                for item in documents
+            )
 
         log_event(
             logger,
             logging.INFO,
             event="policy.rag.search_completed",
             stage="policy_generation",
-            result_count=len(results),
+            result_count=len(evidence_items),
         )
-        if not results:
+        if not evidence_items:
             return f"{query}\n\nNo relevant context found."
 
-        context = "\n\n".join(results)
+        context = format_evidence_context(evidence_items)
         enriched_prompt = f"{query}\n\n=== Relevant Context ===\n{context}\n\n=== Relevant Context end ===\n"
         return enriched_prompt
