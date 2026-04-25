@@ -30,6 +30,8 @@ MAX_POLICY_AGENT_VERSION_LENGTH = 64
 MAX_GENERATED_AT_LENGTH = 64
 MAX_STATUS_LENGTH = 32
 MAX_PROMPT_LENGTH = 20000
+MAX_BUSINESS_CONTEXT_FIELDS = 32
+MAX_BUSINESS_CONTEXT_VALUE_LENGTH = 4000
 MAX_POLICY_TEXT_LENGTH = 50000
 MAX_FEEDBACK_ITEMS = 20
 MAX_FEEDBACK_ITEM_LENGTH = 1000
@@ -428,7 +430,7 @@ def validate_generation_payload(payload: dict | None) -> dict:
             correlation_id=correlation_id,
         )
 
-    return {
+    normalized = {
         "context_id": _require_string_field(
             data,
             field="context_id",
@@ -455,6 +457,72 @@ def validate_generation_payload(payload: dict | None) -> dict:
         ),
         "correlation_id": correlation_id,
     }
+    if "business_context" in data:
+        normalized["business_context"] = _validate_business_context(
+            data["business_context"],
+            correlation_id=correlation_id,
+        )
+    return normalized
+
+
+def _validate_business_context(value: object, *, correlation_id: str | None) -> dict:
+    """Validate optional structured context for retrieval planning."""
+    if not isinstance(value, dict):
+        raise PipelineStepError(
+            stage="contract_validation",
+            message="Field 'business_context' must be an object.",
+            error_type="contract_error",
+            error_code="invalid_field_type",
+            status_code=400,
+            details={"field": "business_context", "expected_type": "object"},
+            correlation_id=correlation_id,
+        )
+    if len(value) > MAX_BUSINESS_CONTEXT_FIELDS:
+        raise PipelineStepError(
+            stage="contract_validation",
+            message="Field 'business_context' exceeds the allowed field count.",
+            error_type="contract_error",
+            error_code="field_too_large",
+            status_code=413,
+            details={"field": "business_context", "max_fields": MAX_BUSINESS_CONTEXT_FIELDS},
+            correlation_id=correlation_id,
+        )
+
+    normalized = {}
+    for key, item in value.items():
+        if not isinstance(key, str) or not key.strip():
+            raise PipelineStepError(
+                stage="contract_validation",
+                message="Field 'business_context' contains an invalid key.",
+                error_type="contract_error",
+                error_code="invalid_field_type",
+                status_code=400,
+                details={"field": "business_context", "expected_key_type": "string"},
+                correlation_id=correlation_id,
+            )
+        if isinstance(item, str):
+            if len(item) > MAX_BUSINESS_CONTEXT_VALUE_LENGTH:
+                raise PipelineStepError(
+                    stage="contract_validation",
+                    message="Field 'business_context' contains an oversized value.",
+                    error_type="contract_error",
+                    error_code="field_too_large",
+                    status_code=413,
+                    details={
+                        "field": "business_context",
+                        "key": key,
+                        "max_length": MAX_BUSINESS_CONTEXT_VALUE_LENGTH,
+                    },
+                    correlation_id=correlation_id,
+                )
+            normalized[key.strip()] = item.strip()
+        elif isinstance(item, list):
+            normalized[key.strip()] = [str(entry).strip() for entry in item if str(entry).strip()]
+        elif item is None:
+            normalized[key.strip()] = None
+        else:
+            normalized[key.strip()] = str(item)
+    return normalized
 
 
 def validate_policy_update_payload(payload: dict | None, path_context_id: str) -> tuple[dict, dict]:

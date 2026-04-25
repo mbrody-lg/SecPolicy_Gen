@@ -189,6 +189,44 @@ def test_run_generation_pipeline_rejects_oversized_prompt(app_context):
     }
 
 
+def test_validate_generation_payload_accepts_optional_business_context(app_context):
+    result = logic.validate_generation_payload(
+        {
+            "context_id": "ctx-business",
+            "refined_prompt": "Generate policy",
+            "language": "en",
+            "model_version": "openai",
+            "business_context": {
+                "country": "Spain",
+                "sector": "Private healthcare",
+                "important_assets": ["Medical records", "Backups"],
+            },
+        }
+    )
+
+    assert result["business_context"] == {
+        "country": "Spain",
+        "sector": "Private healthcare",
+        "important_assets": ["Medical records", "Backups"],
+    }
+
+
+def test_validate_generation_payload_rejects_invalid_business_context(app_context):
+    result = logic.run_generation_pipeline(
+        {
+            "context_id": "ctx-business",
+            "refined_prompt": "Generate policy",
+            "language": "en",
+            "model_version": "openai",
+            "business_context": "country=Spain",
+        }
+    )
+
+    assert result["success"] is False
+    assert result["error_code"] == "invalid_field_type"
+    assert result["details"]["field"] == "business_context"
+
+
 def test_run_generation_pipeline_persists_policy(app_context, monkeypatch):
     monkeypatch.setattr(
         logic,
