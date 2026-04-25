@@ -309,6 +309,8 @@ def _collect_chroma_vector_entries(config: dict) -> list[dict]:
             chroma_entry = vector_entry.get("chroma")
             if isinstance(chroma_entry, dict):
                 entries.append(chroma_entry)
+            elif "chroma" in vector_entry:
+                entries.append(vector_entry)
 
     return entries
 

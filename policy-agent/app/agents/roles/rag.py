@@ -21,22 +21,6 @@ class RAGProcessor:
         # Create vector clients from YAML configuration
         self.vector_clients = get_vector_clients(vector_config)
 
-        # Load required collections
-        self._load_collections(vector_config)
-
-    def _load_collections(self, vector_config):
-        """Load vector collections declared in the RAG role configuration."""
-        for client, entry in zip(self.vector_clients, vector_config):
-            backend_name = next(iter(entry)).lower()
-            collections = entry.get("collection", [])
-
-            if not isinstance(collections, list):
-                raise ValueError(f"'collection' must be a list for {backend_name}")
-
-            # Load matching collection (one per client)
-            if collections:
-                client.load_collection(collections[0])  # loads only one collection per client
-
     def apply(self, query: str, top_k: int = 3) -> str:
         """Return prompt enriched with retrieved context from all clients."""
         results = []

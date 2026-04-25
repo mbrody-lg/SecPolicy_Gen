@@ -108,6 +108,49 @@ def test_get_readiness_status_reports_controlled_failure(app, monkeypatch):
     assert "details" not in payload["checks"]["chroma"]
 
 
+def test_get_readiness_status_reads_yaml_style_chroma_vector_entry(app, monkeypatch):
+    class FakeAdmin:
+        @staticmethod
+        def command(name):
+            assert name == "ping"
+            return {"ok": 1}
+
+    class FakeMongoClient:
+        admin = FakeAdmin()
+
+    monkeypatch.setattr(
+        logic,
+        "load_policy_config",
+        lambda: {
+            "type": "openai",
+            "name": "OpenAI-Policy",
+            "model": "gpt-4o-mini",
+            "roles": [
+                {
+                    "vector": [
+                        {
+                            "chroma": "Chroma Vector Database",
+                            "collection": ["normativa", "sector", "metodologia", "guia"],
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(mongo, "cx", FakeMongoClient())
+    monkeypatch.setenv("CHROMA_PORT", "8000")
+
+    with app.app_context():
+        payload, status_code = logic.get_readiness_status()
+
+    assert status_code == 200
+    assert payload["checks"]["chroma"] == {
+        "status": "configured",
+        "mode": "config_only",
+        "collection_count": 4,
+    }
+
+
 def test_run_generation_pipeline_rejects_invalid_json_body(app_context):
     result = logic.run_generation_pipeline(None)
 
