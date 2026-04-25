@@ -5,6 +5,7 @@ import logging
 from app.agents.base import Agent
 from app.agents.openai.client import OpenAIClient
 from app.agents.roles.rag import RAGProcessor
+from app.rag.evidence import serialize_evidence
 from flask import current_app
 from app.observability import build_log_event, log_event
 
@@ -30,6 +31,7 @@ class OpenAIAgent(Agent):
 
         current_prompt = prompt
         structured_plan = ""
+        retrieval_evidence = []
 
         for role in self.roles:
             role_key = next(iter(role.keys()))
@@ -64,6 +66,7 @@ class OpenAIAgent(Agent):
                     instructions + current_prompt,
                     retrieval_plan=retrieval_plan,
                 )
+                retrieval_evidence = serialize_evidence(rag_processor.evidence_items)
                 continue  # Skip direct OpenAI call for RAG stage
 
             if role_key == "MPG":
@@ -100,7 +103,12 @@ class OpenAIAgent(Agent):
                     prompt_length=len(current_prompt),
                 )
 
-        return {'text': current_prompt.strip(), 'structured_plan': structured_plan, "context_id": context_id}
+        return {
+            "text": current_prompt.strip(),
+            "structured_plan": structured_plan,
+            "retrieval_evidence": retrieval_evidence,
+            "context_id": context_id,
+        }
 
     def _chat(self, prompt: str, instructions: str, temperature: float, max_tokens: int) -> str:
         """Run a chat completion call with role-specific instructions."""

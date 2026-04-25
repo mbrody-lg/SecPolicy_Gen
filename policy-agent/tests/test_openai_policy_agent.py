@@ -33,9 +33,11 @@ def test_openai_policy_agent_pipeline(
     assert isinstance(result, dict)
     assert "text" in result
     assert "structured_plan" in result
+    assert "retrieval_evidence" in result
     assert "context_id" in result
     assert result["context_id"] == default_context_id
     assert result["text"] == "final policy"
+    assert result["retrieval_evidence"] == []
     assert isinstance(result["structured_plan"], list)
     assert len(result["structured_plan"]) == 3
     retrieval_plan = mock_rag_processor.return_value.apply.call_args.kwargs["retrieval_plan"]
@@ -121,3 +123,48 @@ def test_run_with_agent_builds_contextual_retrieval_plan(
         "sector",
         "metodologia",
     }
+
+
+@patch("app.agents.openai.agent.RAGProcessor")
+@patch("app.agents.openai.agent.OpenAIAgent._chat")
+def test_openai_policy_agent_returns_serialized_rag_evidence(
+    mock_chat,
+    mock_rag_processor,
+    app_context,
+    default_context_id,
+    openai_model_version,
+):
+    mock_rag_processor.return_value.apply.return_value = "[RAG] enriched prompt"
+    mock_rag_processor.return_value.evidence_items = [
+        {
+            "text": "legacy dict evidence",
+            "source_id": "normativa",
+            "collection": "normativa",
+        }
+    ]
+    mock_chat.side_effect = [
+        "proposal alpha",
+        "proposal beta",
+        "proposal gamma",
+        "combined proposal",
+        "final policy",
+    ]
+
+    result = run_with_agent(
+        refined_prompt="Create a GDPR policy.",
+        context_id=default_context_id,
+        model_version=openai_model_version,
+    )
+
+    assert result["retrieval_evidence"] == [
+        {
+            "text": "legacy dict evidence",
+            "source_id": "normativa",
+            "collection": "normativa",
+            "family": None,
+            "document_id": None,
+            "score": None,
+            "citation": "normativa:normativa",
+            "metadata": {},
+        }
+    ]
