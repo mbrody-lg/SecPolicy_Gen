@@ -1,21 +1,33 @@
+"""Index policy-agent RAG source documents into Chroma."""
+
+import argparse
 import os
-import yaml
 from pathlib import Path
+
+import chromadb
+from dotenv import load_dotenv
 from pypdf import PdfReader
 from tqdm import tqdm
-from dotenv import load_dotenv
-import chromadb
+
 from app.agents.vector.model_loader import (
     LocalSentenceTransformerEmbeddingFunction,
     download_model_if_needed,
     load_model,
 )
+from app.rag.sources import load_rag_source_manifest
+
+MAX_BATCH = 5000
+MAX_CHUNK_CHARACTERS = 5000
+
 
 def extract_text_from_pdf(path):
+    """Extract text from a PDF file."""
     reader = PdfReader(path)
     return "".join(page.extract_text() or "" for page in reader.pages)
 
+
 def chunk_text(text, size, overlap):
+    """Split text into overlapping character chunks."""
     chunks, start = [], 0
     while start < len(text):
         end = min(start + size, len(text))
@@ -23,128 +35,210 @@ def chunk_text(text, size, overlap):
         start += size - overlap
     return chunks
 
-def load_config_from_policy_yaml():
-    path = os.getenv("CONFIG_PATH", "/config/policy_agent.yaml")
-    with open(path, "r") as f:
-        data = yaml.safe_load(f)
-    vector_roles = []
 
-    for role in data.get("roles", []):
-        if "RAG" in role and "vector" in role:
-            for entry in role["vector"]:
-                if "chroma" in entry:
-                    collections = entry.get("collection", [])
-                    model = entry.get("model")
-                    chunk_size = entry.get("chunk_size", 500)
-                    chunk_overlap = entry.get("chunk_overlap", 100)
-                    revision = entry.get("revision")
+def load_configs_from_rag_sources(path=None, collection_filter=None):
+    """Load indexable source configs from the RAG source manifest."""
+    manifest_path = path or os.getenv("RAG_SOURCES_PATH", "app/config/rag_sources.yaml")
+    manifest = load_rag_source_manifest(manifest_path)
+    defaults = manifest.get("embedding_defaults", {})
+    file_types = defaults.get("file_types", ["pdf"])
 
-                    if not model or not collections:
-                        raise ValueError("The model and collections must be defined within 'Chroma'")
+    configs = []
+    for source in manifest["sources"]:
+        collection_name = source["collection"]
+        if collection_filter and collection_name != collection_filter:
+            continue
 
-                    for col in collections:
-                        vector_roles.append({
-                            "name": col,
-                            "path": f"data/{col}",
-                            "model": model,
-                            "revision": revision,
-                            "chunk_size": chunk_size,
-                            "chunk_overlap": chunk_overlap
-                        })
-    return vector_roles
+        configs.append(
+            {
+                "source_id": source["id"],
+                "name": collection_name,
+                "path": source["path"],
+                "family": source["family"],
+                "include": source.get("include"),
+                "metadata": source["metadata"],
+                "model": defaults.get("model"),
+                "revision": defaults.get("revision"),
+                "chunk_size": defaults.get("chunk_size", 500),
+                "chunk_overlap": defaults.get("chunk_overlap", 100),
+                "file_types": file_types,
+            }
+        )
 
-def process_collection(config):
-    collection_name = config['name']
-    log_path = Path(f"logs/vectorization/{collection_name}.log")
-    log_file = open(log_path, "w", encoding="utf-8")
+    return configs
 
-    def log(msg):
-        print(msg)
-        log_file.write(msg + "\n")
 
-    log(f"== Starting indexing for collection: {collection_name} ==")
+def discover_files(config):
+    """Return source files selected by one manifest entry."""
+    source_path = Path(config["path"])
+    if not source_path.exists():
+        return []
 
-    model_name = config["model"]
-    revision = config.get("revision")
-    chunk_size = config["chunk_size"]
-    chunk_overlap = config["chunk_overlap"]
-    path = Path(config["path"])
+    include_patterns = config.get("include")
+    if include_patterns:
+        files = []
+        for pattern in include_patterns:
+            files.extend(source_path.glob(pattern))
+        return sorted({path for path in files if path.is_file()})
 
-    if not path.exists():
-        log(f"[ERROR] Non-existent route: {path}")
-        return
+    files = []
+    for file_type in config.get("file_types", ["pdf"]):
+        files.extend(source_path.glob(f"*.{file_type}"))
+    return sorted({path for path in files if path.is_file()})
 
+
+def build_chunk_id(config, file_path, chunk_index):
+    """Build a stable chunk id scoped by source and collection."""
+    return f"{config['name']}:{config['source_id']}:{file_path.stem}:chunk-{chunk_index}"
+
+
+def build_chunk_metadata(config, file_path, chunk_index):
+    """Build Chroma-safe metadata for one chunk."""
+    metadata = {
+        "source_id": config["source_id"],
+        "collection": config["name"],
+        "collection_family": config["family"],
+        "source_doc": file_path.name,
+        "source_stem": file_path.stem,
+        "chunk_index": chunk_index,
+    }
+    for key, value in config["metadata"].items():
+        if isinstance(value, list):
+            metadata[key] = ",".join(value)
+        else:
+            metadata[key] = value
+    return metadata
+
+
+def _with_model_download_enabled(callback):
     original_allow_download = os.getenv("POLICY_AGENT_ALLOW_MODEL_DOWNLOAD")
     os.environ["POLICY_AGENT_ALLOW_MODEL_DOWNLOAD"] = "1"
     try:
-        download_model_if_needed(model_name, revision=revision)
+        return callback()
     finally:
         if original_allow_download is None:
             os.environ.pop("POLICY_AGENT_ALLOW_MODEL_DOWNLOAD", None)
         else:
             os.environ["POLICY_AGENT_ALLOW_MODEL_DOWNLOAD"] = original_allow_download
 
+
+def _get_chroma_collection(config, reindex=False):
+    model_name = config["model"]
+    revision = config.get("revision")
+    if not model_name:
+        raise ValueError("RAG source manifest embedding_defaults.model is required.")
+
+    _with_model_download_enabled(lambda: download_model_if_needed(model_name, revision=revision))
     model = load_model(model_name, revision=revision)
     embedding_fn = LocalSentenceTransformerEmbeddingFunction(model)
     client = chromadb.HttpClient(
         host=os.getenv("CHROMA_HOST", "localhost"),
-        port=int(os.getenv("CHROMA_PORT", 8000))
+        port=int(os.getenv("CHROMA_PORT", 8000)),
     )
-    collection = client.get_or_create_collection(name=collection_name, embedding_function=embedding_fn)
+    if reindex:
+        try:
+            client.delete_collection(config["name"])
+        except Exception:
+            pass
+    return client.get_or_create_collection(name=config["name"], embedding_function=embedding_fn)
 
-    files = list(path.glob("*.pdf"))
-    if not files:
-        log(f"[WARNING] No PDF files found in {path}")
-        return
 
-    MAX_BATCH = 5000
-    indexed_total = 0
-    skipped_chunks = 0
+def process_source(config, *, dry_run=False, reindex=False):
+    """Index one manifest source config into its target collection."""
+    collection_name = config["name"]
+    log_path = Path(f"logs/vectorization/{collection_name}.log")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    for i, file in enumerate(tqdm(files, desc=f"Processing {collection_name}")):
-        text = extract_text_from_pdf(file)
-        chunks = chunk_text(text, chunk_size, chunk_overlap)
+    with log_path.open("a", encoding="utf-8") as log_file:
 
-        # Filter oversized chunks
-        filtered = []
-        ids = []
-        for j, chunk in enumerate(chunks):
-            if len(chunk) < 5000:
-                filtered.append(chunk)
-                ids.append(f"{file.stem}-chunk-{j}")
-            else:
-                skipped_chunks += 1
-                log(f"[SKIP] Chunk too large ({len(chunk)} characters): {file.name}, chunk {j}")
+        def log(msg):
+            print(msg)
+            log_file.write(msg + "\n")
 
-        for j in range(0, len(filtered), MAX_BATCH):
-            batch_docs = filtered[j:j+MAX_BATCH]
-            batch_ids = ids[j:j+MAX_BATCH]
-            try:
-                collection.add(documents=batch_docs, ids=batch_ids)
-                indexed_total += len(batch_docs)
-            except Exception as e:
-                log(f"[ERROR] Batch {j}-{j+MAX_BATCH} failed: {e}")
+        log(f"== Starting indexing for source: {config['source_id']} -> {collection_name} ==")
 
-    log(f"[✓] Total indexed: {indexed_total}")
-    log(f"[x] Chunks discarded by size: {skipped_chunks}")
-    log(f"== Collection completed: {collection_name} ==\n")
+        files = discover_files(config)
+        if not files:
+            log(f"[WARNING] No source files found in {config['path']}")
+            return {"indexed": 0, "skipped": 0, "files": 0}
 
-    log_file.close()
+        if dry_run:
+            log(f"[DRY-RUN] Files selected: {len(files)}")
+            return {"indexed": 0, "skipped": 0, "files": len(files)}
+
+        collection = _get_chroma_collection(config, reindex=reindex)
+        indexed_total = 0
+        skipped_chunks = 0
+
+        for file_path in tqdm(files, desc=f"Processing {config['source_id']}"):
+            text = extract_text_from_pdf(file_path)
+            chunks = chunk_text(text, config["chunk_size"], config["chunk_overlap"])
+
+            filtered_docs = []
+            ids = []
+            metadatas = []
+            for chunk_index, chunk in enumerate(chunks):
+                if len(chunk) < MAX_CHUNK_CHARACTERS:
+                    filtered_docs.append(chunk)
+                    ids.append(build_chunk_id(config, file_path, chunk_index))
+                    metadatas.append(build_chunk_metadata(config, file_path, chunk_index))
+                else:
+                    skipped_chunks += 1
+                    log(f"[SKIP] Chunk too large ({len(chunk)} characters): {file_path.name}, chunk {chunk_index}")
+
+            for batch_start in range(0, len(filtered_docs), MAX_BATCH):
+                batch_docs = filtered_docs[batch_start:batch_start + MAX_BATCH]
+                batch_ids = ids[batch_start:batch_start + MAX_BATCH]
+                batch_metadatas = metadatas[batch_start:batch_start + MAX_BATCH]
+                try:
+                    collection.add(documents=batch_docs, ids=batch_ids, metadatas=batch_metadatas)
+                    indexed_total += len(batch_docs)
+                except Exception as error:
+                    log(f"[ERROR] Batch {batch_start}-{batch_start + MAX_BATCH} failed: {error}")
+
+        log(f"[OK] Total indexed: {indexed_total}")
+        log(f"[x] Chunks discarded by size: {skipped_chunks}")
+        log(f"== Source completed: {config['source_id']} ==\n")
+
+    return {"indexed": indexed_total, "skipped": skipped_chunks, "files": len(files)}
+
+
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description="Index RAG source documents into Chroma.")
+    parser.add_argument("--manifest", default=os.getenv("RAG_SOURCES_PATH", "app/config/rag_sources.yaml"))
+    parser.add_argument("--collection", help="Only process sources targeting this collection.")
+    parser.add_argument("--dry-run", action="store_true", help="Validate and list source files without indexing.")
+    parser.add_argument("--validate-only", action="store_true", help="Validate manifest and selected files without Chroma calls.")
+    parser.add_argument("--reindex", action="store_true", help="Delete target collection before indexing each source.")
+    return parser.parse_args()
+
+
+def main():
+    """Run document vectorization from the RAG source manifest."""
+    load_dotenv()
+    args = parse_args()
+    configs = load_configs_from_rag_sources(args.manifest, collection_filter=args.collection)
+
+    if not configs:
+        raise ValueError("No RAG source configs selected.")
+
+    print(f"Loaded {len(configs)} RAG source config(s).")
+    dry_run = args.dry_run or args.validate_only
+    totals = {"indexed": 0, "skipped": 0, "files": 0}
+    reindexed_collections = set()
+    for config in configs:
+        should_reindex = args.reindex and config["name"] not in reindexed_collections
+        result = process_source(config, dry_run=dry_run, reindex=should_reindex)
+        reindexed_collections.add(config["name"])
+        for key in totals:
+            totals[key] += result[key]
+
+    print(
+        "Vectorization completed successfully. "
+        f"files={totals['files']} indexed={totals['indexed']} skipped={totals['skipped']}"
+    )
 
 
 if __name__ == "__main__":
-    print("Starting document vectorization from policy-agent.yaml...")
-    try:
-        # Load environment variables from .env
-        load_dotenv()
-        
-        log_dir = Path("logs/vectorization")
-        log_dir.mkdir(parents=True, exist_ok=True)
-        
-        configs = load_config_from_policy_yaml()
-        
-        for collection_cfg in configs:
-            process_collection(collection_cfg)
-        print("Vectorization completed successfully.")
-    except Exception as e:
-        print(f"Error during vectorization: {e}")
+    main()
