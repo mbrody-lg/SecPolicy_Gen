@@ -66,6 +66,7 @@ class ChromaVectorClient(VectorClient):
                 stage="policy_generation",
                 reason="empty_query",
             )
+            return []
         if not self.collection:
             log_event(
                 logger,

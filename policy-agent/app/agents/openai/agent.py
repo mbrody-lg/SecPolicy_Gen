@@ -23,7 +23,7 @@ class OpenAIAgent(Agent):
         """Return a lightweight backend session descriptor."""
         return {"id": context_id or "openai-policy-session"}
         
-    def run(self, prompt: str, context_id: str = None) -> str:
+    def run(self, prompt: str, context_id: str = None, retrieval_plan=None) -> str:
         """Execute configured roles and return generated policy payload."""
         if not self.roles:
             raise ValueError("The YAML file does not contain any 'roles'.")
@@ -60,7 +60,10 @@ class OpenAIAgent(Agent):
             
             if role_key == "RAG":
                 rag_processor = RAGProcessor(role)
-                current_prompt = rag_processor.apply(instructions + current_prompt)
+                current_prompt = rag_processor.apply(
+                    instructions + current_prompt,
+                    retrieval_plan=retrieval_plan,
+                )
                 continue  # Skip direct OpenAI call for RAG stage
 
             if role_key == "MPG":

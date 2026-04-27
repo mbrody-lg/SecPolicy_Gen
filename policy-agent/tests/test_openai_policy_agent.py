@@ -38,6 +38,9 @@ def test_openai_policy_agent_pipeline(
     assert result["text"] == "final policy"
     assert isinstance(result["structured_plan"], list)
     assert len(result["structured_plan"]) == 3
+    retrieval_plan = mock_rag_processor.return_value.apply.call_args.kwargs["retrieval_plan"]
+    assert retrieval_plan.context_id == default_context_id
+    assert "legal_norms" in retrieval_plan.required_families
     assert mock_chat.call_count == 5
     assert mock_chat.call_args_list[0].args[0] == "[RAG] enriched prompt"
     assert mock_chat.call_args_list[1].args[0] == "[RAG] enriched prompt"
@@ -69,3 +72,52 @@ def test_openai_policy_agent_update_uses_single_model_call(
     assert result["text"] == "updated policy"
     assert mock_chat.call_count == 1
     assert mock_chat.call_args_list[0].args[0] == "Refine this policy draft"
+
+
+@patch("app.agents.openai.agent.RAGProcessor")
+@patch("app.agents.openai.agent.OpenAIAgent._chat")
+def test_run_with_agent_builds_contextual_retrieval_plan(
+    mock_chat,
+    mock_rag_processor,
+    app_context,
+    default_context_id,
+    openai_model_version,
+):
+    mock_rag_processor.return_value.apply.return_value = "[RAG] healthcare prompt"
+    mock_chat.side_effect = [
+        "proposal alpha",
+        "proposal beta",
+        "proposal gamma",
+        "combined proposal",
+        "final policy",
+    ]
+
+    run_with_agent(
+        refined_prompt="Protect patient data under GDPR.",
+        context_id=default_context_id,
+        model_version=openai_model_version,
+        business_context={
+            "language": "en",
+            "country": "Spain",
+            "sector": "Private healthcare",
+            "critical_assets": ["Medical data"],
+            "methodology": "ISO 27799",
+            "need": "Protect patient data",
+        },
+    )
+
+    retrieval_plan = mock_rag_processor.return_value.apply.call_args.kwargs["retrieval_plan"]
+    assert retrieval_plan.context_id == default_context_id
+    assert retrieval_plan.required_families == [
+        "legal_norms",
+        "implementation_guides",
+        "sector_norms",
+        "security_frameworks",
+        "risk_methodologies",
+    ]
+    assert {step.collection for step in retrieval_plan.steps} == {
+        "normativa",
+        "guia",
+        "sector",
+        "metodologia",
+    }

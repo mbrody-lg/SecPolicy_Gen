@@ -428,12 +428,13 @@ def test_run_with_agent_propagates_request_correlation_id(app, monkeypatch):
             self.client = FakeClientWrapper(sdk_client)
             self.roles = [{"PolicyGeneration": True}]
 
-        def run(self, prompt, context_id=None):
+        def run(self, prompt, context_id=None, retrieval_plan=None):
             return {
                 "text": "Generated policy body",
                 "structured_plan": [],
                 "used_headers": self.client.client.default_headers,
                 "context_id": context_id,
+                "retrieval_plan": retrieval_plan,
             }
 
     sdk_client = FakeSdkClient()
