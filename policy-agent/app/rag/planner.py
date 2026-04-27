@@ -88,17 +88,7 @@ def _build_query(context: RetrievalContext, family: str) -> str:
 
 
 def _build_filters(context: RetrievalContext, source: dict[str, Any]) -> dict[str, Any]:
-    metadata = source.get("metadata", {})
-    filters: dict[str, Any] = {
-        "collection_family": source["family"],
-    }
-    if context.country and context.country.upper() in {"SPAIN", "ES"}:
-        filters["jurisdiction"] = "ES"
-    elif metadata.get("jurisdiction"):
-        filters["jurisdiction"] = metadata["jurisdiction"][0]
-    if context.language:
-        filters["language"] = context.language
-    return filters
+    return {"collection_family": source["family"]}
 
 
 def _top_k_for_family(family: str) -> int:
@@ -107,4 +97,3 @@ def _top_k_for_family(family: str) -> int:
     if family == "sector_norms":
         return 3
     return 2
-

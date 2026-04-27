@@ -32,6 +32,8 @@ MAX_STATUS_LENGTH = 32
 MAX_PROMPT_LENGTH = 20000
 MAX_BUSINESS_CONTEXT_FIELDS = 32
 MAX_BUSINESS_CONTEXT_VALUE_LENGTH = 4000
+MAX_BUSINESS_CONTEXT_LIST_ITEMS = 50
+MAX_BUSINESS_CONTEXT_LIST_ITEM_LENGTH = 1000
 MAX_POLICY_TEXT_LENGTH = 50000
 MAX_FEEDBACK_ITEMS = 20
 MAX_FEEDBACK_ITEM_LENGTH = 1000
@@ -517,11 +519,79 @@ def _validate_business_context(value: object, *, correlation_id: str | None) -> 
                 )
             normalized[key.strip()] = item.strip()
         elif isinstance(item, list):
-            normalized[key.strip()] = [str(entry).strip() for entry in item if str(entry).strip()]
+            if len(item) > MAX_BUSINESS_CONTEXT_LIST_ITEMS:
+                raise PipelineStepError(
+                    stage="contract_validation",
+                    message="Field 'business_context' contains too many list items.",
+                    error_type="contract_error",
+                    error_code="field_too_large",
+                    status_code=413,
+                    details={
+                        "field": "business_context",
+                        "key": key,
+                        "max_items": MAX_BUSINESS_CONTEXT_LIST_ITEMS,
+                    },
+                    correlation_id=correlation_id,
+                )
+            normalized[key.strip()] = _validate_business_context_list(
+                key=key,
+                value=item,
+                correlation_id=correlation_id,
+            )
         elif item is None:
             normalized[key.strip()] = None
         else:
-            normalized[key.strip()] = str(item)
+            raise PipelineStepError(
+                stage="contract_validation",
+                message="Field 'business_context' contains an unsupported value type.",
+                error_type="contract_error",
+                error_code="invalid_field_type",
+                status_code=400,
+                details={"field": "business_context", "key": key, "expected_type": "string|list[string]|null"},
+                correlation_id=correlation_id,
+            )
+    return normalized
+
+
+def _validate_business_context_list(
+    *, key: str, value: list, correlation_id: str | None
+) -> list[str]:
+    """Validate list-style business context values without silent coercion."""
+    normalized = []
+    for index, entry in enumerate(value):
+        if not isinstance(entry, str):
+            raise PipelineStepError(
+                stage="contract_validation",
+                message="Field 'business_context' list values must be strings.",
+                error_type="contract_error",
+                error_code="invalid_field_type",
+                status_code=400,
+                details={
+                    "field": "business_context",
+                    "key": key,
+                    "index": index,
+                    "expected_type": "string",
+                },
+                correlation_id=correlation_id,
+            )
+        item = entry.strip()
+        if len(item) > MAX_BUSINESS_CONTEXT_LIST_ITEM_LENGTH:
+            raise PipelineStepError(
+                stage="contract_validation",
+                message="Field 'business_context' contains an oversized list value.",
+                error_type="contract_error",
+                error_code="field_too_large",
+                status_code=413,
+                details={
+                    "field": "business_context",
+                    "key": key,
+                    "index": index,
+                    "max_length": MAX_BUSINESS_CONTEXT_LIST_ITEM_LENGTH,
+                },
+                correlation_id=correlation_id,
+            )
+        if item:
+            normalized.append(item)
     return normalized
 
 

@@ -227,6 +227,25 @@ def test_validate_generation_payload_rejects_invalid_business_context(app_contex
     assert result["details"]["field"] == "business_context"
 
 
+def test_validate_generation_payload_rejects_nested_business_context_list(app_context):
+    result = logic.run_generation_pipeline(
+        {
+            "context_id": "ctx-business",
+            "refined_prompt": "Generate policy",
+            "language": "en",
+            "model_version": "openai",
+            "business_context": {
+                "important_assets": ["Medical records", {"name": "Backups"}],
+            },
+        }
+    )
+
+    assert result["success"] is False
+    assert result["error_code"] == "invalid_field_type"
+    assert result["details"]["field"] == "business_context"
+    assert result["details"]["key"] == "important_assets"
+
+
 def test_run_generation_pipeline_persists_policy(app_context, monkeypatch):
     monkeypatch.setattr(
         logic,
