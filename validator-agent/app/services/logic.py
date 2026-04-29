@@ -30,6 +30,8 @@ MAX_LANGUAGE_LENGTH = 16
 MAX_POLICY_TEXT_LENGTH = 50000
 MAX_POLICY_AGENT_VERSION_LENGTH = 64
 MAX_GENERATED_AT_LENGTH = 64
+MAX_RETRIEVAL_EVIDENCE_ITEMS = 50
+MAX_RETRIEVAL_EVIDENCE_FIELD_LENGTH = 5000
 
 
 def get_health_status() -> dict:
@@ -255,6 +257,89 @@ def _require_string_field(
     return normalized
 
 
+def _validate_retrieval_evidence(value: object, *, correlation_id: str | None) -> list[dict]:
+    """Validate optional RAG evidence supplied by policy-agent."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise PipelineStepError(
+            stage="contract_validation",
+            message="Field 'retrieval_evidence' must be a list.",
+            error_type="contract_error",
+            error_code="invalid_field_type",
+            status_code=400,
+            details={"field": "retrieval_evidence", "expected_type": "list[object]"},
+            correlation_id=correlation_id,
+        )
+    if len(value) > MAX_RETRIEVAL_EVIDENCE_ITEMS:
+        raise PipelineStepError(
+            stage="contract_validation",
+            message="Field 'retrieval_evidence' exceeds the allowed item count.",
+            error_type="contract_error",
+            error_code="field_too_large",
+            status_code=413,
+            details={"field": "retrieval_evidence", "max_items": MAX_RETRIEVAL_EVIDENCE_ITEMS},
+            correlation_id=correlation_id,
+        )
+
+    normalized = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise PipelineStepError(
+                stage="contract_validation",
+                message="Field 'retrieval_evidence' must contain only objects.",
+                error_type="contract_error",
+                error_code="invalid_field_type",
+                status_code=400,
+                details={"field": "retrieval_evidence", "index": index, "expected_type": "object"},
+                correlation_id=correlation_id,
+            )
+        normalized.append(_normalize_evidence_item(item, index, correlation_id))
+    return normalized
+
+
+def _normalize_evidence_item(item: dict, index: int, correlation_id: str | None) -> dict:
+    normalized = {}
+    for field in ("citation", "source_id", "collection", "family", "document_id", "text"):
+        value = item.get(field)
+        if value is None:
+            continue
+        if not isinstance(value, str):
+            raise PipelineStepError(
+                stage="contract_validation",
+                message=f"Field 'retrieval_evidence[{index}].{field}' must be a string.",
+                error_type="contract_error",
+                error_code="invalid_field_type",
+                status_code=400,
+                details={"field": "retrieval_evidence", "index": index, "key": field, "expected_type": "string"},
+                correlation_id=correlation_id,
+            )
+        if len(value) > MAX_RETRIEVAL_EVIDENCE_FIELD_LENGTH:
+            raise PipelineStepError(
+                stage="contract_validation",
+                message=f"Field 'retrieval_evidence[{index}].{field}' exceeds the allowed size.",
+                error_type="contract_error",
+                error_code="field_too_large",
+                status_code=413,
+                details={
+                    "field": "retrieval_evidence",
+                    "index": index,
+                    "key": field,
+                    "max_length": MAX_RETRIEVAL_EVIDENCE_FIELD_LENGTH,
+                },
+                correlation_id=correlation_id,
+            )
+        normalized[field] = value
+
+    score = item.get("score")
+    if isinstance(score, (int, float)):
+        normalized["score"] = score
+    metadata = item.get("metadata")
+    if isinstance(metadata, dict):
+        normalized["metadata"] = metadata
+    return normalized
+
+
 def validate_policy_payload(payload: dict | None) -> dict:
     """Validate request contract, run coordinator orchestration, and normalize response."""
     correlation_id = _get_correlation_id(payload)
@@ -299,6 +384,10 @@ def validate_policy_payload(payload: dict | None) -> dict:
             correlation_id=correlation_id,
         ),
         "structured_plan": data["structured_plan"],
+        "retrieval_evidence": _validate_retrieval_evidence(
+            data.get("retrieval_evidence"),
+            correlation_id=correlation_id,
+        ),
     }
     if "language" in data:
         normalized_payload["language"] = _require_string_field(
@@ -359,6 +448,10 @@ def validate_policy_payload(payload: dict | None) -> dict:
         "language": validation_result.get("language", normalized_payload.get("language", "")),
         "policy_text": validation_result.get("policy_text", normalized_payload["policy_text"]),
         "structured_plan": normalized_payload["structured_plan"],
+        "retrieval_evidence": validation_result.get(
+            "retrieval_evidence",
+            normalized_payload.get("retrieval_evidence", []),
+        ),
         "generated_at": validation_result.get("generated_at", normalized_payload["generated_at"]),
         "policy_agent_version": validation_result.get(
             "policy_agent_version",

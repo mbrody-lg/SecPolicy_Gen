@@ -31,7 +31,7 @@ class Agent(ABC):
         pass
 
     @abstractmethod
-    def run(self, prompt: str, context_id: str = None) -> str:
+    def run(self, prompt: str, context_id: str = None, retrieval_plan=None) -> str:
         """Generate policy output for a prompt and optional context."""
         pass
     

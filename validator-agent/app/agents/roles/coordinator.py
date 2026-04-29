@@ -59,6 +59,7 @@ class Coordinator:
         language = policy_input.get("language", "en")
         version = policy_input.get("policy_agent_version", "0.1.0")
         generated_at = policy_input.get("generated_at", datetime.now(timezone.utc).isoformat())
+        retrieval_evidence = policy_input.get("retrieval_evidence", [])
 
         validation_roles = [
             role for role in self.agent.roles
@@ -111,11 +112,15 @@ class Coordinator:
 
             self.log_validation(
                 context_id, round_results, decision, rounds_done, True,
-                all_rounds=all_rounds, evaluator_result=evaluator_feedback, correlation_id=correlation_id
+                all_rounds=all_rounds, evaluator_result=evaluator_feedback,
+                correlation_id=correlation_id, retrieval_evidence=retrieval_evidence
             )
 
             if decision == "accepted":
-                return self.build_response("accepted", round_results, context_id, language, prompt, version, generated_at, evaluator_feedback)
+                return self.build_response(
+                    "accepted", round_results, context_id, language, prompt, version,
+                    generated_at, evaluator_feedback, retrieval_evidence=retrieval_evidence
+                )
 
             if decision in ["rejected", "review"]:
                 log_event(
@@ -165,10 +170,14 @@ class Coordinator:
 
         self.log_validation(
             context_id, last_round, final_decision, self.max_rounds, False,
-            all_rounds=all_rounds, evaluator_result=evaluator_feedback, correlation_id=correlation_id
+            all_rounds=all_rounds, evaluator_result=evaluator_feedback,
+            correlation_id=correlation_id, retrieval_evidence=retrieval_evidence
         )
 
-        return self.build_response(final_decision, last_round, context_id, language, prompt, version, generated_at, evaluator_feedback)
+        return self.build_response(
+            final_decision, last_round, context_id, language, prompt, version,
+            generated_at, evaluator_feedback, retrieval_evidence=retrieval_evidence
+        )
 
 
     def format_response(self, decision: str, last_round_results: List[Dict]) -> Dict:
@@ -250,6 +259,7 @@ class Coordinator:
         all_rounds: List[List[Dict]] = None,
         evaluator_result: Optional[Dict] = None,
         correlation_id: str | None = None,
+        retrieval_evidence: Optional[List[Dict]] = None,
     ):
         """Persist validation trace and metadata in MongoDB."""
         try:
@@ -271,6 +281,7 @@ class Coordinator:
                     "source_collection": "policies",
                     "context_id": context_id,
                 },
+                "retrieval_evidence_summary": self.summarize_retrieval_evidence(retrieval_evidence or []),
                 "config_used": {
                     "rounds": self.max_rounds,
                     "threshold": self.consensus_threshold,
@@ -303,7 +314,8 @@ class Coordinator:
         policy_text: str,
         version: str,
         generated_at: str,
-        evaluator_feedback: Dict
+        evaluator_feedback: Dict,
+        retrieval_evidence: Optional[List[Dict]] = None,
     ) -> Dict:
         """Build final API response payload for accepted/review/rejected outcomes."""
         response = {
@@ -315,7 +327,8 @@ class Coordinator:
             "evaluator_analysis": evaluator_feedback,
             "status": decision,
             "reasons": [],
-            "recommendations": []
+            "recommendations": [],
+            "retrieval_evidence": retrieval_evidence or [],
         }
 
         if decision == "accepted":
@@ -330,3 +343,26 @@ class Coordinator:
             )
 
         return response
+
+    @staticmethod
+    def summarize_retrieval_evidence(retrieval_evidence: List[Dict]) -> Dict:
+        """Return non-sensitive evidence coverage metadata for validation persistence."""
+        citations = []
+        collections = []
+        families = []
+        for item in retrieval_evidence:
+            citation = item.get("citation")
+            if citation:
+                citations.append(citation)
+            collection = item.get("collection")
+            if collection and collection not in collections:
+                collections.append(collection)
+            family = item.get("family")
+            if family and family not in families:
+                families.append(family)
+        return {
+            "count": len(retrieval_evidence),
+            "citations": citations[:20],
+            "collections": collections,
+            "families": families,
+        }
