@@ -21,6 +21,7 @@ class RAGProcessor:
 
         # Create vector clients from YAML configuration
         self.vector_clients = get_vector_clients(vector_config)
+        self.evidence_items = []
 
     def apply(self, query: str, top_k: int = 3, retrieval_plan=None) -> str:
         """Return prompt enriched with retrieved context from all clients."""
@@ -43,8 +44,10 @@ class RAGProcessor:
             planned_step_count=len(search_steps),
         )
         if not evidence_items:
+            self.evidence_items = []
             return f"{query}\n\nNo relevant context found."
 
+        self.evidence_items = evidence_items
         context = format_evidence_context(evidence_items)
         enriched_prompt = f"{query}\n\n=== Relevant Context ===\n{context}\n\n=== Relevant Context end ===\n"
         return enriched_prompt

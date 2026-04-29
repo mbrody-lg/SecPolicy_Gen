@@ -355,6 +355,14 @@ def test_log_validation_persists_ownership_and_policy_reference():
             round_num=1,
             consensus=True,
             correlation_id="corr-ownership",
+            retrieval_evidence=[
+                {
+                    "citation": "normativa:rgpd",
+                    "collection": "normativa",
+                    "family": "legal_norms",
+                    "text": "not persisted in summary",
+                }
+            ],
         )
 
     assert inserted["document"]["correlation_id"] == "corr-ownership"
@@ -368,3 +376,28 @@ def test_log_validation_persists_ownership_and_policy_reference():
         "source_collection": "policies",
         "context_id": "ctx-ownership",
     }
+    assert inserted["document"]["retrieval_evidence_summary"] == {
+        "count": 1,
+        "citations": ["normativa:rgpd"],
+        "collections": ["normativa"],
+        "families": ["legal_norms"],
+    }
+
+
+def test_build_response_preserves_retrieval_evidence():
+    coordinator = Coordinator.__new__(Coordinator)
+    evidence = [{"citation": "normativa:rgpd", "collection": "normativa"}]
+
+    response = coordinator.build_response(
+        decision="accepted",
+        round_results=[{"role": "AWC", "status": "accepted", "text": "accepted policy"}],
+        context_id="ctx-evidence",
+        language="en",
+        policy_text="policy",
+        version="0.1.0",
+        generated_at="2026-03-05T00:00:00+00:00",
+        evaluator_feedback={"status": "accepted"},
+        retrieval_evidence=evidence,
+    )
+
+    assert response["retrieval_evidence"] == evidence

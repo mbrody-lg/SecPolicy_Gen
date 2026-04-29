@@ -59,3 +59,22 @@ def format_evidence_context(evidence_items: list[RetrievalEvidence]) -> str:
         blocks.append(f"{header}\n{evidence.text}")
     return "\n\n".join(blocks)
 
+
+def serialize_evidence(evidence_items: list[RetrievalEvidence]) -> list[dict[str, Any]]:
+    """Serialize retrieval evidence for persistence and API payloads."""
+    serialized = []
+    for item in evidence_items:
+        evidence = normalize_evidence(item)
+        serialized.append(
+            {
+                "text": evidence.text,
+                "source_id": evidence.source_id,
+                "collection": evidence.collection,
+                "family": evidence.family,
+                "document_id": evidence.document_id,
+                "score": evidence.score,
+                "citation": evidence.citation,
+                "metadata": evidence.metadata,
+            }
+        )
+    return serialized
