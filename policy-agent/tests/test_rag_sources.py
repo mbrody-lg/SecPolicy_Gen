@@ -52,7 +52,7 @@ def test_validate_rag_source_manifest_rejects_duplicate_source_ids():
             {
                 "id": "duplicate",
                 "path": "data/a",
-                "collection": "a",
+                "collection": "collection_a",
                 "family": "legal_norms",
                 "metadata": {
                     "source_kind": "regulation",
@@ -65,7 +65,7 @@ def test_validate_rag_source_manifest_rejects_duplicate_source_ids():
             {
                 "id": "duplicate",
                 "path": "data/b",
-                "collection": "b",
+                "collection": "collection_b",
                 "family": "sector_norms",
                 "metadata": {
                     "source_kind": "sector_guidance",
@@ -80,4 +80,3 @@ def test_validate_rag_source_manifest_rejects_duplicate_source_ids():
 
     with pytest.raises(RagSourceManifestError, match="duplicated"):
         validate_rag_source_manifest(manifest)
-

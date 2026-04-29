@@ -14,6 +14,8 @@ TEST_ONLY_SECRET_KEY = "test-only-secret-key"
 CORRELATION_ID_HEADER = "X-Correlation-ID"
 CORRELATION_ID_MAX_LENGTH = 128
 CORRELATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]+$")
+DEFAULT_CONFIG_PATH = "app/config/context_agent.yaml"
+DEFAULT_QUESTIONS_CONFIG_PATH = "app/config/context_questions.yaml"
 
 
 def _get_env_bool(name: str, default: bool = False) -> bool:
@@ -98,6 +100,8 @@ def create_app():
     app.config["MONGO_URI"] = os.getenv("MONGO_URI", "mongodb://mongo:27017/contextdb")
     app.config["POLICY_AGENT_URL"] = os.getenv("POLICY_AGENT_URL", "http://policy-agent:5000")
     app.config["VALIDATOR_AGENT_URL"] = os.getenv("VALIDATOR_AGENT_URL", "http://validator-agent:5000")
+    app.config["CONFIG_PATH"] = os.getenv("CONFIG_PATH", DEFAULT_CONFIG_PATH)
+    app.config["QUESTIONS_CONFIG_PATH"] = os.getenv("QUESTIONS_CONFIG_PATH", DEFAULT_QUESTIONS_CONFIG_PATH)
     app.config["POLICY_AGENT_TIMEOUT_SECONDS"] = _get_env_float("POLICY_AGENT_TIMEOUT_SECONDS", 30.0)
     app.config["VALIDATOR_AGENT_TIMEOUT_SECONDS"] = _get_env_float("VALIDATOR_AGENT_TIMEOUT_SECONDS", 30.0)
     app.config["MAX_CONTENT_LENGTH"] = _get_env_int("MAX_CONTENT_LENGTH", 256 * 1024)
@@ -113,7 +117,7 @@ def create_app():
     @app.context_processor
     def inject_agent_type():
         from app.agents.factory import load_agent_config
-        config = load_agent_config("app/config/context_agent.yaml")
+        config = load_agent_config(app.config["CONFIG_PATH"])
         return {"agent_type": config.get("type", "unknown")}
 
     from app.routes.routes import main
