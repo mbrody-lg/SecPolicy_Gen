@@ -130,4 +130,6 @@ Common first interpretations:
 - Prefer `make critical-path-validation` when you need CI-aligned evidence for the whole loop.
 - Prefer `/ready` over ad hoc container inspection when deciding if traffic should proceed.
 - Prefer the diagnostics endpoint over manual Mongo inspection for first-pass failure lookup.
+- Use [Developer Recovery](./developer-recovery.md) when readiness or smoke failures point to local Docker, port, stale state, config, Mongo, Chroma, or RAG index drift.
+- Use [CI Handoff Contract](./ci-handoff-contract.md) when translating this local evidence path into INIT-04 Docker-backed gates.
 - Keep documentation for service-specific testing and security workflows in the per-service playbooks; keep end-to-end loop operations here.

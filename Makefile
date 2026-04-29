@@ -1,29 +1,34 @@
 # Infrastructure directory
 INFRA_DIR=infrastructure
 
-COMPOSE=docker-compose -f $(INFRA_DIR)/docker-compose.yml --env-file $(INFRA_DIR)/.env
+DOCKER_COMPOSE_CMD=$(shell scripts/docker_preflight.sh --print-compose 2>/dev/null || printf 'docker-compose')
+COMPOSE=$(DOCKER_COMPOSE_CMD) -f $(INFRA_DIR)/docker-compose.yml --env-file $(INFRA_DIR)/.env
 LINT_PYTHON=$(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi)
 
-.PHONY: all up down clean rebuild logs shell-context context-tests context-import policy-shell policy-tests policy-vectorize validator-shell validator-tests functional-smoke critical-path-validation bootstrap-test-env host-fast-tests lint help
+.PHONY: all docker-preflight up down clean rebuild logs shell-context context-tests context-import policy-shell policy-tests policy-vectorize validator-shell validator-tests functional-smoke critical-path-validation bootstrap-test-env host-fast-tests lint help
+
+## Verify docker and compose prerequisites
+docker-preflight:
+	@bash scripts/docker_preflight.sh
 
 ## Start all infrastructure
-up:
+up: docker-preflight
 	$(COMPOSE) up --build -d
 
 ## Stop all infrastructure
-down:
+down: docker-preflight
 	$(COMPOSE) down
 
 ## Stop and remove containers, networks, and volumes
-clean:
+clean: docker-preflight
 	$(COMPOSE) down -v --remove-orphans
 
 ## Rebuild containers
-rebuild:
+rebuild: docker-preflight
 	$(COMPOSE) up --build -d --force-recreate
 
 ## Show logs for all services
-logs:
+logs: docker-preflight
 	$(COMPOSE) logs -f
 
 ## Enter the container agent-context
@@ -82,6 +87,7 @@ lint:
 help:
 	@echo "Makefile for multi-agent project"
 	@echo ""
+	@echo "make docker-preflight -> Verify Docker and Compose prerequisites"
 	@echo "make up 			-> Start all infrastructure"
 	@echo "make down 		-> Stop and remove containers"
 	@echo "make clean 		-> Stop + remove volumes"

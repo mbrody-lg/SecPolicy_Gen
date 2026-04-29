@@ -47,6 +47,7 @@ def test_get_readiness_status_returns_ready_when_dependencies_are_available(app,
     monkeypatch.setattr(mongo, "cx", FakeMongoClient())
     monkeypatch.setenv("CHROMA_HOST", "chroma")
     monkeypatch.setenv("CHROMA_PORT", "8000")
+    monkeypatch.setenv("CHROMA_READINESS_MODE", "config_only")
 
     with app.app_context():
         payload, status_code = logic.get_readiness_status()
@@ -94,6 +95,7 @@ def test_get_readiness_status_reports_controlled_failure(app, monkeypatch):
     )
     monkeypatch.setattr(mongo, "cx", FailingMongoClient())
     monkeypatch.setenv("CHROMA_PORT", "not-a-number")
+    monkeypatch.setenv("CHROMA_READINESS_MODE", "config_only")
 
     with app.app_context():
         payload, status_code = logic.get_readiness_status()
@@ -106,6 +108,152 @@ def test_get_readiness_status_reports_controlled_failure(app, monkeypatch):
     assert payload["checks"]["chroma"]["mode"] == "config_only"
     assert "details" not in payload["checks"]["mongo"]
     assert "details" not in payload["checks"]["chroma"]
+
+
+def test_get_readiness_status_rejects_empty_chroma_host(app, monkeypatch):
+    class FakeAdmin:
+        @staticmethod
+        def command(name):
+            assert name == "ping"
+            return {"ok": 1}
+
+    class FakeMongoClient:
+        admin = FakeAdmin()
+
+    monkeypatch.setattr(
+        logic,
+        "load_policy_config",
+        lambda: {
+            "type": "openai",
+            "name": "OpenAI-Policy",
+            "model": "gpt-4o-mini",
+            "roles": [
+                {
+                    "vector": [
+                        {
+                            "chroma": {
+                                "collection": ["normativa"],
+                            }
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(mongo, "cx", FakeMongoClient())
+    monkeypatch.setenv("CHROMA_HOST", " ")
+    monkeypatch.setenv("CHROMA_PORT", "8000")
+    monkeypatch.setenv("CHROMA_READINESS_MODE", "config_only")
+
+    with app.app_context():
+        payload, status_code = logic.get_readiness_status()
+
+    assert status_code == 503
+    assert payload["status"] == "not_ready"
+    assert payload["checks"]["chroma"] == {
+        "status": "error",
+        "mode": "config_only",
+        "reason": "invalid_configuration",
+    }
+
+
+def test_get_readiness_status_can_run_live_chroma_check(app, monkeypatch):
+    class FakeAdmin:
+        @staticmethod
+        def command(name):
+            assert name == "ping"
+            return {"ok": 1}
+
+    class FakeMongoClient:
+        admin = FakeAdmin()
+
+    class FakeChromaClient:
+        def heartbeat(self):
+            return 1
+
+    monkeypatch.setattr(
+        logic,
+        "load_policy_config",
+        lambda: {
+            "type": "openai",
+            "name": "OpenAI-Policy",
+            "model": "gpt-4o-mini",
+            "roles": [
+                {
+                    "vector": [
+                        {
+                            "chroma": {
+                                "collection": ["normativa"],
+                            }
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(mongo, "cx", FakeMongoClient())
+    monkeypatch.setattr(logic, "_get_chroma_http_client", lambda: FakeChromaClient())
+    monkeypatch.setenv("CHROMA_HOST", "chroma")
+    monkeypatch.setenv("CHROMA_PORT", "8000")
+    monkeypatch.setenv("CHROMA_READINESS_MODE", "live")
+
+    with app.app_context():
+        payload, status_code = logic.get_readiness_status()
+
+    assert status_code == 200
+    assert payload["status"] == "ready"
+    assert payload["checks"]["chroma"] == {
+        "status": "ok",
+        "mode": "live",
+        "collection_count": 1,
+    }
+
+
+def test_get_readiness_status_rejects_invalid_chroma_readiness_mode(app, monkeypatch):
+    class FakeAdmin:
+        @staticmethod
+        def command(name):
+            assert name == "ping"
+            return {"ok": 1}
+
+    class FakeMongoClient:
+        admin = FakeAdmin()
+
+    monkeypatch.setattr(
+        logic,
+        "load_policy_config",
+        lambda: {
+            "type": "openai",
+            "name": "OpenAI-Policy",
+            "model": "gpt-4o-mini",
+            "roles": [
+                {
+                    "vector": [
+                        {
+                            "chroma": {
+                                "collection": ["normativa"],
+                            }
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(mongo, "cx", FakeMongoClient())
+    monkeypatch.setenv("CHROMA_HOST", "chroma")
+    monkeypatch.setenv("CHROMA_PORT", "8000")
+    monkeypatch.setenv("CHROMA_READINESS_MODE", "unexpected")
+
+    with app.app_context():
+        payload, status_code = logic.get_readiness_status()
+
+    assert status_code == 503
+    assert payload["status"] == "not_ready"
+    assert payload["checks"]["chroma"] == {
+        "status": "error",
+        "mode": "config_only",
+        "reason": "invalid_configuration",
+    }
 
 
 def test_get_readiness_status_reads_yaml_style_chroma_vector_entry(app, monkeypatch):
@@ -139,6 +287,7 @@ def test_get_readiness_status_reads_yaml_style_chroma_vector_entry(app, monkeypa
     )
     monkeypatch.setattr(mongo, "cx", FakeMongoClient())
     monkeypatch.setenv("CHROMA_PORT", "8000")
+    monkeypatch.setenv("CHROMA_READINESS_MODE", "config_only")
 
     with app.app_context():
         payload, status_code = logic.get_readiness_status()
