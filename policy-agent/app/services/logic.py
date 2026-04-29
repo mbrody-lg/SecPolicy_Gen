@@ -10,6 +10,9 @@ from flask import current_app
 from app import CORRELATION_ID_HEADER, get_request_correlation_id, mongo
 from app.agents.factory import create_agent_from_config
 from app.observability import build_log_event, log_event
+from app.rag.context import build_retrieval_context
+from app.rag.planner import build_retrieval_plan
+from app.rag.sources import load_rag_source_manifest
 
 
 POLICY_GENERATION_REQUIRED_FIELDS = ["context_id", "refined_prompt", "language", "model_version"]
@@ -30,6 +33,10 @@ MAX_POLICY_AGENT_VERSION_LENGTH = 64
 MAX_GENERATED_AT_LENGTH = 64
 MAX_STATUS_LENGTH = 32
 MAX_PROMPT_LENGTH = 20000
+MAX_BUSINESS_CONTEXT_FIELDS = 32
+MAX_BUSINESS_CONTEXT_VALUE_LENGTH = 4000
+MAX_BUSINESS_CONTEXT_LIST_ITEMS = 50
+MAX_BUSINESS_CONTEXT_LIST_ITEM_LENGTH = 1000
 MAX_POLICY_TEXT_LENGTH = 50000
 MAX_FEEDBACK_ITEMS = 20
 MAX_FEEDBACK_ITEM_LENGTH = 1000
@@ -309,6 +316,8 @@ def _collect_chroma_vector_entries(config: dict) -> list[dict]:
             chroma_entry = vector_entry.get("chroma")
             if isinstance(chroma_entry, dict):
                 entries.append(chroma_entry)
+            elif "chroma" in vector_entry:
+                entries.append(vector_entry)
 
     return entries
 
@@ -426,7 +435,7 @@ def validate_generation_payload(payload: dict | None) -> dict:
             correlation_id=correlation_id,
         )
 
-    return {
+    normalized = {
         "context_id": _require_string_field(
             data,
             field="context_id",
@@ -453,6 +462,140 @@ def validate_generation_payload(payload: dict | None) -> dict:
         ),
         "correlation_id": correlation_id,
     }
+    if "business_context" in data:
+        normalized["business_context"] = _validate_business_context(
+            data["business_context"],
+            correlation_id=correlation_id,
+        )
+    return normalized
+
+
+def _validate_business_context(value: object, *, correlation_id: str | None) -> dict:
+    """Validate optional structured context for retrieval planning."""
+    if not isinstance(value, dict):
+        raise PipelineStepError(
+            stage="contract_validation",
+            message="Field 'business_context' must be an object.",
+            error_type="contract_error",
+            error_code="invalid_field_type",
+            status_code=400,
+            details={"field": "business_context", "expected_type": "object"},
+            correlation_id=correlation_id,
+        )
+    if len(value) > MAX_BUSINESS_CONTEXT_FIELDS:
+        raise PipelineStepError(
+            stage="contract_validation",
+            message="Field 'business_context' exceeds the allowed field count.",
+            error_type="contract_error",
+            error_code="field_too_large",
+            status_code=413,
+            details={"field": "business_context", "max_fields": MAX_BUSINESS_CONTEXT_FIELDS},
+            correlation_id=correlation_id,
+        )
+
+    normalized = {}
+    for key, item in value.items():
+        if not isinstance(key, str) or not key.strip():
+            raise PipelineStepError(
+                stage="contract_validation",
+                message="Field 'business_context' contains an invalid key.",
+                error_type="contract_error",
+                error_code="invalid_field_type",
+                status_code=400,
+                details={"field": "business_context", "expected_key_type": "string"},
+                correlation_id=correlation_id,
+            )
+        if isinstance(item, str):
+            if len(item) > MAX_BUSINESS_CONTEXT_VALUE_LENGTH:
+                raise PipelineStepError(
+                    stage="contract_validation",
+                    message="Field 'business_context' contains an oversized value.",
+                    error_type="contract_error",
+                    error_code="field_too_large",
+                    status_code=413,
+                    details={
+                        "field": "business_context",
+                        "key": key,
+                        "max_length": MAX_BUSINESS_CONTEXT_VALUE_LENGTH,
+                    },
+                    correlation_id=correlation_id,
+                )
+            normalized[key.strip()] = item.strip()
+        elif isinstance(item, list):
+            if len(item) > MAX_BUSINESS_CONTEXT_LIST_ITEMS:
+                raise PipelineStepError(
+                    stage="contract_validation",
+                    message="Field 'business_context' contains too many list items.",
+                    error_type="contract_error",
+                    error_code="field_too_large",
+                    status_code=413,
+                    details={
+                        "field": "business_context",
+                        "key": key,
+                        "max_items": MAX_BUSINESS_CONTEXT_LIST_ITEMS,
+                    },
+                    correlation_id=correlation_id,
+                )
+            normalized[key.strip()] = _validate_business_context_list(
+                key=key,
+                value=item,
+                correlation_id=correlation_id,
+            )
+        elif item is None:
+            normalized[key.strip()] = None
+        else:
+            raise PipelineStepError(
+                stage="contract_validation",
+                message="Field 'business_context' contains an unsupported value type.",
+                error_type="contract_error",
+                error_code="invalid_field_type",
+                status_code=400,
+                details={"field": "business_context", "key": key, "expected_type": "string|list[string]|null"},
+                correlation_id=correlation_id,
+            )
+    return normalized
+
+
+def _validate_business_context_list(
+    *, key: str, value: list, correlation_id: str | None
+) -> list[str]:
+    """Validate list-style business context values without silent coercion."""
+    normalized = []
+    for index, entry in enumerate(value):
+        if not isinstance(entry, str):
+            raise PipelineStepError(
+                stage="contract_validation",
+                message="Field 'business_context' list values must be strings.",
+                error_type="contract_error",
+                error_code="invalid_field_type",
+                status_code=400,
+                details={
+                    "field": "business_context",
+                    "key": key,
+                    "index": index,
+                    "expected_type": "string",
+                },
+                correlation_id=correlation_id,
+            )
+        item = entry.strip()
+        if len(item) > MAX_BUSINESS_CONTEXT_LIST_ITEM_LENGTH:
+            raise PipelineStepError(
+                stage="contract_validation",
+                message="Field 'business_context' contains an oversized list value.",
+                error_type="contract_error",
+                error_code="field_too_large",
+                status_code=413,
+                details={
+                    "field": "business_context",
+                    "key": key,
+                    "index": index,
+                    "max_length": MAX_BUSINESS_CONTEXT_LIST_ITEM_LENGTH,
+                },
+                correlation_id=correlation_id,
+            )
+        if item:
+            normalized.append(item)
+    return normalized
 
 
 def validate_policy_update_payload(payload: dict | None, path_context_id: str) -> tuple[dict, dict]:
@@ -568,12 +711,28 @@ def _store_policy_config(model_version: str, config: dict) -> None:
     )
 
 
-def run_with_agent(refined_prompt: str, context_id: str, model_version: str) -> dict:
+def run_with_agent(
+    refined_prompt: str,
+    context_id: str,
+    model_version: str,
+    business_context: dict | None = None,
+) -> dict:
     """Run full policy-agent role pipeline for initial policy generation."""
     config = load_policy_config()
     _store_policy_config(model_version, config)
 
     agent = create_agent_from_config(config)
+    retrieval_plan = build_retrieval_plan(
+        build_retrieval_context(
+            {
+                "context_id": context_id,
+                "refined_prompt": refined_prompt,
+                "language": business_context.get("language", "") if business_context else "",
+                "business_context": business_context or {},
+            }
+        ),
+        load_rag_source_manifest(),
+    )
     correlation_id = get_request_correlation_id() or context_id
     _apply_correlation_id_to_agent(agent, correlation_id)
     log_event(
@@ -585,7 +744,7 @@ def run_with_agent(refined_prompt: str, context_id: str, model_version: str) -> 
         correlation_id=correlation_id,
         model_version=model_version,
     )
-    return agent.run(prompt=refined_prompt, context_id=context_id)
+    return agent.run(prompt=refined_prompt, context_id=context_id, retrieval_plan=retrieval_plan)
 
 
 def update_with_agent(prompt: str, context_id: str | None = None, model_version: str | None = None) -> dict:
@@ -621,6 +780,7 @@ def generate_policy_payload(payload: dict | None) -> dict:
             refined_prompt=data["refined_prompt"],
             context_id=data["context_id"],
             model_version=data["model_version"],
+            business_context={**data.get("business_context", {}), "language": data["language"]},
         )
     except FileNotFoundError as exc:
         logger.exception(
@@ -690,6 +850,7 @@ def generate_policy_payload(payload: dict | None) -> dict:
         "language": data["language"],
         "policy_text": result_object["text"],
         "structured_plan": result_object.get("structured_plan", []),
+        "retrieval_evidence": result_object.get("retrieval_evidence", []),
         "model_version": data["model_version"],
         "policy_agent_version": "0.1.0",
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -816,6 +977,7 @@ def update_policy_payload(payload: dict | None, path_context_id: str) -> dict:
         "language": data["language"],
         "policy_text": result_object["text"],
         "structured_plan": policy.get("structured_plan", []),
+        "retrieval_evidence": policy.get("retrieval_evidence", []),
         "model_version": policy.get("model_version"),
         "policy_agent_version": data["policy_agent_version"],
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -841,6 +1003,7 @@ def update_policy_payload(payload: dict | None, path_context_id: str) -> dict:
                 "language": result["language"],
                 "policy_text": result["policy_text"],
                 "structured_plan": result["structured_plan"],
+                "retrieval_evidence": result["retrieval_evidence"],
                 "model_version": result["model_version"],
                 "correlation_id": result["correlation_id"],
                 "policy_agent_version": result["policy_agent_version"],

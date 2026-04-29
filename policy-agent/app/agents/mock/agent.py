@@ -25,7 +25,7 @@ class MockAgent(Agent):
         )
         return {"id": context_id or "openai-policy-session"}
 
-    def run(self, prompt: str, context_id: str = None) -> str:
+    def run(self, prompt: str, context_id: str = None, retrieval_plan=None) -> str:
         """Run the mocked role pipeline and return simulated policy output."""
         if not self.roles:
             raise ValueError("No role has been defined within 'roles' in the MockAgent YAML.")

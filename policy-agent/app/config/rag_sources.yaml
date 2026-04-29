@@ -1,0 +1,110 @@
+version: 1
+
+embedding_defaults:
+  backend: chroma
+  model: intfloat/e5-base
+  revision: b533fe4636f4a2507c08ddab40644d20b0006d6a
+  chunk_size: 300
+  chunk_overlap: 50
+  file_types:
+    - pdf
+
+metadata_defaults:
+  product: policy-agent
+  audience: sme
+  domain: information_security
+  source_status: current_local_corpus
+  evidence_required: true
+
+sources:
+  - id: normativa
+    path: data/normativa
+    collection: normativa
+    family: legal_norms
+    metadata:
+      source_kind: regulation
+      jurisdiction:
+        - EU
+        - ES
+      language:
+        - es
+        - ca
+      applicability: legal_obligations
+      priority: high
+
+  - id: sector
+    path: data/sector
+    collection: sector
+    family: sector_norms
+    metadata:
+      source_kind: sector_guidance
+      jurisdiction:
+        - ES
+      language:
+        - es
+      applicability: sector_context
+      priority: medium
+
+  - id: metodologia_frameworks
+    path: data/metodologia
+    collection: metodologia
+    family: security_frameworks
+    include:
+      - ISO_*.pdf
+      - NIST*.pdf
+      - CIS_*.pdf
+      - uk_CAF*.pdf
+    metadata:
+      source_kind: framework
+      jurisdiction:
+        - international
+        - EU
+        - UK
+      language:
+        - es
+        - en
+      applicability: security_framework_alignment
+      priority: high
+
+  - id: metodologia_risk
+    path: data/metodologia
+    collection: metodologia
+    family: risk_methodologies
+    include:
+      - Magerit*.pdf
+    metadata:
+      source_kind: risk_methodology
+      jurisdiction:
+        - ES
+      language:
+        - es
+        - en
+      applicability: risk_analysis
+      priority: high
+
+  - id: guia
+    path: data/guia
+    collection: guia
+    family: implementation_guides
+    metadata:
+      source_kind: implementation_guide
+      jurisdiction:
+        - ES
+        - UK
+        - EU
+      language:
+        - es
+        - en
+      applicability: practical_controls
+      priority: medium
+
+future_families:
+  control_catalog:
+    status: derive_from_metodologia_and_guia
+  business_processes:
+    status: derive_from_guia
+  policy_templates:
+    status: not_present
+  validation_criteria:
+    status: not_present
+

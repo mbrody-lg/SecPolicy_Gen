@@ -27,6 +27,8 @@ def import_all_vector_modules(module_name):
 
 def get_vector_clients(vector_config: list):
     """Create vector backend clients from YAML role configuration."""
+    vector_clients = []
+
     for entry in vector_config:
         if not isinstance(entry, dict):
             raise ValueError("Each entry within 'vector' must be a dictionary with a single key")
@@ -53,8 +55,6 @@ def get_vector_clients(vector_config: list):
 
         download_model_if_needed(model_id, revision=revision)
         model = load_model(model_id, revision=revision)
-
-        vector_clients = []
 
         for col in collections:
             client = backend_class(model=model)

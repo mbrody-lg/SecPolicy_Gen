@@ -1,0 +1,106 @@
+version: 1
+
+cases:
+  - id: clinica_dental
+    context_fixture: context-agent/app/config/examples/answers/clinica_dental.yaml
+    query_terms:
+      - healthcare
+      - medical records
+      - patient data
+      - GDPR
+    expected_collection_families:
+      - normativa
+      - sector
+      - guia
+      - metodologia
+
+  - id: botiga_online_artesania
+    context_fixture: context-agent/app/config/examples/answers/botiga_online_artesania.yaml
+    query_terms:
+      - ecommerce
+      - customer data
+      - payment
+      - GDPR
+    expected_collection_families:
+      - normativa
+      - sector
+      - guia
+      - metodologia
+
+  - id: despatx_advocats
+    context_fixture: context-agent/app/config/examples/answers/despatx_advocats.yaml
+    query_terms:
+      - legal services
+      - confidential documents
+      - personal data
+      - access control
+    expected_collection_families:
+      - normativa
+      - sector
+      - guia
+      - metodologia
+
+  - id: academia_idiomes
+    context_fixture: context-agent/app/config/examples/answers/academia_idiomes.yaml
+    query_terms:
+      - education
+      - student data
+      - minors
+      - GDPR
+    expected_collection_families:
+      - normativa
+      - sector
+      - guia
+      - metodologia
+
+  - id: startup_iot
+    context_fixture: context-agent/app/config/examples/answers/startup_iot.yaml
+    query_terms:
+      - IoT
+      - devices
+      - cloud platform
+      - vulnerabilities
+    expected_collection_families:
+      - normativa
+      - guia
+      - metodologia
+
+  - id: consultoria_rrhh
+    context_fixture: context-agent/app/config/examples/answers/consultoria_rrhh.yaml
+    query_terms:
+      - HR consultancy
+      - employee data
+      - payroll
+      - suppliers
+    expected_collection_families:
+      - normativa
+      - sector
+      - guia
+      - metodologia
+
+  - id: cooperativa_agroalimentaria
+    context_fixture: context-agent/app/config/examples/answers/cooperativa_agroalimentaria.yaml
+    query_terms:
+      - agri-food
+      - cooperative
+      - operations
+      - continuity
+    expected_collection_families:
+      - normativa
+      - sector
+      - guia
+      - metodologia
+
+  - id: taller_mecanic
+    context_fixture: context-agent/app/config/examples/answers/taller_mecanic.yaml
+    query_terms:
+      - mechanical workshop
+      - customer data
+      - equipment
+      - backups
+    expected_collection_families:
+      - normativa
+      - sector
+      - guia
+      - metodologia
+

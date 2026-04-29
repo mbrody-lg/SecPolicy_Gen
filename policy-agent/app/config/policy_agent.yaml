@@ -16,7 +16,7 @@ roles:
     tools: []
     vector:
       - chroma: Chroma Vector Database
-        collection: [normativa]
+        collection: [normativa, sector, metodologia, guia]
         model: intfloat/e5-base
         revision: b533fe4636f4a2507c08ddab40644d20b0006d6a
         chunk_size: 300
