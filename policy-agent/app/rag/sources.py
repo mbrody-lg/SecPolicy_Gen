@@ -57,6 +57,14 @@ def get_manifest_collections(manifest: dict[str, Any]) -> list[str]:
     return collections
 
 
+def get_sources_by_family(manifest: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """Group source entries by collection family."""
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for source in manifest.get("sources", []):
+        grouped.setdefault(source["family"], []).append(source)
+    return grouped
+
+
 def _validate_source(source: Any, index: int, source_ids: set[str]) -> None:
     if not isinstance(source, dict):
         raise RagSourceManifestError(f"RAG source at index {index} must be a mapping.")
