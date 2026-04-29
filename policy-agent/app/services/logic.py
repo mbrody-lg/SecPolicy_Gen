@@ -10,6 +10,9 @@ from flask import current_app
 from app import CORRELATION_ID_HEADER, get_request_correlation_id, mongo
 from app.agents.factory import create_agent_from_config
 from app.observability import build_log_event, log_event
+from app.rag.context import build_retrieval_context
+from app.rag.planner import build_retrieval_plan
+from app.rag.sources import load_rag_source_manifest
 
 
 POLICY_GENERATION_REQUIRED_FIELDS = ["context_id", "refined_prompt", "language", "model_version"]
@@ -708,12 +711,28 @@ def _store_policy_config(model_version: str, config: dict) -> None:
     )
 
 
-def run_with_agent(refined_prompt: str, context_id: str, model_version: str) -> dict:
+def run_with_agent(
+    refined_prompt: str,
+    context_id: str,
+    model_version: str,
+    business_context: dict | None = None,
+) -> dict:
     """Run full policy-agent role pipeline for initial policy generation."""
     config = load_policy_config()
     _store_policy_config(model_version, config)
 
     agent = create_agent_from_config(config)
+    retrieval_plan = build_retrieval_plan(
+        build_retrieval_context(
+            {
+                "context_id": context_id,
+                "refined_prompt": refined_prompt,
+                "language": business_context.get("language", "") if business_context else "",
+                "business_context": business_context or {},
+            }
+        ),
+        load_rag_source_manifest(),
+    )
     correlation_id = get_request_correlation_id() or context_id
     _apply_correlation_id_to_agent(agent, correlation_id)
     log_event(
@@ -725,7 +744,7 @@ def run_with_agent(refined_prompt: str, context_id: str, model_version: str) -> 
         correlation_id=correlation_id,
         model_version=model_version,
     )
-    return agent.run(prompt=refined_prompt, context_id=context_id)
+    return agent.run(prompt=refined_prompt, context_id=context_id, retrieval_plan=retrieval_plan)
 
 
 def update_with_agent(prompt: str, context_id: str | None = None, model_version: str | None = None) -> dict:
@@ -761,6 +780,7 @@ def generate_policy_payload(payload: dict | None) -> dict:
             refined_prompt=data["refined_prompt"],
             context_id=data["context_id"],
             model_version=data["model_version"],
+            business_context={**data.get("business_context", {}), "language": data["language"]},
         )
     except FileNotFoundError as exc:
         logger.exception(
@@ -830,6 +850,7 @@ def generate_policy_payload(payload: dict | None) -> dict:
         "language": data["language"],
         "policy_text": result_object["text"],
         "structured_plan": result_object.get("structured_plan", []),
+        "retrieval_evidence": result_object.get("retrieval_evidence", []),
         "model_version": data["model_version"],
         "policy_agent_version": "0.1.0",
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -956,6 +977,7 @@ def update_policy_payload(payload: dict | None, path_context_id: str) -> dict:
         "language": data["language"],
         "policy_text": result_object["text"],
         "structured_plan": policy.get("structured_plan", []),
+        "retrieval_evidence": policy.get("retrieval_evidence", []),
         "model_version": policy.get("model_version"),
         "policy_agent_version": data["policy_agent_version"],
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -981,6 +1003,7 @@ def update_policy_payload(payload: dict | None, path_context_id: str) -> dict:
                 "language": result["language"],
                 "policy_text": result["policy_text"],
                 "structured_plan": result["structured_plan"],
+                "retrieval_evidence": result["retrieval_evidence"],
                 "model_version": result["model_version"],
                 "correlation_id": result["correlation_id"],
                 "policy_agent_version": result["policy_agent_version"],

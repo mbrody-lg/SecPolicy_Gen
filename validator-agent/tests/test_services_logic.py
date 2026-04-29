@@ -270,6 +270,7 @@ def test_run_validation_pipeline_returns_structured_success(client):
             "language": "en",
             "policy_text": "updated policy",
             "structured_plan": {"sections": []},
+            "retrieval_evidence": [],
             "generated_at": "2026-03-05T01:00:00+00:00",
             "policy_agent_version": "0.2.0",
             "status": "review",
@@ -278,6 +279,59 @@ def test_run_validation_pipeline_returns_structured_success(client):
             "evaluator_analysis": {"status": "review"},
         },
     }
+
+
+def test_run_validation_pipeline_passes_retrieval_evidence_to_coordinator(client):
+    evidence = [
+        {
+            "citation": "normativa:rgpd",
+            "source_id": "normativa",
+            "collection": "normativa",
+            "family": "legal_norms",
+            "text": "Article 32 requires appropriate security.",
+        }
+    ]
+    payload = {
+        "context_id": "ctx-evidence",
+        "policy_text": "policy",
+        "structured_plan": {"sections": []},
+        "retrieval_evidence": evidence,
+        "generated_at": "2026-03-05T00:00:00+00:00",
+    }
+    validation_result = {
+        "status": "accepted",
+        "policy_text": "policy",
+        "reasons": [],
+        "recommendations": [],
+        "retrieval_evidence": evidence,
+    }
+
+    with client.application.test_request_context("/validate-policy", method="POST"):
+        with patch("app.services.logic.Coordinator") as coordinator_cls:
+            coordinator_cls.return_value.validate_policy.return_value = validation_result
+            result = run_validation_pipeline(payload)
+
+    coordinator_cls.return_value.validate_policy.assert_called_once()
+    normalized_payload = coordinator_cls.return_value.validate_policy.call_args.args[0]
+    assert normalized_payload["retrieval_evidence"] == evidence
+    assert result["validation"]["retrieval_evidence"] == evidence
+
+
+def test_run_validation_pipeline_rejects_invalid_retrieval_evidence(client):
+    payload = {
+        "context_id": "ctx-evidence",
+        "policy_text": "policy",
+        "structured_plan": {"sections": []},
+        "retrieval_evidence": "not-a-list",
+        "generated_at": "2026-03-05T00:00:00+00:00",
+    }
+
+    with client.application.test_request_context("/validate-policy", method="POST"):
+        result = run_validation_pipeline(payload)
+
+    assert result["success"] is False
+    assert result["error_code"] == "invalid_field_type"
+    assert result["details"]["field"] == "retrieval_evidence"
 
 
 def test_run_validation_pipeline_returns_structured_contract_error(client):

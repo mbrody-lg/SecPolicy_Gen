@@ -54,6 +54,10 @@ class ChromaVectorClient(VectorClient):
     
     def search(self, query: str, top_k: int = 3) -> list:
         """Query the active collection and return top document matches."""
+        return [item["text"] for item in self.search_evidence(query, top_k=top_k)]
+
+    def search_evidence(self, query: str, top_k: int = 3) -> list:
+        """Query the active collection and return structured evidence matches."""
         if not query:
             log_event(
                 logger,
@@ -62,6 +66,7 @@ class ChromaVectorClient(VectorClient):
                 stage="policy_generation",
                 reason="empty_query",
             )
+            return []
         if not self.collection:
             log_event(
                 logger,
@@ -82,8 +87,15 @@ class ChromaVectorClient(VectorClient):
                 top_k=top_k,
             )
             
-        results = self.collection.query(query_texts=[query], n_results=top_k)
+        results = self.collection.query(
+            query_texts=[query],
+            n_results=top_k,
+            include=["documents", "metadatas", "distances"],
+        )
         documents = results.get("documents", [])
+        metadatas = results.get("metadatas", [])
+        ids = results.get("ids", [])
+        distances = results.get("distances", [])
         
         if current_app.config["DEBUG"]:
             log_event(
@@ -94,4 +106,21 @@ class ChromaVectorClient(VectorClient):
                 result_count=len(documents[0]) if documents and isinstance(documents[0], list) else 0,
             )
 
-        return documents[0] if documents and isinstance(documents[0], list) else []
+        if not documents or not isinstance(documents[0], list):
+            return []
+
+        evidence = []
+        for index, document in enumerate(documents[0]):
+            metadata = metadatas[0][index] if metadatas and metadatas[0] else {}
+            evidence.append(
+                {
+                    "text": document,
+                    "id": ids[0][index] if ids and ids[0] else None,
+                    "source_id": metadata.get("source_id", "unknown") if isinstance(metadata, dict) else "unknown",
+                    "collection": metadata.get("collection", "unknown") if isinstance(metadata, dict) else "unknown",
+                    "family": metadata.get("collection_family") if isinstance(metadata, dict) else None,
+                    "score": distances[0][index] if distances and distances[0] else None,
+                    "metadata": metadata,
+                }
+            )
+        return evidence

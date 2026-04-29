@@ -250,7 +250,17 @@ def test_run_generation_pipeline_persists_policy(app_context, monkeypatch):
     monkeypatch.setattr(
         logic,
         "run_with_agent",
-        lambda **kwargs: {"text": "Generated policy body", "structured_plan": ["scope"]},
+        lambda **kwargs: {
+            "text": "Generated policy body",
+            "structured_plan": ["scope"],
+            "retrieval_evidence": [
+                {
+                    "citation": "normativa:rgpd",
+                    "collection": "normativa",
+                    "source_id": "normativa",
+                }
+            ],
+        },
     )
 
     result = logic.run_generation_pipeline(
@@ -269,6 +279,13 @@ def test_run_generation_pipeline_persists_policy(app_context, monkeypatch):
     assert stored_policy is not None
     assert stored_policy["ownership"]["owner_service"] == "policy-agent"
     assert stored_policy["correlation_id"] == "ctx-1"
+    assert stored_policy["retrieval_evidence"] == [
+        {
+            "citation": "normativa:rgpd",
+            "collection": "normativa",
+            "source_id": "normativa",
+        }
+    ]
 
 
 def test_run_generation_pipeline_emits_structured_logs(app_context, monkeypatch, caplog):
@@ -344,6 +361,7 @@ def test_run_policy_update_pipeline_updates_existing_policy(app_context, monkeyp
             "language": "en",
             "policy_text": "previous policy",
             "structured_plan": ["old"],
+            "retrieval_evidence": [{"citation": "normativa:rgpd"}],
             "model_version": "gpt-4",
             "policy_agent_version": "0.1.0",
             "generated_at": datetime.now(timezone.utc),
@@ -375,6 +393,7 @@ def test_run_policy_update_pipeline_updates_existing_policy(app_context, monkeyp
     assert stored_policy["policy_text"] == "Updated policy body"
     assert stored_policy["last_validation_status"] == "review"
     assert stored_policy["correlation_id"] == context_id
+    assert stored_policy["retrieval_evidence"] == [{"citation": "normativa:rgpd"}]
 
 
 def test_build_policy_update_prompt_is_deterministic():
@@ -428,12 +447,13 @@ def test_run_with_agent_propagates_request_correlation_id(app, monkeypatch):
             self.client = FakeClientWrapper(sdk_client)
             self.roles = [{"PolicyGeneration": True}]
 
-        def run(self, prompt, context_id=None):
+        def run(self, prompt, context_id=None, retrieval_plan=None):
             return {
                 "text": "Generated policy body",
                 "structured_plan": [],
                 "used_headers": self.client.client.default_headers,
                 "context_id": context_id,
+                "retrieval_plan": retrieval_plan,
             }
 
     sdk_client = FakeSdkClient()
