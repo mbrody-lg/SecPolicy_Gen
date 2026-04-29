@@ -13,6 +13,8 @@ POLICY_CONTAINER="policy_agent_service"
 VALIDATOR_CONTAINER="validator_agent_service"
 COMPOSE_FILE="${INFRA_DIR}/docker-compose.yml"
 POLICY_MOCK_CONFIG="/policy-agent/app/config/examples/policy_agent.example.mock.yaml"
+CONTEXT_MOCK_CONFIG="/context-agent/app/config/examples/context_agent.example.mock.yaml"
+CONTEXT_CONTAINER_CONFIG=""
 POLICY_CONTAINER_CONFIG=""
 VALIDATOR_CONTAINER_CONFIG=""
 
@@ -51,7 +53,7 @@ restore_and_cleanup() {
   if [[ -n "$TMP_BACKUP_DIR" && -d "$TMP_BACKUP_DIR" ]]; then
     if docker inspect "$CONTEXT_CONTAINER" >/dev/null 2>&1; then
       if [[ -f "$TMP_BACKUP_DIR/context_agent.yaml" ]]; then
-        docker cp "$TMP_BACKUP_DIR/context_agent.yaml" "$CONTEXT_CONTAINER:/context-agent/app/config/context_agent.yaml" || true
+        docker cp "$TMP_BACKUP_DIR/context_agent.yaml" "$CONTEXT_CONTAINER:$CONTEXT_CONTAINER_CONFIG" || true
       fi
       if [[ -f "$TMP_BACKUP_DIR/policy_agent.yaml" ]]; then
         docker exec "$POLICY_CONTAINER" mkdir -p /config
@@ -256,14 +258,15 @@ PY
 fi
 
 if [[ "$MOCK_MODE" == "1" || "$MOCK_MODE" == "true" ]]; then
+  CONTEXT_CONTAINER_CONFIG="$(resolve_service_config_path "$CONTEXT_CONTAINER")"
   POLICY_CONTAINER_CONFIG="$(resolve_service_config_path "$POLICY_CONTAINER")"
   VALIDATOR_CONTAINER_CONFIG="$(resolve_service_config_path "$VALIDATOR_CONTAINER")"
   TMP_BACKUP_DIR="$(mktemp -d)"
-  docker cp "$CONTEXT_CONTAINER:/context-agent/app/config/context_agent.yaml" "$TMP_BACKUP_DIR/context_agent.yaml"
+  docker cp "$CONTEXT_CONTAINER:$CONTEXT_CONTAINER_CONFIG" "$TMP_BACKUP_DIR/context_agent.yaml"
   docker cp "$POLICY_CONTAINER:$POLICY_CONTAINER_CONFIG" "$TMP_BACKUP_DIR/policy_agent.yaml"
   docker cp "$VALIDATOR_CONTAINER:$VALIDATOR_CONTAINER_CONFIG" "$TMP_BACKUP_DIR/validator_agent.yaml"
   log "using mock agent configs for deterministic execution"
-  docker exec "$CONTEXT_CONTAINER" cp /context-agent/app/config/examples/context_agent.example.mock.yaml /context-agent/app/config/context_agent.yaml
+  docker exec "$CONTEXT_CONTAINER" sh -lc "mkdir -p \"$(dirname "$CONTEXT_CONTAINER_CONFIG")\" && cp \"$CONTEXT_MOCK_CONFIG\" \"$CONTEXT_CONTAINER_CONFIG\""
   docker exec "$POLICY_CONTAINER" sh -lc "mkdir -p \"$(dirname "$POLICY_CONTAINER_CONFIG")\" && cp \"$POLICY_MOCK_CONFIG\" \"$POLICY_CONTAINER_CONFIG\""
   docker exec "$VALIDATOR_CONTAINER" sh -lc "mkdir -p \"$(dirname "$VALIDATOR_CONTAINER_CONFIG")\" && cp /validator-agent/app/config/examples/validator_agent.example.mock.yaml \"$VALIDATOR_CONTAINER_CONFIG\""
 else

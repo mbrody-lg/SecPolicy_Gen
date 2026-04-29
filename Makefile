@@ -5,7 +5,7 @@ DOCKER_COMPOSE_CMD=$(shell scripts/docker_preflight.sh --print-compose 2>/dev/nu
 COMPOSE=$(DOCKER_COMPOSE_CMD) -f $(INFRA_DIR)/docker-compose.yml --env-file $(INFRA_DIR)/.env
 LINT_PYTHON=$(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi)
 
-.PHONY: all docker-preflight up down clean rebuild logs shell-context context-tests context-import policy-shell policy-tests policy-vectorize validator-shell validator-tests functional-smoke critical-path-validation bootstrap-test-env host-fast-tests lint help
+.PHONY: all docker-preflight up down clean rebuild logs shell-context context-tests context-import policy-shell policy-tests policy-vectorize policy-rag-validate validator-shell validator-tests functional-smoke critical-path-validation bootstrap-test-env host-fast-tests lint help
 
 ## Verify docker and compose prerequisites
 docker-preflight:
@@ -53,7 +53,11 @@ policy-tests:
 
 ## Run tests for policy-agent
 policy-vectorize: 
-	docker exec -it policy_agent_service python scripts/index_pdfs_to_chroma.py
+	docker exec policy_agent_service python scripts/index_pdfs_to_chroma.py
+
+## Validate policy-agent RAG manifest and source paths without indexing
+policy-rag-validate:
+	docker exec policy_agent_service python scripts/index_pdfs_to_chroma.py --validate-only --validate-chroma
 
 ## Enter the validator-agent container
 validator-shell: 
@@ -99,6 +103,7 @@ help:
 	@echo "make policy-shell 	-> Access policy-agent shell"
 	@echo "make policy-tests 	-> Run tests inside policy-agent"
 	@echo "make policy-vectorize 	-> Run data vectorization inside policy-agent"
+	@echo "make policy-rag-validate -> Validate RAG manifest/source paths without indexing"
 	@echo "make validator-shell 	-> Access validator-agent shell"
 	@echo "make validator-tests 	-> Run tests within validator-agent"
 	@echo "make functional-smoke 	-> Run full docker functional smoke pipeline"

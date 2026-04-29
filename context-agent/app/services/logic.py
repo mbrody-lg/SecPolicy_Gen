@@ -2,15 +2,21 @@
 
 from datetime import datetime, timezone
 import logging
+import os
 from time import perf_counter
 
 import requests
 import yaml
 from bson import ObjectId
-from flask import current_app
+from flask import current_app, has_app_context
 from markdown import markdown
 
-from app import get_request_correlation_id, mongo
+from app import (
+    DEFAULT_CONFIG_PATH,
+    DEFAULT_QUESTIONS_CONFIG_PATH,
+    get_request_correlation_id,
+    mongo,
+)
 from app.agents.factory import create_agent_from_config
 from app.observability import build_log_event, log_event
 
@@ -98,13 +104,33 @@ def get_readiness_status() -> dict:
     }
 
 
-def load_questions(config_path="app/config/context_questions.yaml"):
+def _resolve_config_path(config_key: str, env_name: str, default_path: str) -> str:
+    """Resolve runtime config paths from Flask config, environment, or defaults."""
+    if has_app_context():
+        return current_app.config.get(config_key, default_path)
+    return os.getenv(env_name, default_path)
+
+
+def _agent_config_path() -> str:
+    return _resolve_config_path("CONFIG_PATH", "CONFIG_PATH", DEFAULT_CONFIG_PATH)
+
+
+def _questions_config_path() -> str:
+    return _resolve_config_path(
+        "QUESTIONS_CONFIG_PATH",
+        "QUESTIONS_CONFIG_PATH",
+        DEFAULT_QUESTIONS_CONFIG_PATH,
+    )
+
+
+def load_questions(config_path: str | None = None):
     """Load context-question definitions from YAML configuration."""
-    with open(config_path, "r", encoding="utf-8") as f:
+    resolved_config_path = config_path or _questions_config_path()
+    with open(resolved_config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)["questions"]
 
 
-def generate_context_prompt(data: dict, question_config="app/config/context_questions.yaml") -> str:
+def generate_context_prompt(data: dict, question_config: str | None = None) -> str:
     """
     Build a text prompt from form answers.
     This prompt is used to drive context generation.
@@ -128,9 +154,8 @@ def run_with_agent(prompt: str, context_id: str = None, model_version: str = Non
     Execute the configured agent using the initial prompt.
     The context_id can be used for session naming, assistant_id, or traceability.
     """
-    config_path = "app/config/context_agent.yaml"
     _ = model_version
-    agent = create_agent_from_config(config_path)
+    agent = create_agent_from_config(_agent_config_path())
     agent.create(context_id=context_id)  # pass context_id when persistence is needed
     return agent.run(prompt, context_id)
 

@@ -1,5 +1,6 @@
 """Source manifest loading and validation for policy-agent RAG."""
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,7 @@ REQUIRED_METADATA_FIELDS = {
     "applicability",
     "priority",
 }
+CHROMA_COLLECTION_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,61}[A-Za-z0-9]$")
 
 
 class RagSourceManifestError(ValueError):
@@ -87,6 +89,12 @@ def _validate_source(source: Any, index: int, source_ids: set[str]) -> None:
         if not isinstance(value, str) or not value.strip():
             raise RagSourceManifestError(f"RAG source '{source_id}' has an invalid '{field}'.")
 
+    collection = source["collection"]
+    if not _is_valid_chroma_collection_name(collection):
+        raise RagSourceManifestError(
+            f"RAG source '{source_id}' has an invalid Chroma collection name '{collection}'."
+        )
+
     include = source.get("include")
     if include is not None and (
         not isinstance(include, list) or not all(isinstance(item, str) and item.strip() for item in include)
@@ -109,3 +117,13 @@ def _validate_source(source: Any, index: int, source_ids: set[str]) -> None:
             raise RagSourceManifestError(
                 f"RAG source '{source_id}' metadata field '{field}' must be a list of strings."
             )
+
+
+def _is_valid_chroma_collection_name(name: str) -> bool:
+    """Return whether a collection name is compatible with Chroma naming rules."""
+    if not CHROMA_COLLECTION_NAME_PATTERN.match(name):
+        return False
+    if ".." in name:
+        return False
+    parts = name.split(".")
+    return not (len(parts) == 4 and all(part.isdigit() and 0 <= int(part) <= 255 for part in parts))

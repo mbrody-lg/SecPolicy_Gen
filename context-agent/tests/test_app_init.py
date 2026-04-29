@@ -69,9 +69,13 @@ def test_create_app_sets_dependency_timeouts_and_secure_defaults(monkeypatch):
     monkeypatch.delenv("MAX_CONTENT_LENGTH", raising=False)
     monkeypatch.delenv("SESSION_COOKIE_SECURE", raising=False)
     monkeypatch.delenv("TRUSTED_HOSTS", raising=False)
+    monkeypatch.delenv("CONFIG_PATH", raising=False)
+    monkeypatch.delenv("QUESTIONS_CONFIG_PATH", raising=False)
 
     app = app_module.create_app()
 
+    assert app.config["CONFIG_PATH"] == app_module.DEFAULT_CONFIG_PATH
+    assert app.config["QUESTIONS_CONFIG_PATH"] == app_module.DEFAULT_QUESTIONS_CONFIG_PATH
     assert app.config["POLICY_AGENT_TIMEOUT_SECONDS"] == 30.0
     assert app.config["VALIDATOR_AGENT_TIMEOUT_SECONDS"] == 30.0
     assert app.config["MAX_CONTENT_LENGTH"] == 256 * 1024
@@ -89,9 +93,13 @@ def test_create_app_reads_timeout_and_trusted_host_overrides(monkeypatch):
     monkeypatch.setenv("MAX_CONTENT_LENGTH", "4096")
     monkeypatch.setenv("SESSION_COOKIE_SECURE", "true")
     monkeypatch.setenv("TRUSTED_HOSTS", "localhost,context-agent.internal")
+    monkeypatch.setenv("CONFIG_PATH", "/config/context_agent.yaml")
+    monkeypatch.setenv("QUESTIONS_CONFIG_PATH", "/config/context_questions.yaml")
 
     app = app_module.create_app()
 
+    assert app.config["CONFIG_PATH"] == "/config/context_agent.yaml"
+    assert app.config["QUESTIONS_CONFIG_PATH"] == "/config/context_questions.yaml"
     assert app.config["POLICY_AGENT_TIMEOUT_SECONDS"] == 12.5
     assert app.config["VALIDATOR_AGENT_TIMEOUT_SECONDS"] == 45.0
     assert app.config["MAX_CONTENT_LENGTH"] == 4096
@@ -133,6 +141,26 @@ def test_request_hook_regenerates_unsafe_inbound_correlation_id(monkeypatch, uns
     assert generated
     assert generated != unsafe_correlation_id
     UUID(generated)
+
+
+def test_agent_type_context_processor_uses_config_path(monkeypatch):
+    _set_common_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "true")
+    monkeypatch.setenv("FLASK_SECRET_KEY", "configured-test-secret")
+    monkeypatch.setenv("CONFIG_PATH", "/config/custom-context-agent.yaml")
+    captured = {}
+
+    def fake_load_agent_config(config_path):
+        captured["config_path"] = config_path
+        return {"type": "mock"}
+
+    monkeypatch.setattr("app.agents.factory.load_agent_config", fake_load_agent_config)
+
+    app = app_module.create_app()
+    agent_type_context_processor = app.template_context_processors[None][-1]
+
+    assert agent_type_context_processor() == {"agent_type": "mock"}
+    assert captured["config_path"] == "/config/custom-context-agent.yaml"
 
 
 def test_request_hook_generates_correlation_id_when_missing(monkeypatch):
