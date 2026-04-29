@@ -45,15 +45,18 @@ def get_health_status() -> dict:
 def get_readiness_status() -> dict:
     """Validate the minimum dependencies needed to serve validator requests."""
     checks = {}
-    errors = []
+    ready = True
 
     try:
         mongo.db.command("ping")
-        checks["mongo"] = "ok"
+        checks["mongo"] = {"status": "ok"}
     except Exception:  # pragma: no cover - pymongo-specific failure shapes
         logger.exception("Validator readiness failed while checking mongo.")
-        checks["mongo"] = "error"
-        errors.append("mongo_unavailable")
+        ready = False
+        checks["mongo"] = {
+            "status": "error",
+            "reason": "ping_failed",
+        }
 
     config_path = current_app.config.get("CONFIG_PATH", "")
     try:
@@ -61,22 +64,27 @@ def get_readiness_status() -> dict:
             raise FileNotFoundError(config_path)
         with open(config_path, "r", encoding="utf-8") as config_file:
             yaml.safe_load(config_file)
-        checks["config"] = "ok"
+        checks["config"] = {
+            "status": "ok",
+            "source": "loaded",
+        }
     except Exception:
         logger.exception("Validator readiness failed while loading config path=%s", config_path)
-        checks["config"] = "error"
-        errors.append("config_unavailable")
+        ready = False
+        checks["config"] = {
+            "status": "error",
+            "reason": "unavailable",
+        }
 
-    if errors:
-        return _error_payload(
-            error_type="dependency_error",
-            error_code="service_not_ready",
-            message="Validator-agent readiness checks failed.",
-            details={"checks": checks, "errors": errors},
-        ) | {"status_code": 503}
+    if not ready:
+        return {
+            "status": "not_ready",
+            "service": "validator-agent",
+            "checks": checks,
+            "status_code": 503,
+        }
 
     return {
-        "success": True,
         "status": "ready",
         "service": "validator-agent",
         "checks": checks,

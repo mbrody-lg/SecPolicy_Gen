@@ -8,6 +8,12 @@ services:
       - mongo_data:/data/db
     networks:
       - internal
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand('ping').ok\" | grep 1 || mongo --quiet --eval \"db.adminCommand('ping').ok\" | grep 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
   chroma:
     image: chromadb/chroma
     volumes:
@@ -33,7 +39,8 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - POLICY_AGENT_URL=${POLICY_AGENT_URL}
     depends_on:
-      - mongo
+      mongo:
+        condition: service_healthy
     networks:
       - internal
     healthcheck:
@@ -58,9 +65,12 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - CHROMA_HOST=${CHROMA_HOST}
       - CHROMA_PORT=${CHROMA_PORT}
+      - CHROMA_READINESS_MODE=live
     depends_on:
-      - mongo
-      - chroma
+      mongo:
+        condition: service_healthy
+      chroma:
+        condition: service_started
     networks:
       - internal
     healthcheck:
@@ -87,7 +97,8 @@ services:
     volumes:
       - ../validator-agent:/validator-agent
     depends_on:
-      - mongo
+      mongo:
+        condition: service_healthy
     networks:
       - internal
     healthcheck:

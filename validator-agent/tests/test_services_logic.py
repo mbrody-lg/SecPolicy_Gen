@@ -26,10 +26,12 @@ def test_get_readiness_status_returns_ready_payload(app, monkeypatch):
 
     ping_mock.assert_called_once_with("ping")
     assert result == {
-        "success": True,
         "status": "ready",
         "service": "validator-agent",
-        "checks": {"mongo": "ok", "config": "ok"},
+        "checks": {
+            "mongo": {"status": "ok"},
+            "config": {"status": "ok", "source": "loaded"},
+        },
     }
 
 
@@ -41,13 +43,11 @@ def test_get_readiness_status_returns_dependency_error_when_mongo_fails(app, mon
         result = get_readiness_status()
 
     assert result == {
-        "success": False,
-        "error_type": "dependency_error",
-        "error_code": "service_not_ready",
-        "message": "Validator-agent readiness checks failed.",
-        "details": {
-            "checks": {"mongo": "error", "config": "ok"},
-            "errors": ["mongo_unavailable"],
+        "status": "not_ready",
+        "service": "validator-agent",
+        "checks": {
+            "mongo": {"status": "error", "reason": "ping_failed"},
+            "config": {"status": "ok", "source": "loaded"},
         },
         "status_code": 503,
     }

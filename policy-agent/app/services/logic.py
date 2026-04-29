@@ -335,6 +335,24 @@ def _validate_readiness_config(config: dict) -> None:
         raise ValueError("Configuration field 'roles' must be a list.")
 
 
+def _chroma_readiness_mode() -> str:
+    return os.getenv("CHROMA_READINESS_MODE", "config_only").strip().lower()
+
+
+def _get_chroma_http_client():
+    from app.agents.vector.chroma.http_client import get_chroma_http_client
+
+    return get_chroma_http_client()
+
+
+def _check_live_chroma() -> None:
+    client = _get_chroma_http_client()
+    heartbeat = getattr(client, "heartbeat", None)
+    if not callable(heartbeat):
+        raise RuntimeError("Chroma client does not expose heartbeat.")
+    heartbeat()
+
+
 def get_readiness_status() -> tuple[dict, int]:
     """Run minimal safe readiness checks for config and critical dependencies."""
     checks: dict[str, dict] = {}
@@ -380,23 +398,31 @@ def get_readiness_status() -> tuple[dict, int]:
 
     chroma_entries = _collect_chroma_vector_entries(config or {})
     if chroma_entries:
+        chroma_host = os.getenv("CHROMA_HOST", "chroma").strip()
         chroma_port = os.getenv("CHROMA_PORT", "8000")
+        mode = _chroma_readiness_mode()
         try:
-            chroma_port_value = int(chroma_port)
+            if not chroma_host:
+                raise ValueError("Configured Chroma host must not be empty.")
+            int(chroma_port)
             first_entry = chroma_entries[0]
             collections = first_entry.get("collection", [])
             if not isinstance(collections, list) or not collections:
                 raise ValueError("Configured Chroma collections must be a non-empty list.")
+            if mode not in {"config_only", "live"}:
+                raise ValueError("Invalid Chroma readiness mode.")
+            if mode == "live":
+                _check_live_chroma()
             checks["chroma"] = {
-                "status": "configured",
-                "mode": "config_only",
+                "status": "ok" if mode == "live" else "configured",
+                "mode": mode,
                 "collection_count": len(collections),
             }
         except Exception:
             ready = False
             checks["chroma"] = {
                 "status": "error",
-                "mode": "config_only",
+                "mode": mode if mode in {"config_only", "live"} else "config_only",
                 "reason": "invalid_configuration",
             }
     else:

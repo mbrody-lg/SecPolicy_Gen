@@ -42,9 +42,9 @@ make up
 This starts:
 - **MongoDB** - Data persistence for all agents
 - **Chroma** - Vector database for regulatory documents
-- **Context Agent** - Web interface at http://localhost:3000
-- **Policy Agent** - API at http://localhost:5001
-- **Validator Agent** - API at http://localhost:5002
+- **Context Agent** - Web/API service at http://localhost:5003
+- **Policy Agent** - API at http://localhost:5002
+- **Validator Agent** - API at http://localhost:5001
 
 ### 4. Stop Services
 
@@ -89,7 +89,7 @@ All agents run on separate ports and use internal Docker DNS:
 | `make rebuild` | Force rebuild all containers |
 | `make logs` | View live logs from all services |
 | `make host-fast-tests` | Run fast host-side checks across services |
-| `make context-shell` | Access Context Agent shell |
+| `make shell-context` | Access Context Agent shell |
 | `make context-tests` | Run Context Agent tests |
 | `make policy-shell` | Access Policy Agent shell |
 | `make policy-tests` | Run Policy Agent tests |
@@ -128,6 +128,26 @@ docker-compose.yml services:
 └── validator-agent    # Policy validation service
 ```
 
+## Compose Readiness Map
+
+The Compose stack uses container healthchecks as readiness gates, not just
+startup ordering:
+
+| Service | Readiness probe | Dependent services |
+|---------|-----------------|--------------------|
+| `mongo` | `db.adminCommand('ping')` through the Mongo shell inside the container | `context-agent`, `policy-agent`, `validator-agent` |
+| `chroma` | Container start only; live usability is checked by `policy-agent /ready` through its Chroma client | `policy-agent` |
+| `context-agent` | HTTP `GET /ready` on the container-local Flask port | External smoke and diagnostics checks |
+| `policy-agent` | HTTP `GET /ready` on the container-local Flask port | External smoke and diagnostics checks |
+| `validator-agent` | HTTP `GET /ready` on the container-local Flask port | External smoke and diagnostics checks |
+
+Readiness invariants:
+- Agents that require MongoDB do not start until `mongo` is `service_healthy`.
+- `policy-agent` does not start until `mongo` is `service_healthy` and `chroma` has started; `policy-agent /ready` performs the live Chroma check in Docker through `CHROMA_READINESS_MODE=live`.
+- Agent healthchecks remain bound to `/ready`; Docker readiness should reflect whether each service can accept application traffic, while dependency readiness reflects whether required backing services are accepting connections.
+- Compose healthchecks are local container probes. Host port mappings are for developer access and are not used to prove inter-service readiness.
+- `depends_on.condition: service_healthy` only gates container startup. It does not replace runtime retry/error handling if a dependency becomes unhealthy after an agent has started.
+
 ## Setting Up RAG Data
 
 The Policy Agent uses a vector database to retrieve relevant regulations and guidelines.
@@ -160,9 +180,9 @@ All services communicate through Docker's internal network. External access poin
 
 | Service | Port | Access |
 |---------|------|--------|
-| Context Agent Web | 3000 | http://localhost:3000 |
-| Policy Agent API | 5001 | http://localhost:5001 |
-| Validator Agent API | 5002 | http://localhost:5002 |
+| Context Agent Web/API | 5003 | http://localhost:5003 |
+| Policy Agent API | 5002 | http://localhost:5002 |
+| Validator Agent API | 5001 | http://localhost:5001 |
 | MongoDB | 27017 | localhost:27017 (host only) |
 | Chroma | 8000 | Internal Docker network |
 
@@ -171,7 +191,7 @@ All services communicate through Docker's internal network. External access poin
 ### Services Won't Start
 - Check Docker is running: `docker ps`
 - Review logs: `make logs`
-- Ensure ports 27017, 8000, 3000, 5001, 5002 are available
+- Ensure ports 27017, 8000, 5003, 5002, and 5001 are available
 
 ### MongoDB Connection Error
 - Verify `MONGO_URI` in `.env`
@@ -194,7 +214,7 @@ To modify and test locally:
 
 ### 1. Access Agent Shell
 ```bash
-make context-shell    # Enter Context Agent container
+make shell-context    # Enter Context Agent container
 ```
 
 ### 2. Install Dependencies

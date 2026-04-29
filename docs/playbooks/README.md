@@ -42,6 +42,12 @@ When the work needs a single CI-aligned evidence command for the full critical l
 - [Policy Agent](./policy-agent.md)
 - [Validator Agent](./validator-agent.md)
 
+## Operational Playbooks
+
+- [Context -> Policy -> Validator Runbook](./context-policy-validator-loop.md)
+- [Developer Recovery](./developer-recovery.md)
+- [CI Handoff Contract](./ci-handoff-contract.md)
+
 ## When To Use Them
 
 - Use the service playbook before changing tests, lint-sensitive code, or security-sensitive paths in that service.
