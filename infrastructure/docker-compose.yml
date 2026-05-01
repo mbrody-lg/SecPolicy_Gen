@@ -33,11 +33,20 @@ services:
     working_dir: /context-agent
     environment:
       - FLASK_APP=run.py
-      - FLASK_ENV=development
+      - FLASK_ENV=${FLASK_ENV:-development}
+      - DEBUG=${DEBUG:-false}
+      - TESTING=${TESTING:-false}
       - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
       - MONGO_URI=${MONGO_URI}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - POLICY_AGENT_URL=${POLICY_AGENT_URL}
+      - OPENAI_API_URL=${OPENAI_API_URL:-https://api.openai.com/v1/}
+      - POLICY_AGENT_URL=${POLICY_AGENT_URL:-http://policy-agent:5000}
+      - VALIDATOR_AGENT_URL=${VALIDATOR_AGENT_URL:-http://validator-agent:5000}
+      - POLICY_AGENT_TIMEOUT_SECONDS=${POLICY_AGENT_TIMEOUT_SECONDS:-30}
+      - VALIDATOR_AGENT_TIMEOUT_SECONDS=${VALIDATOR_AGENT_TIMEOUT_SECONDS:-30}
+      - MAX_CONTENT_LENGTH=${MAX_CONTENT_LENGTH:-262144}
+      - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
+      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-localhost,context-agent,policy-agent,validator-agent}
       - CONFIG_PATH=/context-agent/app/config/context_agent.yaml
       - QUESTIONS_CONFIG_PATH=/context-agent/app/config/context_questions.yaml
     depends_on:
@@ -61,13 +70,21 @@ services:
     working_dir: /policy-agent
     environment:
       - FLASK_APP=app
-      - FLASK_ENV=development
+      - FLASK_ENV=${FLASK_ENV:-development}
+      - DEBUG=${DEBUG:-false}
+      - TESTING=${TESTING:-false}
       - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
       - MONGO_URI=${MONGO_URI}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_API_URL=${OPENAI_API_URL:-https://api.openai.com/v1/}
       - CHROMA_HOST=${CHROMA_HOST}
       - CHROMA_PORT=${CHROMA_PORT}
-      - CHROMA_READINESS_MODE=live
+      - CHROMA_READINESS_MODE=${CHROMA_READINESS_MODE:-live}
+      - RAG_VALIDATE_CHROMA=${RAG_VALIDATE_CHROMA:-false}
+      - POLICY_AGENT_ALLOW_MODEL_DOWNLOAD=${POLICY_AGENT_ALLOW_MODEL_DOWNLOAD:-0}
+      - MAX_CONTENT_LENGTH=${MAX_CONTENT_LENGTH:-262144}
+      - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
+      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-localhost,context-agent,policy-agent,validator-agent}
       - RAG_SOURCES_PATH=/policy-agent/app/config/rag_sources.yaml
       - CONFIG_PATH=/policy-agent/app/config/policy_agent.yaml
     depends_on:
@@ -91,13 +108,20 @@ services:
       - "5001:5000"
     environment:
       - FLASK_APP=app
-      - FLASK_ENV=development
+      - FLASK_ENV=${FLASK_ENV:-development}
+      - DEBUG=${DEBUG:-false}
+      - TESTING=${TESTING:-false}
       - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
       - MONGO_URI=${MONGO_URI}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_API_URL=${OPENAI_API_URL:-https://api.openai.com/v1/}
       - MISTRAL_API_KEY=${MISTRAL_API_KEY}
-      - MISTRAL_API_URL=${MISTRAL_API_URL}
-      - POLICY_AGENT_URL=${POLICY_AGENT_URL}
+      - MISTRAL_API_URL=${MISTRAL_API_URL:-https://api.mistral.ai/v1}
+      - POLICY_AGENT_URL=${POLICY_AGENT_URL:-http://policy-agent:5000}
+      - POLICY_AGENT_TIMEOUT_SECONDS=${POLICY_AGENT_TIMEOUT_SECONDS:-30}
+      - MAX_CONTENT_LENGTH=${MAX_CONTENT_LENGTH:-262144}
+      - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
+      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-localhost,context-agent,policy-agent,validator-agent}
       - CONFIG_PATH=/validator-agent/app/config/validator_agent.yaml
     volumes:
       - ../validator-agent:/validator-agent
