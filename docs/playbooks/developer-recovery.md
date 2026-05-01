@@ -32,7 +32,14 @@ Start with the least destructive action that can produce useful evidence:
    make up
    ```
 
-3. Check the three readiness endpoints:
+3. Validate RAG runtime wiring when policy-agent or Chroma behavior is in
+   scope:
+
+   ```bash
+   make policy-rag-validate
+   ```
+
+4. Check the three readiness endpoints:
 
    ```bash
    curl -fsS http://localhost:5003/ready
@@ -40,19 +47,19 @@ Start with the least destructive action that can produce useful evidence:
    curl -fsS http://localhost:5001/ready
    ```
 
-4. Run the smoke path when readiness is green:
+5. Run the smoke path when readiness is green:
 
    ```bash
    make functional-smoke
    ```
 
-5. Use the full evidence command when the change crosses service boundaries:
+6. Use the full evidence command when the change crosses service boundaries:
 
    ```bash
    make critical-path-validation
    ```
 
-6. Stop the stack when finished:
+7. Stop the stack when finished:
 
    ```bash
    make down
@@ -172,6 +179,27 @@ Expected evidence:
 - The relevant service test target passes, such as `make policy-tests`,
   `make validator-tests`, or `make context-tests`.
 
+### Bootstrap Drift
+
+Symptom:
+- Host-side tests fail before service code runs.
+- `.venv` is missing, stale, or built with an unsupported Python version.
+
+First diagnostic:
+
+```bash
+make bootstrap-test-env
+```
+
+Safe action:
+- Use Python 3.11 or newer, or set `PYTHON_BIN` to a compatible interpreter.
+- Re-run `make bootstrap-test-env` before `make host-fast-tests`.
+
+Expected evidence:
+- Bootstrap logs identify the interpreter and dependency file that failed, if
+  any.
+- `make host-fast-tests` can import the three service test suites.
+
 ### Missing Config
 
 Symptom:
@@ -221,6 +249,12 @@ Safe action:
 Expected evidence:
 - Validate-only output confirms the expected collection state, or identifies
   the collection that needs reindexing.
+
+Preferred command:
+
+```bash
+make policy-rag-validate
+```
 
 ### Stale Volumes
 

@@ -8,10 +8,30 @@ STACK_STARTED=0
 READINESS_TIMEOUT_SECONDS="${READINESS_TIMEOUT_SECONDS:-120}"
 READINESS_INTERVAL_SECONDS="${READINESS_INTERVAL_SECONDS:-2}"
 DOCKER_COMPOSE_CMD=()
+LOG_TAIL_LINES="${LOG_TAIL_LINES:-80}"
+
+collect_readiness_diagnostics() {
+  local label=$1
+  local url=$2
+  local compose_service=$3
+
+  echo "[critical-path] diagnostics for $label readiness failure" >&2
+  echo "[critical-path] readiness response from $url:" >&2
+  curl -sS "$url" >&2 || true
+  echo >&2
+
+  if [[ "${#DOCKER_COMPOSE_CMD[@]}" -gt 0 ]]; then
+    echo "[critical-path] compose status:" >&2
+    "${DOCKER_COMPOSE_CMD[@]}" -f infrastructure/docker-compose.yml --env-file infrastructure/.env ps >&2 || true
+    echo "[critical-path] recent $compose_service logs (tail=$LOG_TAIL_LINES):" >&2
+    "${DOCKER_COMPOSE_CMD[@]}" -f infrastructure/docker-compose.yml --env-file infrastructure/.env logs --tail "$LOG_TAIL_LINES" "$compose_service" >&2 || true
+  fi
+}
 
 wait_for_ready() {
   local label=$1
   local url=$2
+  local compose_service=$3
   local elapsed=0
   local code=""
 
@@ -27,6 +47,7 @@ wait_for_ready() {
 
   echo "[critical-path] timeout waiting ${READINESS_TIMEOUT_SECONDS}s for $label readiness at $url; last HTTP status: $code" >&2
   echo "[critical-path] try increasing READINESS_TIMEOUT_SECONDS, inspect 'make logs', or run 'make docker-preflight' to verify Docker prerequisites." >&2
+  collect_readiness_diagnostics "$label" "$url" "$compose_service"
   return 1
 }
 
@@ -60,9 +81,9 @@ read -r -a DOCKER_COMPOSE_CMD <<< "$(scripts/docker_preflight.sh --print-compose
 STACK_STARTED=1
 
 echo "[critical-path] waiting for readiness probes on all services (${READINESS_TIMEOUT_SECONDS}s timeout, ${READINESS_INTERVAL_SECONDS}s interval)"
-wait_for_ready "context-agent" "http://localhost:5003/ready"
-wait_for_ready "policy-agent" "http://localhost:5002/ready"
-wait_for_ready "validator-agent" "http://localhost:5001/ready"
+wait_for_ready "context-agent" "http://localhost:5003/ready" "context-agent"
+wait_for_ready "policy-agent" "http://localhost:5002/ready" "policy-agent"
+wait_for_ready "validator-agent" "http://localhost:5001/ready" "validator-agent"
 
 echo "[critical-path] running service suites"
 make context-tests

@@ -24,11 +24,14 @@ KEEP_STACK="${MIGRATION_SMOKE_KEEP_STACK:-0}"
 TMP_BACKUP_DIR=""
 GOLDEN_DIR="${MIGRATION_SMOKE_GOLDEN_DIR:-/migration/golden-contexts}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+PROBE_MAX_ATTEMPTS="${MIGRATION_SMOKE_PROBE_ATTEMPTS:-60}"
+PROBE_DELAY_SECONDS="${MIGRATION_SMOKE_PROBE_DELAY_SECONDS:-2}"
+LOG_TAIL_LINES="${MIGRATION_SMOKE_LOG_TAIL_LINES:-80}"
 
 declare -a SERVICE_PROBE_DEFINITIONS=(
-  "context-agent|http://localhost:5003"
-  "policy-agent|http://localhost:5002"
-  "validator-agent|http://localhost:5001"
+  "context-agent|http://localhost:5003|context-agent"
+  "policy-agent|http://localhost:5002|policy-agent"
+  "validator-agent|http://localhost:5001|validator-agent"
 )
 
 log() {
@@ -38,6 +41,23 @@ log() {
 resolve_service_config_path() {
   local container_name=$1
   docker exec "$container_name" python -c "from app import create_app; app=create_app(); print(app.config['CONFIG_PATH'])"
+}
+
+collect_probe_diagnostics() {
+  local service_name=$1
+  local base_url=$2
+  local compose_service=$3
+
+  log "diagnostics for $service_name probe failure"
+  log "readiness response from $base_url/ready:"
+  curl -sS "$base_url/ready" || true
+  printf "\n"
+
+  log "compose status:"
+  "${DOCKER_COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$TMP_ENV_FILE" ps || true
+
+  log "recent $compose_service logs (tail=$LOG_TAIL_LINES):"
+  "${DOCKER_COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$TMP_ENV_FILE" logs --tail "$LOG_TAIL_LINES" "$compose_service" || true
 }
 
 if command -v docker-compose >/dev/null 2>&1; then
@@ -88,18 +108,16 @@ trap 'restore_and_cleanup' EXIT
 wait_for_http() {
   local url=$1
   local attempts=0
-  local max_attempts=60
-  local delay=2
   local code=""
 
-  while (( attempts < max_attempts )); do
+  while (( attempts < PROBE_MAX_ATTEMPTS )); do
     code="$(curl -sS -o /dev/null -w "%{http_code}" "$url" || echo 000)"
     if [[ "$code" =~ ^[0-9]+$ ]] && (( code >= 200 && code < 500 )); then
       log "ready: $url"
       return 0
     fi
     attempts=$((attempts + 1))
-    sleep "$delay"
+    sleep "$PROBE_DELAY_SECONDS"
   done
 
   log "timeout waiting for $url"
@@ -109,18 +127,16 @@ wait_for_http() {
 wait_for_http_200() {
   local url=$1
   local attempts=0
-  local max_attempts=60
-  local delay=2
   local code=""
 
-  while (( attempts < max_attempts )); do
+  while (( attempts < PROBE_MAX_ATTEMPTS )); do
     code="$(curl -sS -o /dev/null -w "%{http_code}" "$url" || echo 000)"
     if [[ "$code" == "200" ]]; then
       log "ready: $url"
       return 0
     fi
     attempts=$((attempts + 1))
-    sleep "$delay"
+    sleep "$PROBE_DELAY_SECONDS"
   done
 
   log "timeout waiting for $url to return 200"
@@ -159,6 +175,7 @@ PY
 probe_service_health_and_ready() {
   local service_name=$1
   local base_url=$2
+  local compose_service=$3
   local health_headers ready_headers health_body ready_body health_code ready_code
 
   health_headers="$(mktemp)"
@@ -169,15 +186,21 @@ probe_service_health_and_ready() {
   health_code="$(curl -sS -D "$health_headers" -o "$health_body" -w "%{http_code}" "$base_url/health" || echo 000)"
   if [[ "$health_code" != "200" ]]; then
     log "$service_name /health returned HTTP $health_code"
+    collect_probe_diagnostics "$service_name" "$base_url" "$compose_service"
     rm -f "$health_headers" "$ready_headers" "$health_body" "$ready_body"
     return 1
   fi
   assert_response_header_present "$health_headers" "X-Correlation-ID"
 
-  wait_for_http_200 "$base_url/ready"
+  if ! wait_for_http_200 "$base_url/ready"; then
+    collect_probe_diagnostics "$service_name" "$base_url" "$compose_service"
+    rm -f "$health_headers" "$ready_headers" "$health_body" "$ready_body"
+    return 1
+  fi
   ready_code="$(curl -sS -D "$ready_headers" -o "$ready_body" -w "%{http_code}" "$base_url/ready" || echo 000)"
   if [[ "$ready_code" != "200" ]]; then
     log "$service_name /ready returned HTTP $ready_code"
+    collect_probe_diagnostics "$service_name" "$base_url" "$compose_service"
     rm -f "$health_headers" "$ready_headers" "$health_body" "$ready_body"
     return 1
   fi
@@ -189,11 +212,13 @@ probe_service_health_and_ready() {
 }
 
 run_service_probe_validation() {
-  local definition service_name base_url
+  local definition service_name base_url compose_service
   for definition in "${SERVICE_PROBE_DEFINITIONS[@]}"; do
     service_name=${definition%%|*}
     base_url=${definition#*|}
-    probe_service_health_and_ready "$service_name" "$base_url"
+    base_url=${base_url%%|*}
+    compose_service=${definition##*|}
+    probe_service_health_and_ready "$service_name" "$base_url" "$compose_service"
   done
 }
 

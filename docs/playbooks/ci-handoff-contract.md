@@ -16,6 +16,7 @@ Makefile targets, or modify Compose behavior.
 | Start Docker stack | `make up` | Required before Docker-backed service and smoke gates |
 | Context service tests | `make context-tests` | Docker-backed service suite |
 | Policy service tests | `make policy-tests` | Docker-backed service suite |
+| Policy RAG runtime validation | `make policy-rag-validate` | Lightweight manifest/source/Chroma heartbeat gate without indexing |
 | Validator service tests | `make validator-tests` | Docker-backed service suite |
 | End-to-end smoke | `make functional-smoke` | Docker-backed critical-loop smoke |
 | Full critical path | `make critical-path-validation` | Canonical single-command evidence path |
@@ -43,10 +44,12 @@ alone is not enough evidence for service-to-service execution.
 4. Run `make up`.
 5. Verify readiness on `5003`, `5002`, and `5001`.
 6. Run `make context-tests`, `make policy-tests`, and `make validator-tests`.
-7. Run `make functional-smoke`.
-8. Promote `make critical-path-validation` once runtime and duration are stable
+7. Run `make policy-rag-validate` when the PR touches policy-agent RAG
+   manifest, collection naming, Chroma wiring, or source paths.
+8. Run `make functional-smoke`.
+9. Promote `make critical-path-validation` once runtime and duration are stable
    enough for the target branch policy.
-9. Run `make down` in cleanup even after failures.
+10. Run `make down` in cleanup even after failures.
 
 ## Informational First Gates
 
@@ -90,6 +93,7 @@ CI-facing candidates are non-interactive:
 - `make up`
 - `make context-tests`
 - `make policy-tests`
+- `make policy-rag-validate`
 - `make validator-tests`
 - `make functional-smoke`
 - `make critical-path-validation`
