@@ -119,6 +119,7 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | `MIGRATION_SMOKE_PROBE_ATTEMPTS` | `runtime knob` | Safe default `60` | Functional smoke probes | Parse as positive integer |
 | `MIGRATION_SMOKE_PROBE_DELAY_SECONDS` | `runtime knob` | Safe default `2` | Functional smoke probes | Parse as positive integer |
 | `MIGRATION_SMOKE_LOG_TAIL_LINES` | `runtime knob` | Safe default `80` | Functional smoke diagnostics | Keep logs bounded and redacted |
+| `RUN_REAL_PROVIDER_TESTS` | `runtime knob` | Defaults to off | Live provider tests | Must be explicit; deterministic tests must not require it |
 | `COMPOSE_FILE` | `safe default` | Defaults to infrastructure Compose file | Docker preflight | Path must exist |
 | `ENV_FILE` | `safe default` | Defaults to `infrastructure/.env` | Docker preflight | Path must exist for stack targets |
 

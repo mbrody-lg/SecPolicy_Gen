@@ -1,4 +1,18 @@
+import os
+
+import pytest
+
 from app.agents.mistralai.client import MistralClient
+
+
+pytestmark = [
+    pytest.mark.live,
+    pytest.mark.skipif(
+        os.getenv("RUN_REAL_PROVIDER_TESTS", "").strip().lower() not in {"1", "true", "yes", "on"},
+        reason="real provider tests require RUN_REAL_PROVIDER_TESTS=1",
+    ),
+]
+
 
 def test_mistral_real(client):
     client = MistralClient()
@@ -9,17 +23,12 @@ def test_mistral_real(client):
     temperature = 0.7
     max_tokens = 512
 
-    try:
-        response = client.chat(
-            model=model,
-            prompt=prompt,
-            instructions=instructions,
-            temperature=temperature,
-            max_tokens=max_tokens
-        )
-        print("=== RESPONSE ===")
-        print(response)
+    response = client.chat(
+        model=model,
+        prompt=prompt,
+        instructions=instructions,
+        temperature=temperature,
+        max_tokens=max_tokens
+    )
 
-    except Exception as e:
-        print("=== ERROR ===")
-        print(str(e))
+    assert response is not None
