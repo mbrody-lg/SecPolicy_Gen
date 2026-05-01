@@ -38,6 +38,8 @@ services:
       - MONGO_URI=${MONGO_URI}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - POLICY_AGENT_URL=${POLICY_AGENT_URL}
+      - CONFIG_PATH=/context-agent/app/config/context_agent.yaml
+      - QUESTIONS_CONFIG_PATH=/context-agent/app/config/context_questions.yaml
     depends_on:
       mongo:
         condition: service_healthy
@@ -66,6 +68,8 @@ services:
       - CHROMA_HOST=${CHROMA_HOST}
       - CHROMA_PORT=${CHROMA_PORT}
       - CHROMA_READINESS_MODE=live
+      - RAG_SOURCES_PATH=/policy-agent/app/config/rag_sources.yaml
+      - CONFIG_PATH=/policy-agent/app/config/policy_agent.yaml
     depends_on:
       mongo:
         condition: service_healthy
@@ -94,6 +98,7 @@ services:
       - MISTRAL_API_KEY=${MISTRAL_API_KEY}
       - MISTRAL_API_URL=${MISTRAL_API_URL}
       - POLICY_AGENT_URL=${POLICY_AGENT_URL}
+      - CONFIG_PATH=/validator-agent/app/config/validator_agent.yaml
     volumes:
       - ../validator-agent:/validator-agent
     depends_on:

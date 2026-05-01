@@ -3,21 +3,21 @@
 import argparse
 import os
 from pathlib import Path
+import sys
 
-import chromadb
 from dotenv import load_dotenv
 from pypdf import PdfReader
 from tqdm import tqdm
 
-from app.agents.vector.model_loader import (
-    LocalSentenceTransformerEmbeddingFunction,
-    download_model_if_needed,
-    load_model,
-)
+POLICY_AGENT_ROOT = Path(__file__).resolve().parents[1]
+if str(POLICY_AGENT_ROOT) not in sys.path:
+    sys.path.insert(0, str(POLICY_AGENT_ROOT))
+
 from app.rag.sources import load_rag_source_manifest
 
 MAX_BATCH = 5000
 MAX_CHUNK_CHARACTERS = 5000
+TRUTHY_VALUES = {"1", "true", "yes", "on"}
 
 
 def extract_text_from_pdf(path):
@@ -87,6 +87,62 @@ def discover_files(config):
     return sorted({path for path in files if path.is_file()})
 
 
+def validate_source_configs(configs, *, check_chroma=False):
+    """Validate selected RAG sources without loading models or mutating Chroma."""
+    collections = []
+    totals = {"sources": 0, "files": 0, "collections": 0}
+
+    for config in configs:
+        totals["sources"] += 1
+        collection_name = config["name"]
+        if collection_name not in collections:
+            collections.append(collection_name)
+
+        source_path = Path(config["path"])
+        if not source_path.exists():
+            raise FileNotFoundError(
+                f"RAG source '{config['source_id']}' path does not exist: {source_path}"
+            )
+        if not source_path.is_dir():
+            raise NotADirectoryError(
+                f"RAG source '{config['source_id']}' path must be a directory: {source_path}"
+            )
+
+        files = discover_files(config)
+        totals["files"] += len(files)
+        print(
+            "[VALIDATE] "
+            f"{config['source_id']} -> {collection_name}: path={source_path} files={len(files)}"
+        )
+
+    totals["collections"] = len(collections)
+    print(f"[VALIDATE] Collections selected: {', '.join(collections)}")
+
+    if check_chroma:
+        _validate_chroma_reachable()
+    else:
+        print("[VALIDATE] Chroma reachability: skipped")
+
+    return totals
+
+
+def _validate_chroma_reachable():
+    """Run a lightweight Chroma heartbeat without touching collections or models."""
+    host = os.getenv("CHROMA_HOST", "localhost")
+    port = int(os.getenv("CHROMA_PORT", 8000))
+    chromadb = _get_chromadb()
+    client = chromadb.HttpClient(host=host, port=port)
+    client.heartbeat()
+    print(f"[VALIDATE] Chroma reachability: ok ({host}:{port})")
+
+
+def _get_chromadb():
+    """Import Chroma lazily so validate-only can run without vector dependencies."""
+    import chromadb
+
+    return chromadb
+
+
 def build_chunk_id(config, file_path, chunk_index):
     """Build a stable chunk id scoped by source and collection."""
     return f"{config['name']}:{config['source_id']}:{file_path.stem}:chunk-{chunk_index}"
@@ -123,6 +179,12 @@ def _with_model_download_enabled(callback):
 
 
 def _get_chroma_collection(config, reindex=False):
+    from app.agents.vector.model_loader import (
+        LocalSentenceTransformerEmbeddingFunction,
+        download_model_if_needed,
+        load_model,
+    )
+
     model_name = config["model"]
     revision = config.get("revision")
     if not model_name:
@@ -131,6 +193,7 @@ def _get_chroma_collection(config, reindex=False):
     _with_model_download_enabled(lambda: download_model_if_needed(model_name, revision=revision))
     model = load_model(model_name, revision=revision)
     embedding_fn = LocalSentenceTransformerEmbeddingFunction(model)
+    chromadb = _get_chromadb()
     client = chromadb.HttpClient(
         host=os.getenv("CHROMA_HOST", "localhost"),
         port=int(os.getenv("CHROMA_PORT", 8000)),
@@ -209,7 +272,16 @@ def parse_args():
     parser.add_argument("--manifest", default=os.getenv("RAG_SOURCES_PATH", "app/config/rag_sources.yaml"))
     parser.add_argument("--collection", help="Only process sources targeting this collection.")
     parser.add_argument("--dry-run", action="store_true", help="Validate and list source files without indexing.")
-    parser.add_argument("--validate-only", action="store_true", help="Validate manifest and selected files without Chroma calls.")
+    parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Validate manifest, source paths, and collection names without indexing.",
+    )
+    parser.add_argument(
+        "--validate-chroma",
+        action="store_true",
+        help="With --validate-only, also run a lightweight Chroma heartbeat.",
+    )
     parser.add_argument("--reindex", action="store_true", help="Delete target collection before indexing each source.")
     return parser.parse_args()
 
@@ -224,6 +296,15 @@ def main():
         raise ValueError("No RAG source configs selected.")
 
     print(f"Loaded {len(configs)} RAG source config(s).")
+    if args.validate_only:
+        check_chroma = args.validate_chroma or os.getenv("RAG_VALIDATE_CHROMA", "").lower() in TRUTHY_VALUES
+        totals = validate_source_configs(configs, check_chroma=check_chroma)
+        print(
+            "RAG validation completed successfully. "
+            f"sources={totals['sources']} collections={totals['collections']} files={totals['files']}"
+        )
+        return
+
     dry_run = args.dry_run or args.validate_only
     totals = {"indexed": 0, "skipped": 0, "files": 0}
     reindexed_collections = set()

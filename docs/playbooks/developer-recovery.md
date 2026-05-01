@@ -208,6 +208,11 @@ First diagnostic:
 docker exec policy_agent_service python scripts/index_pdfs_to_chroma.py --validate-only
 ```
 
+This loads the RAG source manifest, validates source directories and Chroma-compatible
+collection names, and reports selected files without loading embedding models or indexing.
+Add `--validate-chroma` when the local Docker stack should also prove Chroma heartbeat
+reachability.
+
 Safe action:
 - Prefer validate-only checks before reindexing.
 - Reindex only when the changed work requires the local Chroma collection to be
