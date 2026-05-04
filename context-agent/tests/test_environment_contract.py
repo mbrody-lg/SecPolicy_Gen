@@ -7,6 +7,7 @@ import pytest
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = ROOT_DIR / "docs" / "playbooks" / "environment-configuration.md"
+ENV_EXAMPLE_PATH = ROOT_DIR / "infrastructure" / ".env.example"
 
 CONTRACT_VARIABLE_PATTERN = re.compile(r"`([A-Z][A-Z0-9_]+)`")
 PYTHON_ENV_PATTERN = re.compile(
@@ -38,6 +39,40 @@ DOCKERFILE_PATHS = [
     ROOT_DIR / "policy-agent" / "Dockerfile",
     ROOT_DIR / "validator-agent" / "Dockerfile",
 ]
+REQUIRED_ENV_EXAMPLE_VARIABLES = {
+    "CHROMA_HOST",
+    "CHROMA_PORT",
+    "CHROMA_READINESS_MODE",
+    "DEBUG",
+    "FLASK_ENV",
+    "FLASK_SECRET_KEY",
+    "MAX_CONTENT_LENGTH",
+    "MISTRAL_API_KEY",
+    "MISTRAL_API_URL",
+    "MONGO_URI",
+    "OPENAI_API_KEY",
+    "OPENAI_API_URL",
+    "POLICY_AGENT_ALLOW_MODEL_DOWNLOAD",
+    "POLICY_AGENT_TIMEOUT_SECONDS",
+    "POLICY_AGENT_URL",
+    "RAG_VALIDATE_CHROMA",
+    "SESSION_COOKIE_SECURE",
+    "TESTING",
+    "TRUSTED_HOSTS",
+    "VALIDATOR_AGENT_TIMEOUT_SECONDS",
+    "VALIDATOR_AGENT_URL",
+}
+SECRET_EXAMPLE_VARIABLES = {
+    "FLASK_SECRET_KEY",
+    "MISTRAL_API_KEY",
+    "OPENAI_API_KEY",
+}
+LIVE_SECRET_PATTERNS = (
+    re.compile(r"sk-(?:proj|or-v1)-", re.IGNORECASE),
+    re.compile(r"\bghp_[A-Za-z0-9_]+\b"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]+\b"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+)
 
 
 def _iter_files(path: Path, suffixes: tuple[str, ...]):
@@ -55,6 +90,17 @@ def _read(path: Path) -> str:
 
 def _contract_variables() -> set[str]:
     return set(CONTRACT_VARIABLE_PATTERN.findall(_read(CONTRACT_PATH)))
+
+
+def _env_example_values() -> dict[str, str]:
+    values: dict[str, str] = {}
+    for line in _read(ENV_EXAMPLE_PATH).splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        key, _, value = stripped.partition("=")
+        values[key] = value
+    return values
 
 
 def _python_env_variables() -> set[str]:
@@ -101,3 +147,26 @@ def test_environment_contract_covers_consumed_variables():
     missing = consumed_variables - _contract_variables()
 
     assert missing == set()
+
+
+@pytest.mark.fast
+def test_env_example_covers_contract_surface_with_fake_secrets():
+    env_values = _env_example_values()
+
+    missing = REQUIRED_ENV_EXAMPLE_VARIABLES - set(env_values)
+    undocumented = set(env_values) - _contract_variables()
+    unsafe_secret_examples = {
+        key: env_values[key]
+        for key in SECRET_EXAMPLE_VARIABLES
+        if key in env_values and not env_values[key].startswith("fake-local-")
+    }
+    live_like_values = {
+        key: value
+        for key, value in env_values.items()
+        if any(pattern.search(value) for pattern in LIVE_SECRET_PATTERNS)
+    }
+
+    assert missing == set()
+    assert undocumented == set()
+    assert unsafe_secret_examples == {}
+    assert live_like_values == {}

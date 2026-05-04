@@ -24,6 +24,47 @@ def test_create_app_requires_secret_key_outside_testing(monkeypatch):
         app_module.create_app()
 
 
+@pytest.mark.parametrize(
+    "missing_variable",
+    [
+        "MONGO_URI",
+        "CONFIG_PATH",
+        "POLICY_AGENT_URL",
+    ],
+)
+def test_create_app_requires_runtime_config_outside_testing(monkeypatch, missing_variable):
+    _set_common_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "false")
+    monkeypatch.setenv("FLASK_SECRET_KEY", "configured-secret")
+    monkeypatch.setenv("POLICY_AGENT_URL", "http://policy-agent:5000")
+    monkeypatch.delenv(missing_variable, raising=False)
+
+    with pytest.raises(ValueError, match=f"{missing_variable} must be set"):
+        app_module.create_app()
+
+
+@pytest.mark.parametrize(
+    ("variable", "value", "message"),
+    [
+        ("MONGO_URI", "not-a-mongo-uri", "MONGO_URI must be a MongoDB URI"),
+        ("POLICY_AGENT_URL", "policy-agent:5000", "POLICY_AGENT_URL must be an http"),
+        ("POLICY_AGENT_TIMEOUT_SECONDS", "0", "POLICY_AGENT_TIMEOUT_SECONDS must be a positive number"),
+        ("POLICY_AGENT_TIMEOUT_SECONDS", "not-a-number", "POLICY_AGENT_TIMEOUT_SECONDS must be a positive number"),
+        ("MAX_CONTENT_LENGTH", "0", "MAX_CONTENT_LENGTH must be a positive integer"),
+        ("MAX_CONTENT_LENGTH", "not-an-int", "MAX_CONTENT_LENGTH must be a positive integer"),
+        ("TRUSTED_HOSTS", " , , ", "TRUSTED_HOSTS must include at least one value"),
+    ],
+)
+def test_create_app_rejects_malformed_runtime_config(monkeypatch, variable, value, message):
+    _set_common_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "true")
+    monkeypatch.setenv("FLASK_SECRET_KEY", "configured-test-secret")
+    monkeypatch.setenv(variable, value)
+
+    with pytest.raises(ValueError, match=message):
+        app_module.create_app()
+
+
 def test_create_app_allows_placeholder_secret_in_testing(monkeypatch):
     _set_common_env(monkeypatch)
     monkeypatch.setenv("TESTING", "true")
