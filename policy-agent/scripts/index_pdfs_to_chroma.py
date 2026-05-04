@@ -13,11 +13,13 @@ POLICY_AGENT_ROOT = Path(__file__).resolve().parents[1]
 if str(POLICY_AGENT_ROOT) not in sys.path:
     sys.path.insert(0, str(POLICY_AGENT_ROOT))
 
+from app.agents.vector.chroma.config import get_chroma_host, get_chroma_port
 from app.rag.sources import load_rag_source_manifest
 
 MAX_BATCH = 5000
 MAX_CHUNK_CHARACTERS = 5000
 TRUTHY_VALUES = {"1", "true", "yes", "on"}
+FALSY_VALUES = {"", "0", "false", "no", "off"}
 
 
 def extract_text_from_pdf(path):
@@ -128,8 +130,8 @@ def validate_source_configs(configs, *, check_chroma=False):
 
 def _validate_chroma_reachable():
     """Run a lightweight Chroma heartbeat without touching collections or models."""
-    host = os.getenv("CHROMA_HOST", "localhost")
-    port = int(os.getenv("CHROMA_PORT", 8000))
+    host = get_chroma_host(default="localhost")
+    port = get_chroma_port(default="8000")
     chromadb = _get_chromadb()
     client = chromadb.HttpClient(host=host, port=port)
     client.heartbeat()
@@ -195,8 +197,8 @@ def _get_chroma_collection(config, reindex=False):
     embedding_fn = LocalSentenceTransformerEmbeddingFunction(model)
     chromadb = _get_chromadb()
     client = chromadb.HttpClient(
-        host=os.getenv("CHROMA_HOST", "localhost"),
-        port=int(os.getenv("CHROMA_PORT", 8000)),
+        host=get_chroma_host(default="localhost"),
+        port=get_chroma_port(default="8000"),
     )
     if reindex:
         try:
@@ -297,7 +299,7 @@ def main():
 
     print(f"Loaded {len(configs)} RAG source config(s).")
     if args.validate_only:
-        check_chroma = args.validate_chroma or os.getenv("RAG_VALIDATE_CHROMA", "").lower() in TRUTHY_VALUES
+        check_chroma = args.validate_chroma or _env_flag_enabled("RAG_VALIDATE_CHROMA")
         totals = validate_source_configs(configs, check_chroma=check_chroma)
         print(
             "RAG validation completed successfully. "
@@ -319,6 +321,17 @@ def main():
         "Vectorization completed successfully. "
         f"files={totals['files']} indexed={totals['indexed']} skipped={totals['skipped']}"
     )
+
+
+def _env_flag_enabled(name):
+    """Parse an explicit environment flag without accepting ambiguous values."""
+    value = os.getenv(name, "").strip().lower()
+    if value in TRUTHY_VALUES:
+        return True
+    if value in FALSY_VALUES:
+        return False
+    allowed_values = sorted((TRUTHY_VALUES | FALSY_VALUES) - {""})
+    raise ValueError(f"{name} must be one of: {', '.join(allowed_values)}.")
 
 
 if __name__ == "__main__":

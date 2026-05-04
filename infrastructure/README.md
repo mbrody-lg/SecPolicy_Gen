@@ -160,19 +160,25 @@ The Policy Agent uses a vector database to retrieve relevant regulations and gui
    - CIS Controls
    - Industry-specific regulations
 
-2. **Configure Chroma path** in `.env`:
+2. **Configure RAG sources** in the policy-agent manifest, or point
+   `RAG_SOURCES_PATH` at an alternate manifest:
    ```env
-   CHROMA_COLLECTIONS_PATH=/absolute/path/to/documents
+   RAG_SOURCES_PATH=/policy-agent/app/config/rag_sources.yaml
    ```
 
-3. **Index documents**:
+3. **Validate manifest and source paths**:
+   ```bash
+   make policy-rag-validate
+   ```
+
+4. **Index documents**:
    ```bash
    make policy-vectorize
    ```
 
-4. **Wait for completion** - Processing time depends on document size
+5. **Wait for completion** - Processing time depends on document size
 
-5. **Update policy-agent.yaml** to reference the collections
+6. **Update policy-agent.yaml** to reference the collections
 
 ## Networking
 
@@ -199,7 +205,8 @@ All services communicate through Docker's internal network. External access poin
 - View MongoDB logs: `make logs`
 
 ### Chroma Not Indexing
-- Verify file path in `CHROMA_COLLECTIONS_PATH` is absolute
+- Verify `RAG_SOURCES_PATH` points to the intended manifest
+- Verify source paths inside `rag_sources.yaml` are mounted and readable
 - Ensure PDF files are readable
 - Check vectorization logs during processing
 

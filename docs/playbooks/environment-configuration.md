@@ -68,10 +68,10 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | `OPENAI_API_KEY` | `secret` | No real example value | OpenAI client | Required only for non-mock provider execution |
 | `OPENAI_API_URL` | `runtime knob` | Safe provider default may be documented | OpenAI client | Compose should pass explicitly when used |
 | `CHROMA_HOST` | `required` | Docker default `chroma`; host default may differ | Chroma HTTP client/readiness | Missing/blank value should fail safely |
-| `CHROMA_PORT` | `required` | Docker default `8000` | Chroma HTTP client/readiness | Parse as integer port |
+| `CHROMA_PORT` | `required` | Docker default `8000` | Chroma HTTP client/readiness | Parse as integer port from 1 to 65535 |
 | `CHROMA_READINESS_MODE` | `runtime knob` | `config_only` outside live Docker checks; Compose may set `live` | Policy readiness | Reject unexpected modes |
 | `RAG_SOURCES_PATH` | `required` | Compose passes `/policy-agent/app/config/rag_sources.yaml` | RAG source manifest | Manifest path must exist before indexing/validation |
-| `RAG_VALIDATE_CHROMA` | `runtime knob` | Defaults to off | RAG validate-only script | Parse as explicit truthy flag |
+| `RAG_VALIDATE_CHROMA` | `runtime knob` | Defaults to off | RAG validate-only script | Parse as explicit boolean flag |
 | `POLICY_AGENT_ALLOW_MODEL_DOWNLOAD` | `runtime knob` | Defaults to off | Embedding model loader/indexing | Must be explicit for one-time model download |
 | `METADATA_SCHEMA_PATH` | `runtime knob` | Optional/local until governed | RAG metadata validation | Document if promoted to active contract |
 | `MAX_CONTENT_LENGTH` | `runtime knob` | Safe default `262144` | Flask request limits | Parse as positive integer |
