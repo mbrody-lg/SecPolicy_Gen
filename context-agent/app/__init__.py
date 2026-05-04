@@ -2,6 +2,7 @@
 
 import os
 import re
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from flask import Flask, g, has_request_context, request
@@ -27,25 +28,31 @@ def _get_env_bool(name: str, default: bool = False) -> bool:
 
 
 def _get_env_float(name: str, default: float) -> float:
-    """Parse float environment values with a safe fallback."""
+    """Parse positive float environment values with a safe fallback."""
     value = os.getenv(name)
     if value is None:
         return default
     try:
-        return float(value)
+        parsed = float(value)
     except ValueError:
-        return default
+        raise ValueError(f"{name} must be a positive number.") from None
+    if parsed <= 0:
+        raise ValueError(f"{name} must be a positive number.")
+    return parsed
 
 
 def _get_env_int(name: str, default: int) -> int:
-    """Parse integer environment values with a safe fallback."""
+    """Parse positive integer environment values with a safe fallback."""
     value = os.getenv(name)
     if value is None:
         return default
     try:
-        return int(value)
+        parsed = int(value)
     except ValueError:
-        return default
+        raise ValueError(f"{name} must be a positive integer.") from None
+    if parsed <= 0:
+        raise ValueError(f"{name} must be a positive integer.")
+    return parsed
 
 
 def _get_env_list(name: str) -> list[str] | None:
@@ -54,7 +61,35 @@ def _get_env_list(name: str) -> list[str] | None:
     if value is None:
         return None
     items = [item.strip() for item in value.split(",") if item.strip()]
-    return items or None
+    if not items:
+        raise ValueError(f"{name} must include at least one value when set.")
+    return items
+
+
+def _get_required_env(name: str, *, is_testing: bool, test_default: str | None = None) -> str:
+    """Read a required environment value, allowing explicit test-only defaults."""
+    value = os.getenv(name, "").strip()
+    if value:
+        return value
+    if is_testing and test_default is not None:
+        return test_default
+    raise ValueError(f"{name} must be set when TESTING is false.")
+
+
+def _validate_http_url(name: str, value: str) -> str:
+    """Validate a configured HTTP service URL without exposing the raw value."""
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(f"{name} must be an http(s) URL.")
+    return value
+
+
+def _validate_mongo_uri(name: str, value: str) -> str:
+    """Validate a MongoDB URI without exposing the raw value."""
+    parsed = urlparse(value)
+    if parsed.scheme not in {"mongodb", "mongodb+srv"} or not parsed.netloc:
+        raise ValueError(f"{name} must be a MongoDB URI.")
+    return value
 
 
 def get_request_correlation_id() -> str | None:
@@ -87,19 +122,39 @@ def create_app():
 
     app = Flask(__name__)
     is_testing = _get_env_bool("TESTING", default=False)
-    secret_key = os.getenv("FLASK_SECRET_KEY")
-    if not secret_key:
-        if is_testing:
-            secret_key = TEST_ONLY_SECRET_KEY
-        else:
-            raise ValueError("FLASK_SECRET_KEY must be set when TESTING is false.")
+    secret_key = _get_required_env(
+        "FLASK_SECRET_KEY",
+        is_testing=is_testing,
+        test_default=TEST_ONLY_SECRET_KEY,
+    )
 
     app.config["SECRET_KEY"] = secret_key
     app.config["TESTING"] = is_testing
     app.config["DEBUG"] = _get_env_bool("DEBUG", default=False)
-    app.config["MONGO_URI"] = os.getenv("MONGO_URI", "mongodb://mongo:27017/contextdb")
-    app.config["POLICY_AGENT_URL"] = os.getenv("POLICY_AGENT_URL", "http://policy-agent:5000")
-    app.config["VALIDATOR_AGENT_URL"] = os.getenv("VALIDATOR_AGENT_URL", "http://validator-agent:5000")
+    app.config["MONGO_URI"] = _validate_mongo_uri(
+        "MONGO_URI",
+        _get_required_env(
+            "MONGO_URI",
+            is_testing=is_testing,
+            test_default="mongodb://mongo:27017/contextdb",
+        ),
+    )
+    app.config["POLICY_AGENT_URL"] = _validate_http_url(
+        "POLICY_AGENT_URL",
+        _get_required_env(
+            "POLICY_AGENT_URL",
+            is_testing=is_testing,
+            test_default="http://policy-agent:5000",
+        ),
+    )
+    app.config["VALIDATOR_AGENT_URL"] = _validate_http_url(
+        "VALIDATOR_AGENT_URL",
+        _get_required_env(
+            "VALIDATOR_AGENT_URL",
+            is_testing=is_testing,
+            test_default="http://validator-agent:5000",
+        ),
+    )
     app.config["CONFIG_PATH"] = os.getenv("CONFIG_PATH", DEFAULT_CONFIG_PATH)
     app.config["QUESTIONS_CONFIG_PATH"] = os.getenv("QUESTIONS_CONFIG_PATH", DEFAULT_QUESTIONS_CONFIG_PATH)
     app.config["POLICY_AGENT_TIMEOUT_SECONDS"] = _get_env_float("POLICY_AGENT_TIMEOUT_SECONDS", 30.0)
