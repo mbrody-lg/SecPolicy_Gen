@@ -110,13 +110,18 @@ roles:
 To set up regulatory data for RAG:
 
 1. **Prepare documents**: Gather PDF files (ISO 27001, GDPR guides, CIS Controls, etc.)
-2. **Set path**: Update `.env` with `CHROMA_COLLECTIONS_PATH=/path/to/documents`
-3. **Vectorize**: Run the indexing script
+2. **Update the manifest**: Add source directories and metadata to `app/config/rag_sources.yaml`, or point
+   `RAG_SOURCES_PATH` at another manifest with the same schema.
+3. **Validate sources**: Run the lightweight manifest/source check
+   ```bash
+   make policy-rag-validate
+   ```
+4. **Vectorize**: Run the indexing script
    ```bash
    make policy-vectorize
    ```
-4. **Wait**: Processing takes time depending on file size
-5. **Configure**: Update `policy-agent.yaml` with collection names (normativa, guia, sector, etc.)
+5. **Wait**: Processing takes time depending on file size
+6. **Configure**: Update `policy-agent.yaml` with collection names (normativa, guia, sector, etc.)
 
 Runtime model downloads are disabled by default as a secure baseline. Preload embeddings with
 `make policy-vectorize` before using RAG, or set `POLICY_AGENT_ALLOW_MODEL_DOWNLOAD=1` only for

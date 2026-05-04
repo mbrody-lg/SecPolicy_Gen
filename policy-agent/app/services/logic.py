@@ -9,6 +9,7 @@ from flask import current_app
 
 from app import CORRELATION_ID_HEADER, get_request_correlation_id, mongo
 from app.agents.factory import create_agent_from_config
+from app.agents.vector.chroma.config import get_chroma_host, get_chroma_port
 from app.observability import build_log_event, log_event
 from app.rag.context import build_retrieval_context
 from app.rag.planner import build_retrieval_plan
@@ -398,13 +399,10 @@ def get_readiness_status() -> tuple[dict, int]:
 
     chroma_entries = _collect_chroma_vector_entries(config or {})
     if chroma_entries:
-        chroma_host = os.getenv("CHROMA_HOST", "chroma").strip()
-        chroma_port = os.getenv("CHROMA_PORT", "8000")
         mode = _chroma_readiness_mode()
         try:
-            if not chroma_host:
-                raise ValueError("Configured Chroma host must not be empty.")
-            int(chroma_port)
+            get_chroma_host(default="chroma")
+            get_chroma_port(default="8000")
             first_entry = chroma_entries[0]
             collections = first_entry.get("collection", [])
             if not isinstance(collections, list) or not collections:

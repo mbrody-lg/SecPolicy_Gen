@@ -195,6 +195,33 @@ def test_validate_source_configs_optionally_checks_chroma(monkeypatch, tmp_path)
     assert calls == [("chroma", 8000), "heartbeat"]
 
 
+def test_validate_source_configs_rejects_invalid_chroma_port(monkeypatch, tmp_path):
+    source_dir = tmp_path / "sources"
+    source_dir.mkdir()
+    monkeypatch.setenv("CHROMA_PORT", "65536")
+
+    with pytest.raises(ValueError, match="CHROMA_PORT"):
+        indexer.validate_source_configs(
+            [
+                {
+                    "source_id": "guia",
+                    "name": "guia",
+                    "path": str(source_dir),
+                    "include": None,
+                    "file_types": ["pdf"],
+                }
+            ],
+            check_chroma=True,
+        )
+
+
+def test_env_flag_enabled_rejects_ambiguous_rag_validate_value(monkeypatch):
+    monkeypatch.setenv("RAG_VALIDATE_CHROMA", "maybe")
+
+    with pytest.raises(ValueError, match="RAG_VALIDATE_CHROMA"):
+        indexer._env_flag_enabled("RAG_VALIDATE_CHROMA")
+
+
 def test_manifest_rejects_invalid_chroma_collection_name():
     manifest = {
         "version": 1,
