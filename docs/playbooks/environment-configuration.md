@@ -103,6 +103,7 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | Variable | Class | Default policy | Used by | Validation expectation |
 |----------|-------|----------------|---------|------------------------|
 | `FLASK_ENV` | `runtime knob` | Local Compose uses `development` | Flask runtime | Document as local-only until production runtime exists |
+| `FLASK_RUN_DEBUG` | `runtime knob` | Defaults to off; local override only | Flask development server | Must not be enabled by default |
 | `FLASK_APP` | `safe default` | Dockerfiles set each service app module | Local/container Flask runner | Required only for `flask run` style execution |
 | `PYTHONDONTWRITEBYTECODE` | `safe default` | Dockerfiles set `1` | Python container runtime | Build/runtime hygiene only |
 | `PYTHONUNBUFFERED` | `safe default` | Dockerfiles set `1` | Python container logging | Keeps container logs unbuffered |
@@ -135,6 +136,26 @@ MISTRAL_API_KEY=fake-local-mistral-key
 
 Do not use examples that resemble live provider key prefixes or personal
 tokens. They invite accidental use and make reviews harder.
+
+## Runtime Separation
+
+The bundled Dockerfiles and `infrastructure/docker-compose.yml` are local
+development contracts. They publish host ports, bind-mount service directories,
+run the Flask development server, and may use fake local secrets. They are valid
+for deterministic local smoke and developer diagnostics, not as production
+deployment artifacts.
+
+Local-only settings include `FLASK_ENV=development`, `FLASK_RUN_DEBUG=1`,
+`SESSION_COOKIE_SECURE=false`, fake provider keys, mock agent configs, host port
+mappings, and bind mounts. The default local contract keeps
+`FLASK_RUN_DEBUG=0` and `DEBUG=false`; enabling either is an explicit developer
+override.
+
+Production environments must inject real secrets through a secret manager or
+equivalent runtime environment, keep `DEBUG=false`, use secure cookies behind
+TLS/reverse proxy termination, avoid bind-mounted mutable source directories,
+and use managed or operationally backed MongoDB/Chroma storage. INIT-04 owns CI
+workflow implementation, and INIT-11 owns service-to-service authentication.
 
 ## Validation Policy
 

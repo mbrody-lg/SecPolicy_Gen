@@ -1,6 +1,10 @@
 # Infrastructure Setup
 
-Complete Docker-based infrastructure for running the multi-agent security policy generation system.
+Complete Docker-based infrastructure for running the multi-agent security policy generation system locally.
+
+This Compose stack is a local/development runtime. It publishes host ports,
+bind-mounts service directories, and uses fake local placeholders in examples.
+Do not treat it as a production deployment template.
 
 ## Quick Start
 
@@ -16,9 +20,11 @@ Create a `.env` file in the `infrastructure/` directory:
 
 ```env
 # Required for all agents
-OPENAI_API_KEY=sk-your-api-key-here
-FLASK_SECRET_KEY=your-secret-key-here
+OPENAI_API_KEY=fake-local-openai-key
+FLASK_SECRET_KEY=fake-local-flask-secret
 FLASK_ENV=development
+FLASK_RUN_DEBUG=0
+DEBUG=false
 
 # Database
 MONGO_URI=mongodb://mongo:27017/policy-gen-db
@@ -237,16 +243,36 @@ pytest
 ### 4. Make Changes
 Edit code in your local editor and reload in the container.
 
+## Local Runtime Vs Production Expectations
+
+The repository Dockerfiles and `infrastructure/docker-compose.yml` are optimized
+for local iteration and deterministic smoke evidence:
+
+- service source directories are bind-mounted into containers;
+- service ports are published on localhost for manual testing;
+- MongoDB and Chroma run as local containers;
+- fake local secrets are acceptable only for deterministic local runs;
+- `FLASK_ENV=development`, `FLASK_RUN_DEBUG=0`, and `DEBUG=false` are the local
+  defaults, with debug mode available only as an explicit developer override;
+- `SESSION_COOKIE_SECURE=false` is local-only.
+
+Production should provide immutable build artifacts, managed or operationally
+backed data stores, secret-manager backed credentials, `DEBUG=false`, secure
+cookies, and TLS/reverse proxy termination. Service-to-service authentication is
+not defined by this local stack; it belongs to INIT-11.
+
 ## Production Deployment
 
-For production:
+For production, treat the local stack as a checklist of concerns, not as an
+operational recipe:
 
 1. **Set environment variables securely** - Use a secrets management service
-2. **Use production models** - Configure with gpt-4o instead of gpt-4o-mini
+2. **Disable debug paths** - Keep `DEBUG=false` and `FLASK_RUN_DEBUG=0`
 3. **Enable HTTPS** - Add reverse proxy (Nginx, Traefik)
-4. **Set appropriate logging** - Configure log aggregation
-5. **Back up MongoDB** - Set up regular backup strategy
-6. **Monitor services** - Use the built-in `/health` and `/ready` endpoints plus the Docker Compose `healthcheck` probes now wired to `/ready` on each agent service
+4. **Set secure cookies** - Use `SESSION_COOKIE_SECURE=true` behind HTTPS
+5. **Set appropriate logging** - Configure log aggregation
+6. **Back up MongoDB** - Set up regular backup strategy
+7. **Monitor services** - Use the built-in `/health` and `/ready` endpoints plus the Docker Compose `healthcheck` probes now wired to `/ready` on each agent service
 
 ## Extensibility
 

@@ -1,22 +1,19 @@
-# Dockerfile per Flask amb entorn de desenvolupament
+# Local/development Flask image. Not a production runtime contract.
 FROM python:3.11-slim
 
-# Variables d’entorn
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/policy-agent
 ENV PIP_NO_CACHE_DIR=1
+ENV FLASK_RUN_DEBUG=0
 
 
-# Instal·lació de dependències del sistema
 RUN apt-get update \
     && apt-get install -y --no-install-recommends gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Directori de treball
 WORKDIR /policy-agent
 
-# Copiem els arxius
 COPY requirements.txt .
 RUN pip install --upgrade pip \
     && pip install --index-url https://download.pytorch.org/whl/cpu torch \
@@ -24,5 +21,4 @@ RUN pip install --upgrade pip \
 
 COPY . .
 
-# Comandament per executar Flask
-CMD ["flask", "run", "--host=0.0.0.0", "--port=5000", "--debug"]
+CMD ["sh", "-c", "if [ \"$FLASK_RUN_DEBUG\" = \"1\" ] || [ \"$FLASK_RUN_DEBUG\" = \"true\" ]; then exec flask run --host=0.0.0.0 --port=5000 --debug; fi; exec flask run --host=0.0.0.0 --port=5000"]
