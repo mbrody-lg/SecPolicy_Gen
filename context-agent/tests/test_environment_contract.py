@@ -8,6 +8,11 @@ import pytest
 ROOT_DIR = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = ROOT_DIR / "docs" / "playbooks" / "environment-configuration.md"
 ENV_EXAMPLE_PATH = ROOT_DIR / "infrastructure" / ".env.example"
+SERVICE_ENV_EXAMPLE_PATHS = [
+    ROOT_DIR / "context-agent" / ".env.example",
+    ROOT_DIR / "policy-agent" / ".env.example",
+    ROOT_DIR / "validator-agent" / ".env.example",
+]
 
 CONTRACT_VARIABLE_PATTERN = re.compile(r"`([A-Z][A-Z0-9_]+)`")
 PYTHON_ENV_PATTERN = re.compile(
@@ -45,6 +50,7 @@ REQUIRED_ENV_EXAMPLE_VARIABLES = {
     "CHROMA_READINESS_MODE",
     "DEBUG",
     "FLASK_ENV",
+    "FLASK_RUN_DEBUG",
     "FLASK_SECRET_KEY",
     "MAX_CONTENT_LENGTH",
     "MISTRAL_API_KEY",
@@ -95,6 +101,17 @@ def _contract_variables() -> set[str]:
 def _env_example_values() -> dict[str, str]:
     values: dict[str, str] = {}
     for line in _read(ENV_EXAMPLE_PATH).splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        key, _, value = stripped.partition("=")
+        values[key] = value
+    return values
+
+
+def _env_file_values(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for line in _read(path).splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
@@ -167,6 +184,35 @@ def test_env_example_covers_contract_surface_with_fake_secrets():
     }
 
     assert missing == set()
+    assert undocumented == set()
+    assert unsafe_secret_examples == {}
+    assert live_like_values == {}
+
+
+@pytest.mark.fast
+def test_service_env_examples_use_fake_local_secret_values():
+    unsafe_secret_examples: dict[str, str] = {}
+    live_like_values: dict[str, str] = {}
+    undocumented: set[str] = set()
+
+    for path in SERVICE_ENV_EXAMPLE_PATHS:
+        env_values = _env_file_values(path)
+        undocumented.update(set(env_values) - _contract_variables())
+        unsafe_secret_examples.update(
+            {
+                f"{path.name}:{key}": env_values[key]
+                for key in SECRET_EXAMPLE_VARIABLES
+                if key in env_values and not env_values[key].startswith("fake-local-")
+            }
+        )
+        live_like_values.update(
+            {
+                f"{path.name}:{key}": value
+                for key, value in env_values.items()
+                if any(pattern.search(value) for pattern in LIVE_SECRET_PATTERNS)
+            }
+        )
+
     assert undocumented == set()
     assert unsafe_secret_examples == {}
     assert live_like_values == {}
