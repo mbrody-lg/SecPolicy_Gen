@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+source "$ROOT_DIR/scripts/redaction.sh"
 
 STACK_STARTED=0
 READINESS_TIMEOUT_SECONDS="${READINESS_TIMEOUT_SECONDS:-120}"
@@ -17,14 +18,16 @@ collect_readiness_diagnostics() {
 
   echo "[critical-path] diagnostics for $label readiness failure" >&2
   echo "[critical-path] readiness response from $url:" >&2
-  curl -sS "$url" >&2 || true
+  curl -sS "$url" 2>&1 | redact_sensitive_output >&2 || true
   echo >&2
 
   if [[ "${#DOCKER_COMPOSE_CMD[@]}" -gt 0 ]]; then
     echo "[critical-path] compose status:" >&2
-    "${DOCKER_COMPOSE_CMD[@]}" -f infrastructure/docker-compose.yml --env-file infrastructure/.env ps >&2 || true
+    "${DOCKER_COMPOSE_CMD[@]}" -f infrastructure/docker-compose.yml --env-file infrastructure/.env ps 2>&1 \
+      | redact_sensitive_output >&2 || true
     echo "[critical-path] recent $compose_service logs (tail=$LOG_TAIL_LINES):" >&2
-    "${DOCKER_COMPOSE_CMD[@]}" -f infrastructure/docker-compose.yml --env-file infrastructure/.env logs --tail "$LOG_TAIL_LINES" "$compose_service" >&2 || true
+    "${DOCKER_COMPOSE_CMD[@]}" -f infrastructure/docker-compose.yml --env-file infrastructure/.env logs --tail "$LOG_TAIL_LINES" "$compose_service" 2>&1 \
+      | redact_sensitive_output >&2 || true
   fi
 }
 

@@ -152,6 +152,8 @@ Minimum evidence by change type:
   `make policy-rag-validate`.
 - Cross-service config changes: `make critical-path-validation`.
 - Redaction changes: sentinel-secret tests and smoke artifact review.
+  Diagnostic scripts that print readiness responses or container logs must pass
+  output through `scripts/redaction.sh`.
 
 If a validation command cannot run because of dependency, network, or local
 environment constraints, record it as blocked. Do not describe blocked evidence

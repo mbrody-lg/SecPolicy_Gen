@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INFRA_DIR="$ROOT_DIR/infrastructure"
+source "$ROOT_DIR/scripts/redaction.sh"
 INFRA_ENV_FILE="${INFRA_DIR}/.env"
 TMP_ENV_FILE=""
 TMP_ENV_TEMP_CREATED=0
@@ -50,14 +51,16 @@ collect_probe_diagnostics() {
 
   log "diagnostics for $service_name probe failure"
   log "readiness response from $base_url/ready:"
-  curl -sS "$base_url/ready" || true
+  curl -sS "$base_url/ready" 2>&1 | redact_sensitive_output || true
   printf "\n"
 
   log "compose status:"
-  "${DOCKER_COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$TMP_ENV_FILE" ps || true
+  "${DOCKER_COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$TMP_ENV_FILE" ps 2>&1 \
+    | redact_sensitive_output || true
 
   log "recent $compose_service logs (tail=$LOG_TAIL_LINES):"
-  "${DOCKER_COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$TMP_ENV_FILE" logs --tail "$LOG_TAIL_LINES" "$compose_service" || true
+  "${DOCKER_COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$TMP_ENV_FILE" logs --tail "$LOG_TAIL_LINES" "$compose_service" 2>&1 \
+    | redact_sensitive_output || true
 }
 
 if command -v docker-compose >/dev/null 2>&1; then
