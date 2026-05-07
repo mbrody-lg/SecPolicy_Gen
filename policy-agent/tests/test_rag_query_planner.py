@@ -59,10 +59,11 @@ def test_build_retrieval_plan_selects_expected_families_for_healthcare_context()
     ]
     assert plan.coverage_notes == []
     assert {step.collection for step in plan.steps} == {
-        "normativa",
-        "guia",
-        "sector",
-        "metodologia",
+        "legal_norms",
+        "implementation_guides",
+        "sector_norms",
+        "security_frameworks",
+        "risk_methodologies",
     }
     assert any(step.family == "legal_norms" and step.top_k == 4 for step in plan.steps)
     assert all(step.filters["collection_family"] == step.family for step in plan.steps)
@@ -83,8 +84,8 @@ def test_build_retrieval_plan_records_missing_family_coverage():
     manifest = {
         "sources": [
             {
-                "id": "normativa",
-                "collection": "normativa",
+                "id": "legal_norms",
+                "collection": "legal_norms",
                 "family": "legal_norms",
                 "metadata": {"jurisdiction": ["EU"], "language": ["es"]},
             }
@@ -97,4 +98,3 @@ def test_build_retrieval_plan_records_missing_family_coverage():
         "missing_source_family:implementation_guides",
         "missing_source_family:sector_norms",
     ]
-

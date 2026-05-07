@@ -118,10 +118,11 @@ def test_run_with_agent_builds_contextual_retrieval_plan(
         "risk_methodologies",
     ]
     assert {step.collection for step in retrieval_plan.steps} == {
-        "normativa",
-        "guia",
-        "sector",
-        "metodologia",
+        "legal_norms",
+        "implementation_guides",
+        "sector_norms",
+        "security_frameworks",
+        "risk_methodologies",
     }
 
 
@@ -138,8 +139,8 @@ def test_openai_policy_agent_returns_serialized_rag_evidence(
     mock_rag_processor.return_value.evidence_items = [
         {
             "text": "legacy dict evidence",
-            "source_id": "normativa",
-            "collection": "normativa",
+            "source_id": "legal_norms",
+            "collection": "legal_norms",
         }
     ]
     mock_chat.side_effect = [
@@ -159,12 +160,12 @@ def test_openai_policy_agent_returns_serialized_rag_evidence(
     assert result["retrieval_evidence"] == [
         {
             "text": "legacy dict evidence",
-            "source_id": "normativa",
-            "collection": "normativa",
+            "source_id": "legal_norms",
+            "collection": "legal_norms",
             "family": None,
             "document_id": None,
             "score": None,
-            "citation": "normativa:normativa",
+            "citation": "legal_norms:legal_norms",
             "metadata": {},
         }
     ]

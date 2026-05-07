@@ -83,7 +83,7 @@ roles:
     instructions: "Search regulatory data and extract relevant information..."
     vector:
       Chroma:
-        collection: [normativa, guia, sector]
+        collection: [legal_norms, sector_norms, implementation_guides]
         volume_name: chroma
         model: intfloat/e5-base
         chunk_size: 1000
@@ -121,7 +121,7 @@ To set up regulatory data for RAG:
    make policy-vectorize
    ```
 5. **Wait**: Processing takes time depending on file size
-6. **Configure**: Update `policy-agent.yaml` with collection names (normativa, guia, sector, etc.)
+6. **Configure**: Update `policy-agent.yaml` with collection names (legal_norms, sector_norms, implementation_guides, etc.)
 
 Runtime model downloads are disabled by default as a secure baseline. Preload embeddings with
 `make policy-vectorize` before using RAG, or set `POLICY_AGENT_ALLOW_MODEL_DOWNLOAD=1` only for

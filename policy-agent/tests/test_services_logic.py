@@ -36,7 +36,7 @@ def test_get_readiness_status_returns_ready_when_dependencies_are_available(app,
                     "vector": [
                         {
                             "chroma": {
-                                "collection": ["normativa"],
+                                "collection": ["legal_norms"],
                             }
                         }
                     ]
@@ -85,7 +85,7 @@ def test_get_readiness_status_reports_controlled_failure(app, monkeypatch):
                     "vector": [
                         {
                             "chroma": {
-                                "collection": ["normativa"],
+                                "collection": ["legal_norms"],
                             }
                         }
                     ]
@@ -132,7 +132,7 @@ def test_get_readiness_status_rejects_empty_chroma_host(app, monkeypatch):
                     "vector": [
                         {
                             "chroma": {
-                                "collection": ["normativa"],
+                                "collection": ["legal_norms"],
                             }
                         }
                     ]
@@ -183,7 +183,7 @@ def test_get_readiness_status_can_run_live_chroma_check(app, monkeypatch):
                     "vector": [
                         {
                             "chroma": {
-                                "collection": ["normativa"],
+                                "collection": ["legal_norms"],
                             }
                         }
                     ]
@@ -231,7 +231,7 @@ def test_get_readiness_status_rejects_invalid_chroma_readiness_mode(app, monkeyp
                     "vector": [
                         {
                             "chroma": {
-                                "collection": ["normativa"],
+                                "collection": ["legal_norms"],
                             }
                         }
                     ]
@@ -278,7 +278,13 @@ def test_get_readiness_status_reads_yaml_style_chroma_vector_entry(app, monkeypa
                     "vector": [
                         {
                             "chroma": "Chroma Vector Database",
-                            "collection": ["normativa", "sector", "metodologia", "guia"],
+                            "collection": [
+                                "legal_norms",
+                                "sector_norms",
+                                "security_frameworks",
+                                "risk_methodologies",
+                                "implementation_guides",
+                            ],
                         }
                     ]
                 }
@@ -296,7 +302,7 @@ def test_get_readiness_status_reads_yaml_style_chroma_vector_entry(app, monkeypa
     assert payload["checks"]["chroma"] == {
         "status": "configured",
         "mode": "config_only",
-        "collection_count": 4,
+        "collection_count": 5,
     }
 
 
@@ -404,9 +410,9 @@ def test_run_generation_pipeline_persists_policy(app_context, monkeypatch):
             "structured_plan": ["scope"],
             "retrieval_evidence": [
                 {
-                    "citation": "normativa:rgpd",
-                    "collection": "normativa",
-                    "source_id": "normativa",
+                    "citation": "legal_norms:rgpd",
+                    "collection": "legal_norms",
+                    "source_id": "legal_norms",
                 }
             ],
         },
@@ -430,9 +436,9 @@ def test_run_generation_pipeline_persists_policy(app_context, monkeypatch):
     assert stored_policy["correlation_id"] == "ctx-1"
     assert stored_policy["retrieval_evidence"] == [
         {
-            "citation": "normativa:rgpd",
-            "collection": "normativa",
-            "source_id": "normativa",
+            "citation": "legal_norms:rgpd",
+            "collection": "legal_norms",
+            "source_id": "legal_norms",
         }
     ]
 
@@ -510,7 +516,7 @@ def test_run_policy_update_pipeline_updates_existing_policy(app_context, monkeyp
             "language": "en",
             "policy_text": "previous policy",
             "structured_plan": ["old"],
-            "retrieval_evidence": [{"citation": "normativa:rgpd"}],
+            "retrieval_evidence": [{"citation": "legal_norms:rgpd"}],
             "model_version": "gpt-4",
             "policy_agent_version": "0.1.0",
             "generated_at": datetime.now(timezone.utc),
@@ -542,7 +548,7 @@ def test_run_policy_update_pipeline_updates_existing_policy(app_context, monkeyp
     assert stored_policy["policy_text"] == "Updated policy body"
     assert stored_policy["last_validation_status"] == "review"
     assert stored_policy["correlation_id"] == context_id
-    assert stored_policy["retrieval_evidence"] == [{"citation": "normativa:rgpd"}]
+    assert stored_policy["retrieval_evidence"] == [{"citation": "legal_norms:rgpd"}]
 
 
 def test_build_policy_update_prompt_is_deterministic():

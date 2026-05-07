@@ -17,9 +17,9 @@ metadata_defaults:
   evidence_required: true
 
 sources:
-  - id: normativa
-    path: data/normativa
-    collection: normativa
+  - id: legal_norms
+    path: data/legal_norms
+    collection: legal_norms
     family: legal_norms
     metadata:
       source_kind: regulation
@@ -32,9 +32,9 @@ sources:
       applicability: legal_obligations
       priority: high
 
-  - id: sector
-    path: data/sector
-    collection: sector
+  - id: sector_norms
+    path: data/sector_norms
+    collection: sector_norms
     family: sector_norms
     metadata:
       source_kind: sector_guidance
@@ -45,9 +45,9 @@ sources:
       applicability: sector_context
       priority: medium
 
-  - id: metodologia_frameworks
-    path: data/metodologia
-    collection: metodologia
+  - id: security_frameworks
+    path: data/methodology
+    collection: security_frameworks
     family: security_frameworks
     include:
       - ISO_*.pdf
@@ -66,9 +66,9 @@ sources:
       applicability: security_framework_alignment
       priority: high
 
-  - id: metodologia_risk
-    path: data/metodologia
-    collection: metodologia
+  - id: risk_methodologies
+    path: data/methodology
+    collection: risk_methodologies
     family: risk_methodologies
     include:
       - Magerit*.pdf
@@ -82,9 +82,9 @@ sources:
       applicability: risk_analysis
       priority: high
 
-  - id: guia
-    path: data/guia
-    collection: guia
+  - id: implementation_guides
+    path: data/implementation_guides
+    collection: implementation_guides
     family: implementation_guides
     metadata:
       source_kind: implementation_guide
@@ -100,11 +100,10 @@ sources:
 
 future_families:
   control_catalog:
-    status: derive_from_metodologia_and_guia
+    status: derive_from_methodology_and_guides
   business_processes:
-    status: derive_from_guia
+    status: derive_from_guides
   policy_templates:
     status: not_present
   validation_criteria:
     status: not_present
-
