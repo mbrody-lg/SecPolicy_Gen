@@ -20,23 +20,25 @@ The active YAML baseline uses:
 - model revision: `b533fe4636f4a2507c08ddab40644d20b0006d6a`
 - chunk size: `300`
 - chunk overlap: `50`
-- active collection before `INIT-13`: `normativa`
+- active collection before `INIT-13`: `legal_norms`
 
 ## Local Source Inventory
 Current source folders under `policy-agent/data/`:
 
 | Folder | Approximate Role | Current Files | Notes |
 | --- | --- | ---: | --- |
-| `normativa` | legal and regulatory sources | 7 PDFs | GDPR/RGPD, LOPDGDD, LSSI-CE, breach notification guidance, copyright/marks |
-| `sector` | sector-specific guidance | 11 PDFs | ecommerce, retail, construction, education, health, industry, logistics, tourism, professional services |
-| `metodologia` | frameworks and methodologies | 8 PDFs | ISO 27001/27002, CIS, NIST CSF, MAGERIT, UK CAF |
-| `guia` | implementation guides and checklists | 34 PDFs | access control, backups, logs, telework, encryption, suppliers, HR, awareness, ecommerce, secure deletion |
+| `legal_norms` | legal and regulatory sources | 7 PDFs | GDPR/RGPD, LOPDGDD, LSSI-CE, breach notification guidance, copyright/marks |
+| `sector_norms` | sector-specific guidance | 11 PDFs | ecommerce, retail, construction, education, health, industry, logistics, tourism, professional services |
+| `security_frameworks` | frameworks | 5 PDFs | ISO 27001/27002, CIS, NIST CSF, UK CAF |
+| `risk_methodologies` | risk methodologies | 3 PDFs | MAGERIT method, catalogue, and techniques |
+| `implementation_guides` | implementation guides and checklists | 34 PDFs | access control, backups, logs, telework, encryption, suppliers, HR, awareness, ecommerce, secure deletion |
 
 The `CONTENT.TXT` files are useful rough manifests but are not authoritative. Some entries are stale or inconsistent with actual filenames.
 
 ## Known Limitations
 - The RAG role currently uses one broad query rather than a structured retrieval plan.
-- The active configuration previously queried only `normativa`, leaving sector, methodology, and guide sources unused by default.
+- The active configuration previously queried only `legal_norms`, leaving
+  `sector_norms`, `security_frameworks`, `risk_methodologies`, and `implementation_guides` sources unused by default.
 - Indexed chunks do not yet carry enough metadata for strict filtering by jurisdiction, sector, framework, data type, asset type, or applicability.
 - Vector search currently returns plain document text to the RAG processor, not source ids, metadata, scores, or collection names.
 - The generated policy does not persist retrieval evidence or citations.
@@ -51,4 +53,3 @@ The first `INIT-13` slice keeps runtime behavior conservative:
 - add tests around configuration and manifest loading
 
 Later slices should add metadata-rich indexing, query planning, structured evidence, reranking, evidence persistence, validator grounding, and RAG evaluation.
-

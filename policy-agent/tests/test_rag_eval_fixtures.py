@@ -33,6 +33,12 @@ def test_ws8_rag_fixture_cases_have_expected_collection_families():
     for case in catalog["cases"]:
         assert case["query_terms"]
         assert set(case["expected_collection_families"]).issubset(
-            {"normativa", "sector", "guia", "metodologia"}
+            {
+                "legal_norms",
+                "sector_norms",
+                "implementation_guides",
+                "security_frameworks",
+                "risk_methodologies",
+            }
         )
-        assert "normativa" in case["expected_collection_families"]
+        assert "legal_norms" in case["expected_collection_families"]

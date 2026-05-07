@@ -14,7 +14,7 @@ roles:
     tools: []
     vector:
       - chroma: Chroma Vector Database
-        collection: [normativa, sector, guia, metodologia]
+        collection: [legal_norms, sector_norms, security_frameworks, risk_methodologies, implementation_guides]
         model: intfloat/e5-base
         revision: b533fe4636f4a2507c08ddab40644d20b0006d6a
         chunk_size: 300

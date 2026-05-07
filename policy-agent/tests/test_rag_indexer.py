@@ -9,16 +9,12 @@ from scripts import index_pdfs_to_chroma as indexer
 def test_load_configs_from_rag_sources_filters_collection():
     configs = indexer.load_configs_from_rag_sources(
         Path("app/config/rag_sources.yaml"),
-        collection_filter="metodologia",
+        collection_filter="security_frameworks",
     )
 
-    assert [config["source_id"] for config in configs] == [
-        "metodologia_frameworks",
-        "metodologia_risk",
-    ]
+    assert [config["source_id"] for config in configs] == ["security_frameworks"]
     assert {config["family"] for config in configs} == {
         "security_frameworks",
-        "risk_methodologies",
     }
 
 
@@ -41,19 +37,19 @@ def test_discover_files_uses_include_patterns(tmp_path):
 
 def test_build_chunk_id_is_stable_and_scoped():
     chunk_id = indexer.build_chunk_id(
-        {"name": "metodologia", "source_id": "metodologia_frameworks"},
+        {"name": "security_frameworks", "source_id": "security_frameworks"},
         Path("ISO_27001.pdf"),
         3,
     )
 
-    assert chunk_id == "metodologia:metodologia_frameworks:ISO_27001:chunk-3"
+    assert chunk_id == "security_frameworks:security_frameworks:ISO_27001:chunk-3"
 
 
 def test_build_chunk_metadata_flattens_list_values():
     metadata = indexer.build_chunk_metadata(
         {
-            "source_id": "normativa",
-            "name": "normativa",
+            "source_id": "legal_norms",
+            "name": "legal_norms",
             "family": "legal_norms",
             "metadata": {
                 "source_kind": "regulation",
@@ -68,8 +64,8 @@ def test_build_chunk_metadata_flattens_list_values():
     )
 
     assert metadata == {
-        "source_id": "normativa",
-        "collection": "normativa",
+        "source_id": "legal_norms",
+        "collection": "legal_norms",
         "collection_family": "legal_norms",
         "source_doc": "RGPD.pdf",
         "source_stem": "RGPD",
@@ -94,8 +90,8 @@ def test_process_source_dry_run_does_not_call_chroma(tmp_path, monkeypatch):
 
     result = indexer.process_source(
         {
-            "source_id": "guia",
-            "name": "guia",
+            "source_id": "implementation_guides",
+            "name": "implementation_guides",
             "path": str(source_dir),
             "family": "implementation_guides",
             "metadata": {
@@ -129,8 +125,8 @@ def test_validate_source_configs_checks_paths_without_model_or_indexing(tmp_path
     totals = indexer.validate_source_configs(
         [
             {
-                "source_id": "guia",
-                "name": "guia",
+                "source_id": "implementation_guides",
+                "name": "implementation_guides",
                 "path": str(source_dir),
                 "include": None,
                 "file_types": ["pdf"],
@@ -148,7 +144,7 @@ def test_validate_source_configs_fails_for_missing_source_path(tmp_path):
             [
                 {
                     "source_id": "missing",
-                    "name": "normativa",
+                    "name": "legal_norms",
                     "path": str(tmp_path / "missing"),
                     "include": None,
                     "file_types": ["pdf"],
@@ -181,8 +177,8 @@ def test_validate_source_configs_optionally_checks_chroma(monkeypatch, tmp_path)
     totals = indexer.validate_source_configs(
         [
             {
-                "source_id": "guia",
-                "name": "guia",
+                "source_id": "implementation_guides",
+                "name": "implementation_guides",
                 "path": str(source_dir),
                 "include": None,
                 "file_types": ["pdf"],
@@ -204,8 +200,8 @@ def test_validate_source_configs_rejects_invalid_chroma_port(monkeypatch, tmp_pa
         indexer.validate_source_configs(
             [
                 {
-                    "source_id": "guia",
-                    "name": "guia",
+                    "source_id": "implementation_guides",
+                    "name": "implementation_guides",
                     "path": str(source_dir),
                     "include": None,
                     "file_types": ["pdf"],
@@ -228,7 +224,7 @@ def test_manifest_rejects_invalid_chroma_collection_name():
         "sources": [
             {
                 "id": "bad_collection",
-                "path": "data/normativa",
+                "path": "data/legal_norms",
                 "collection": "bad name",
                 "family": "legal_norms",
                 "metadata": {
