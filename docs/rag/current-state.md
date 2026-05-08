@@ -1,7 +1,8 @@
 # Policy-Agent RAG Current State
 
 ## Purpose
-Capture the baseline before `INIT-13` changes the retrieval architecture.
+Capture the current `policy-agent` RAG runtime shape after the English
+collection naming alignment.
 
 ## Current Flow
 1. `context-agent` sends `context_id`, `refined_prompt`, `language`, and `model_version` to `policy-agent`.
@@ -20,7 +21,8 @@ The active YAML baseline uses:
 - model revision: `b533fe4636f4a2507c08ddab40644d20b0006d6a`
 - chunk size: `300`
 - chunk overlap: `50`
-- active collection before `INIT-13`: `legal_norms`
+- active collections: `legal_norms`, `sector_norms`, `security_frameworks`,
+  `risk_methodologies`, `implementation_guides`
 
 ## Local Source Inventory
 Current source folders under `policy-agent/data/`:
@@ -37,19 +39,19 @@ The `CONTENT.TXT` files are useful rough manifests but are not authoritative. So
 
 ## Known Limitations
 - The RAG role currently uses one broad query rather than a structured retrieval plan.
-- The active configuration previously queried only `legal_norms`, leaving
-  `sector_norms`, `security_frameworks`, `risk_methodologies`, and `implementation_guides` sources unused by default.
+- Existing Chroma volumes created with the previous collection names must be
+  reindexed before runtime queries use the English collection names.
 - Indexed chunks do not yet carry enough metadata for strict filtering by jurisdiction, sector, framework, data type, asset type, or applicability.
 - Vector search currently returns plain document text to the RAG processor, not source ids, metadata, scores, or collection names.
 - The generated policy does not persist retrieval evidence or citations.
 - There is no retrieval evaluation dataset yet.
 
-## First Modernization Slice
-The first `INIT-13` slice keeps runtime behavior conservative:
-- document the baseline
-- introduce a source manifest
-- validate manifest shape
-- configure existing collections for multi-collection retrieval
-- add tests around configuration and manifest loading
+## Current Naming Slice
+This slice keeps retrieval behavior conservative while aligning nomenclature:
+- use English collection names, source ids, and corpus folders
+- split the previous methodology collection into framework and risk-methodology
+  collections
+- keep source-level manifest validation and test coverage aligned with the
+  active YAML contract
 
 Later slices should add metadata-rich indexing, query planning, structured evidence, reranking, evidence persistence, validator grounding, and RAG evaluation.
