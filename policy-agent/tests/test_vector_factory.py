@@ -32,15 +32,19 @@ def test_get_vector_clients_expands_all_collections(monkeypatch):
         [
             {
                 "fake": "Fake Vector Database",
-                "collection": ["normativa", "sector", "guia"],
+                "collection": ["legal_norms", "sector_norms", "implementation_guides"],
                 "model": "test-model",
                 "revision": "test-revision",
             }
         ]
     )
 
-    assert [client.loaded_collection for client in clients] == ["normativa", "sector", "guia"]
-    assert FakeVectorClient.loaded_collections == ["normativa", "sector", "guia"]
+    assert [client.loaded_collection for client in clients] == [
+        "legal_norms",
+        "sector_norms",
+        "implementation_guides",
+    ]
+    assert FakeVectorClient.loaded_collections == ["legal_norms", "sector_norms", "implementation_guides"]
     assert all(client.model == "model:test-model:test-revision" for client in clients)
 
 
@@ -55,18 +59,22 @@ def test_get_vector_clients_keeps_collections_from_multiple_entries(monkeypatch)
         [
             {
                 "fake": "Fake Vector Database",
-                "collection": ["normativa"],
+                "collection": ["legal_norms"],
                 "model": "model-a",
             },
             {
                 "fake": "Fake Vector Database",
-                "collection": ["sector", "guia"],
+                "collection": ["sector_norms", "implementation_guides"],
                 "model": "model-b",
             },
         ]
     )
 
-    assert [client.loaded_collection for client in clients] == ["normativa", "sector", "guia"]
+    assert [client.loaded_collection for client in clients] == [
+        "legal_norms",
+        "sector_norms",
+        "implementation_guides",
+    ]
     assert [client.model for client in clients] == [
         "model:model-a",
         "model:model-b",

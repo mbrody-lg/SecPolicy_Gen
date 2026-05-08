@@ -29,7 +29,7 @@ def test_readiness_payload_does_not_include_secret_values(app, monkeypatch):
                     "vector": [
                         {
                             "chroma": {
-                                "collection": ["normativa"],
+                                "collection": ["legal_norms"],
                             }
                         }
                     ]

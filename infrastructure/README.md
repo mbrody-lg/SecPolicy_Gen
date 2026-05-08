@@ -76,8 +76,9 @@ make clean
 ### Chroma Vector Database
 - **Port**: 8000
 - **Purpose**: Stores embedded regulatory documents for RAG
-- **Collections**: normativa, guia, sector, methodology
-- **Access**: Internal Docker network only
+- **Current local collections**: legal_norms, sector_norms, security_frameworks, risk_methodologies, implementation_guides
+- **Access**: Docker internal network plus localhost `8000` for developer
+  diagnostics in the local Compose stack
 
 ### Agent Services
 All agents run on separate ports and use internal Docker DNS:
@@ -196,7 +197,7 @@ All services communicate through Docker's internal network. External access poin
 | Policy Agent API | 5002 | http://localhost:5002 |
 | Validator Agent API | 5001 | http://localhost:5001 |
 | MongoDB | 27017 | localhost:27017 (host only) |
-| Chroma | 8000 | Internal Docker network |
+| Chroma | 8000 | http://localhost:8000 for local diagnostics; agents use Docker DNS |
 
 ## Troubleshooting
 

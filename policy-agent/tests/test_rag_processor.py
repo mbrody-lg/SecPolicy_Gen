@@ -14,9 +14,9 @@ class FakeSearchClient:
 
 def test_rag_processor_queries_each_configured_client(app_context, monkeypatch):
     clients = [
-        FakeSearchClient("normativa"),
-        FakeSearchClient("sector"),
-        FakeSearchClient("guia"),
+        FakeSearchClient("legal_norms"),
+        FakeSearchClient("sector_norms"),
+        FakeSearchClient("implementation_guides"),
     ]
     monkeypatch.setattr(rag_module, "get_vector_clients", lambda vector_config: clients)
 
@@ -25,7 +25,7 @@ def test_rag_processor_queries_each_configured_client(app_context, monkeypatch):
             "vector": [
                 {
                     "chroma": "Chroma Vector Database",
-                    "collection": ["normativa", "sector", "guia"],
+                    "collection": ["legal_norms", "sector_norms", "implementation_guides"],
                     "model": "test-model",
                 }
             ]
@@ -40,10 +40,10 @@ def test_rag_processor_queries_each_configured_client(app_context, monkeypatch):
         [("protect patient data", 2)],
     ]
     assert "=== Relevant Context ===" in enriched_prompt
-    assert "citation=normativa:legacy" in enriched_prompt
-    assert "normativa document" in enriched_prompt
-    assert "sector document" in enriched_prompt
-    assert "guia document" in enriched_prompt
+    assert "citation=legal_norms:legacy" in enriched_prompt
+    assert "legal_norms document" in enriched_prompt
+    assert "sector_norms document" in enriched_prompt
+    assert "implementation_guides document" in enriched_prompt
 
 
 def test_rag_processor_prefers_structured_evidence_when_available(app_context, monkeypatch):
@@ -53,16 +53,16 @@ def test_rag_processor_prefers_structured_evidence_when_available(app_context, m
             return [
                 {
                     "text": "GDPR requires appropriate security controls.",
-                    "id": "normativa:rgpd:chunk-1",
-                    "source_id": "normativa",
-                    "collection": "normativa",
+                    "id": "legal_norms:rgpd:chunk-1",
+                    "source_id": "legal_norms",
+                    "collection": "legal_norms",
                     "family": "legal_norms",
                     "score": 0.15,
                     "metadata": {"source_doc": "RGPD.pdf"},
                 }
             ]
 
-    client = StructuredSearchClient("normativa")
+    client = StructuredSearchClient("legal_norms")
     monkeypatch.setattr(rag_module, "get_vector_clients", lambda vector_config: [client])
 
     processor = rag_module.RAGProcessor(
@@ -70,7 +70,7 @@ def test_rag_processor_prefers_structured_evidence_when_available(app_context, m
             "vector": [
                 {
                     "chroma": "Chroma Vector Database",
-                    "collection": ["normativa"],
+                    "collection": ["legal_norms"],
                     "model": "test-model",
                 }
             ]
@@ -80,7 +80,7 @@ def test_rag_processor_prefers_structured_evidence_when_available(app_context, m
     enriched_prompt = processor.apply("protect personal data", top_k=4)
 
     assert client.queries == [("protect personal data", 4)]
-    assert "citation=normativa:normativa:rgpd:chunk-1" in enriched_prompt
+    assert "citation=legal_norms:legal_norms:rgpd:chunk-1" in enriched_prompt
     assert "family=legal_norms" in enriched_prompt
     assert "GDPR requires appropriate security controls." in enriched_prompt
 
@@ -110,9 +110,9 @@ def test_rag_processor_keeps_empty_result_fallback(app_context, monkeypatch):
 
 def test_rag_processor_uses_retrieval_plan_for_collection_queries(app_context, monkeypatch):
     clients = [
-        FakeSearchClient("normativa"),
-        FakeSearchClient("sector"),
-        FakeSearchClient("guia"),
+        FakeSearchClient("legal_norms"),
+        FakeSearchClient("sector_norms"),
+        FakeSearchClient("implementation_guides"),
     ]
     monkeypatch.setattr(rag_module, "get_vector_clients", lambda vector_config: clients)
 
@@ -121,7 +121,7 @@ def test_rag_processor_uses_retrieval_plan_for_collection_queries(app_context, m
             "vector": [
                 {
                     "chroma": "Chroma Vector Database",
-                    "collection": ["normativa", "sector", "guia"],
+                    "collection": ["legal_norms", "sector_norms", "implementation_guides"],
                     "model": "test-model",
                 }
             ]
@@ -133,13 +133,13 @@ def test_rag_processor_uses_retrieval_plan_for_collection_queries(app_context, m
         steps=[
             RetrievalPlanStep(
                 family="legal_norms",
-                collection="normativa",
+                collection="legal_norms",
                 query="legal_norms: protect patient data",
                 top_k=4,
             ),
             RetrievalPlanStep(
                 family="sector_norms",
-                collection="sector",
+                collection="sector_norms",
                 query="sector_norms: protect patient data",
                 top_k=3,
             ),
@@ -151,5 +151,5 @@ def test_rag_processor_uses_retrieval_plan_for_collection_queries(app_context, m
     assert clients[0].queries == [("legal_norms: protect patient data", 4)]
     assert clients[1].queries == [("sector_norms: protect patient data", 3)]
     assert clients[2].queries == []
-    assert "normativa document" in enriched_prompt
-    assert "sector document" in enriched_prompt
+    assert "legal_norms document" in enriched_prompt
+    assert "sector_norms document" in enriched_prompt

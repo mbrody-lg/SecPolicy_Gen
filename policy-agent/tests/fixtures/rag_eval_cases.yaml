@@ -9,10 +9,11 @@ cases:
       - patient data
       - GDPR
     expected_collection_families:
-      - normativa
-      - sector
-      - guia
-      - metodologia
+      - legal_norms
+      - sector_norms
+      - implementation_guides
+      - security_frameworks
+      - risk_methodologies
 
   - id: botiga_online_artesania
     context_fixture: context-agent/app/config/examples/answers/botiga_online_artesania.yaml
@@ -22,10 +23,11 @@ cases:
       - payment
       - GDPR
     expected_collection_families:
-      - normativa
-      - sector
-      - guia
-      - metodologia
+      - legal_norms
+      - sector_norms
+      - implementation_guides
+      - security_frameworks
+      - risk_methodologies
 
   - id: despatx_advocats
     context_fixture: context-agent/app/config/examples/answers/despatx_advocats.yaml
@@ -35,10 +37,11 @@ cases:
       - personal data
       - access control
     expected_collection_families:
-      - normativa
-      - sector
-      - guia
-      - metodologia
+      - legal_norms
+      - sector_norms
+      - implementation_guides
+      - security_frameworks
+      - risk_methodologies
 
   - id: academia_idiomes
     context_fixture: context-agent/app/config/examples/answers/academia_idiomes.yaml
@@ -48,10 +51,11 @@ cases:
       - minors
       - GDPR
     expected_collection_families:
-      - normativa
-      - sector
-      - guia
-      - metodologia
+      - legal_norms
+      - sector_norms
+      - implementation_guides
+      - security_frameworks
+      - risk_methodologies
 
   - id: startup_iot
     context_fixture: context-agent/app/config/examples/answers/startup_iot.yaml
@@ -61,9 +65,10 @@ cases:
       - cloud platform
       - vulnerabilities
     expected_collection_families:
-      - normativa
-      - guia
-      - metodologia
+      - legal_norms
+      - implementation_guides
+      - security_frameworks
+      - risk_methodologies
 
   - id: consultoria_rrhh
     context_fixture: context-agent/app/config/examples/answers/consultoria_rrhh.yaml
@@ -73,10 +78,11 @@ cases:
       - payroll
       - suppliers
     expected_collection_families:
-      - normativa
-      - sector
-      - guia
-      - metodologia
+      - legal_norms
+      - sector_norms
+      - implementation_guides
+      - security_frameworks
+      - risk_methodologies
 
   - id: cooperativa_agroalimentaria
     context_fixture: context-agent/app/config/examples/answers/cooperativa_agroalimentaria.yaml
@@ -86,10 +92,11 @@ cases:
       - operations
       - continuity
     expected_collection_families:
-      - normativa
-      - sector
-      - guia
-      - metodologia
+      - legal_norms
+      - sector_norms
+      - implementation_guides
+      - security_frameworks
+      - risk_methodologies
 
   - id: taller_mecanic
     context_fixture: context-agent/app/config/examples/answers/taller_mecanic.yaml
@@ -99,8 +106,9 @@ cases:
       - equipment
       - backups
     expected_collection_families:
-      - normativa
-      - sector
-      - guia
-      - metodologia
+      - legal_norms
+      - sector_norms
+      - implementation_guides
+      - security_frameworks
+      - risk_methodologies
 

@@ -13,7 +13,13 @@ from app.rag.sources import (
 def test_load_rag_source_manifest_exposes_current_collections():
     manifest = load_rag_source_manifest(Path("app/config/rag_sources.yaml"))
 
-    assert get_manifest_collections(manifest) == ["normativa", "sector", "metodologia", "guia"]
+    assert get_manifest_collections(manifest) == [
+        "legal_norms",
+        "sector_norms",
+        "security_frameworks",
+        "risk_methodologies",
+        "implementation_guides",
+    ]
     assert {source["family"] for source in manifest["sources"]} == {
         "legal_norms",
         "sector_norms",
