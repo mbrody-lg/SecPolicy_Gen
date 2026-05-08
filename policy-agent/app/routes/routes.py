@@ -5,6 +5,8 @@ from flask import Blueprint, jsonify, request
 from app.services.logic import (
     get_health_status,
     get_readiness_status,
+    get_rag_runtime_status,
+    refresh_rag_runtime,
     run_generation_pipeline,
     run_policy_update_pipeline,
 )
@@ -23,6 +25,20 @@ def health():
 def ready():
     """Return readiness based on minimal safe dependency and config checks."""
     payload, status_code = get_readiness_status()
+    return jsonify(payload), status_code
+
+
+@routes.route("/rag/status", methods=["GET"])
+def rag_status():
+    """Return RAG runtime status and missing configured Chroma collections."""
+    payload, status_code = get_rag_runtime_status()
+    return jsonify(payload), status_code
+
+
+@routes.route("/rag/refresh", methods=["POST"])
+def rag_refresh():
+    """Run the controlled local RAG refresh action when enabled."""
+    payload, status_code = refresh_rag_runtime()
     return jsonify(payload), status_code
 
 

@@ -44,8 +44,35 @@
 
   <div class="bg-white rounded-lg shadow p-4">
     <h2 class="text-xl font-semibold mb-2">Generate policies</h2>
+    {% set runtime_ready = system_status and system_status.status == 'ready' %}
+    {% if not runtime_ready %}
+      <div class="mb-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+        <div class="font-semibold">Application runtime is not ready</div>
+        {% if system_status and system_status.rag %}
+          <div class="mt-1">RAG status: {{ system_status.rag.status }}</div>
+          {% if system_status.rag.missing_collections %}
+            <div class="mt-1">Missing collections: {{ system_status.rag.missing_collections | join(', ') }}</div>
+          {% endif %}
+          {% if system_status.rag.embedding_models %}
+            <div class="mt-1">
+              Embedding models:
+              {% for model in system_status.rag.embedding_models %}
+                {{ model.model }} ({{ model.status }}){% if not loop.last %}, {% endif %}
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endif %}
+      </div>
+      <form method="post" action="{{ url_for('main.context_system_refresh', context_id=context._id) }}" class="mb-3">
+        <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+          Update state
+        </button>
+      </form>
+    {% endif %}
     <form method="post" action="{{ url_for('main.trigger_policy_generation', context_id=context._id) }}">
-      <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">
+      <button type="submit"
+        class="{% if runtime_ready %}bg-green-600 hover:bg-green-700{% else %}bg-gray-400 cursor-not-allowed{% endif %} text-white px-4 py-2 rounded"
+        {% if not runtime_ready %}disabled{% endif %}>
         Generate and validate
       </button>
     </form>

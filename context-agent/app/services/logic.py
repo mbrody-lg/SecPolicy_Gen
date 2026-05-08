@@ -22,6 +22,7 @@ from app.observability import build_log_event, log_event
 
 logger = logging.getLogger(__name__)
 MAX_PIPELINE_DIAGNOSTIC_HOPS = 25
+SYSTEM_STATUS_TIMEOUT_SECONDS = 2.0
 
 
 class PipelineStepError(Exception):
@@ -101,6 +102,104 @@ def get_readiness_status() -> dict:
         "status": "ready" if is_ready else "not_ready",
         "service": "context-agent",
         "checks": checks,
+    }
+
+
+def _service_endpoint_status(name: str, base_url: str, *, path: str = "/ready") -> dict:
+    """Return bounded service status from a dependency endpoint."""
+    try:
+        response = requests.get(
+            f"{base_url.rstrip('/')}{path}",
+            timeout=SYSTEM_STATUS_TIMEOUT_SECONDS,
+        )
+        payload = response.json() if response.content else {}
+    except requests.RequestException:
+        return {
+            "service": name,
+            "status": "unreachable",
+            "status_code": None,
+            "checks": {},
+        }
+    except ValueError:
+        return {
+            "service": name,
+            "status": "error",
+            "status_code": response.status_code,
+            "checks": {},
+        }
+
+    return {
+        "service": name,
+        "status": payload.get("status", "unknown") if isinstance(payload, dict) else "unknown",
+        "status_code": response.status_code,
+        "checks": payload.get("checks", {}) if isinstance(payload, dict) else {},
+        "payload": payload if isinstance(payload, dict) else {},
+    }
+
+
+def get_system_status() -> dict:
+    """Aggregate local service readiness and RAG runtime status for the UI."""
+    context_status = get_readiness_status()
+    policy_agent_url = current_app.config.get("POLICY_AGENT_URL", "http://policy-agent:5000")
+    validator_agent_url = current_app.config.get("VALIDATOR_AGENT_URL", "http://validator-agent:5000")
+
+    services = [
+        {
+            "service": "context-agent",
+            "status": context_status.get("status", "unknown"),
+            "status_code": 200 if context_status.get("status") == "ready" else 503,
+            "checks": context_status.get("checks", {}),
+        },
+        _service_endpoint_status("policy-agent", policy_agent_url),
+        _service_endpoint_status("validator-agent", validator_agent_url),
+    ]
+    rag_status = _service_endpoint_status("policy-agent-rag", policy_agent_url, path="/rag/status")
+    all_ready = all(service.get("status") == "ready" for service in services)
+    rag_ready = rag_status.get("payload", {}).get("rag", {}).get("status") == "ready"
+
+    return {
+        "status": "ready" if all_ready and rag_ready else "not_ready",
+        "services": services,
+        "rag": rag_status.get("payload", {}).get("rag", {
+            "status": rag_status.get("status", "unknown"),
+            "reason": "rag_status_unavailable",
+        }),
+        "actions": {
+            "rag_refresh_available": True,
+            "rag_refresh_path": "/system/refresh",
+        },
+    }
+
+
+def refresh_system_state() -> dict:
+    """Attempt a controlled dependency refresh and return the updated system status."""
+    policy_agent_url = current_app.config.get("POLICY_AGENT_URL", "http://policy-agent:5000")
+    try:
+        response = requests.post(
+            f"{policy_agent_url.rstrip('/')}/rag/refresh",
+            timeout=_dependency_timeout("POLICY_AGENT_TIMEOUT_SECONDS"),
+        )
+        payload = response.json() if response.content else {}
+    except requests.RequestException:
+        return {
+            "success": False,
+            "error_code": "policy_agent_unreachable",
+            "message": "Policy agent is unreachable.",
+            "status": get_system_status(),
+        }
+    except ValueError:
+        return {
+            "success": False,
+            "error_code": "invalid_policy_agent_response",
+            "message": "Policy agent returned an invalid response.",
+            "status": get_system_status(),
+        }
+
+    return {
+        "success": response.status_code < 400 and payload.get("success") is True,
+        "status_code": response.status_code,
+        "response": payload,
+        "status": get_system_status(),
     }
 
 

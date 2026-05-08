@@ -1,4 +1,5 @@
 from bson import ObjectId
+import pytest
 from uuid import UUID
 
 from test_base import *
@@ -6,6 +7,9 @@ import app.routes.routes as routes_module
 
 
 class FakeCursor:
+    def __init__(self, docs=None):
+        self.docs = list(docs or [])
+
     def sort(self, *args, **kwargs):
         return self
 
@@ -15,31 +19,137 @@ class FakeCursor:
     def limit(self, *args, **kwargs):
         return []
 
+    def __iter__(self):
+        return iter(self.docs)
+
 
 class FakeContextsCollection:
+    def __init__(self, docs=None):
+        self.docs = list(docs or [])
+
     def count_documents(self, query):
         return 0
 
     def find(self, query, fields):
         return FakeCursor()
 
+    def find_one(self, query):
+        for doc in self.docs:
+            if all(doc.get(key) == value for key, value in query.items()):
+                return doc
+        return None
+
+
+class FakeInteractionsCollection:
+    def __init__(self, docs=None):
+        self.docs = list(docs or [])
+
+    def find(self, query):
+        return FakeCursor(
+            doc for doc in self.docs
+            if all(doc.get(key) == value for key, value in query.items())
+        )
+
 
 class FakeDB:
-    def __init__(self):
-        self.contexts = FakeContextsCollection()
+    def __init__(self, contexts=None, interactions=None):
+        self.contexts = FakeContextsCollection(contexts)
+        self.interactions = FakeInteractionsCollection(interactions)
 
 
 def test_dashboard_route(client, monkeypatch):
     monkeypatch.setattr(routes_module.mongo, "db", FakeDB(), raising=False)
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
 
     response = client.get('/')
     assert response.status_code == 200
     assert b"Generated contexts" in response.data
 
+
+def test_dashboard_route_renders_system_status_panel(client, monkeypatch):
+    monkeypatch.setattr(routes_module.mongo, "db", FakeDB(), raising=False)
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {
+            "status": "not_ready",
+            "services": [
+                {"service": "context-agent", "status": "ready", "status_code": 200},
+                {"service": "policy-agent", "status": "ready", "status_code": 200},
+                {"service": "validator-agent", "status": "ready", "status_code": 200},
+            ],
+            "rag": {
+                "status": "requires_refresh",
+                "missing_collections": ["guia"],
+                "refresh_job": {"status": "failed"},
+            },
+        },
+    )
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert b"Application readiness" in response.data
+    assert b"policy-agent RAG" in response.data
+    assert b"requires_refresh" in response.data
+    assert b"Missing: guia" in response.data
+    assert b"Update state" in response.data
+
+
 def test_create_route_get(client):
     response = client.get('/create')
     assert response.status_code == 200
     assert b"Create a new context" in response.data
+
+
+def test_context_detail_disables_policy_generation_when_runtime_is_not_ready(client, monkeypatch):
+    context_id = ObjectId()
+    monkeypatch.setattr(
+        routes_module.mongo,
+        "db",
+        FakeDB(
+            contexts=[{"_id": context_id, "status": "completed"}],
+            interactions=[
+                {
+                    "context_id": context_id,
+                    "origin": "agent",
+                    "answer": "Refined context",
+                    "timestamp": "2026-05-08T00:00:00+00:00",
+                }
+            ],
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {
+            "status": "not_ready",
+            "rag": {
+                "status": "requires_refresh",
+                "missing_collections": [],
+                "embedding_models": [
+                    {
+                        "model": "intfloat/multilingual-e5-base",
+                        "status": "missing",
+                        "reason": "not_cached",
+                    }
+                ],
+            },
+        },
+    )
+
+    response = client.get(f"/context/{context_id}")
+
+    assert response.status_code == 200
+    assert b"Application runtime is not ready" in response.data
+    assert b"intfloat/multilingual-e5-base (missing)" in response.data
+    assert b"Update state" in response.data
+    assert b"disabled" in response.data
 
 
 def test_health_route_returns_lightweight_ok_payload(client):
@@ -98,6 +208,75 @@ def test_ready_route_returns_503_when_service_is_not_ready(client, monkeypatch):
             "mongo": {"status": "error", "message": "mongo unavailable"},
         },
     }
+
+
+def test_system_status_route_returns_aggregated_status(client, monkeypatch):
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {
+            "status": "not_ready",
+            "services": [{"service": "policy-agent", "status": "not_ready"}],
+            "rag": {"status": "requires_refresh"},
+        },
+    )
+
+    response = client.get("/system/status")
+
+    assert response.status_code == 503
+    assert response.get_json()["rag"]["status"] == "requires_refresh"
+
+
+def test_system_status_route_returns_200_when_ready(client, monkeypatch):
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {
+            "status": "ready",
+            "services": [{"service": "policy-agent", "status": "ready"}],
+            "rag": {"status": "ready"},
+        },
+    )
+
+    response = client.get("/system/status")
+
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "ready"
+
+
+def test_system_refresh_redirects_with_flash(client, monkeypatch):
+    monkeypatch.setattr(
+        routes_module,
+        "refresh_system_state",
+        lambda: {"success": True, "status": {"status": "ready"}},
+    )
+
+    response = client.post("/system/refresh", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/")
+    with client.session_transaction() as session:
+        flashes = session.get("_flashes", [])
+    assert ("success", "System state refreshed successfully.") in flashes
+
+
+def test_system_refresh_redirects_with_failure_flash(client, monkeypatch):
+    monkeypatch.setattr(
+        routes_module,
+        "refresh_system_state",
+        lambda: {
+            "success": False,
+            "response": {"message": "RAG refresh is disabled for this runtime."},
+        },
+    )
+
+    response = client.post("/system/refresh", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/")
+    with client.session_transaction() as session:
+        flashes = session.get("_flashes", [])
+    assert ("danger", "RAG refresh is disabled for this runtime.") in flashes
 
 
 def test_send_policy_to_context_returns_400_when_required_fields_missing(client):
@@ -168,6 +347,11 @@ def test_trigger_policy_generation_redirects_with_success_flash(client, monkeypa
     context_id = str(ObjectId())
     monkeypatch.setattr(
         routes_module,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
+    monkeypatch.setattr(
+        routes_module,
         "generate_full_policy_pipeline",
         lambda current_context_id: {"success": True, "stage": "completed"},
     )
@@ -185,6 +369,11 @@ def test_trigger_policy_generation_redirects_with_stage_flash_on_failure(client,
     context_id = str(ObjectId())
     monkeypatch.setattr(
         routes_module,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
+    monkeypatch.setattr(
+        routes_module,
         "generate_full_policy_pipeline",
         lambda current_context_id: {
             "success": False,
@@ -200,6 +389,45 @@ def test_trigger_policy_generation_redirects_with_stage_flash_on_failure(client,
     with client.session_transaction() as session:
         flashes = session.get("_flashes", [])
     assert ("danger", "validation: Policy validation failed.") in flashes
+
+
+def test_trigger_policy_generation_blocks_when_runtime_is_not_ready(client, monkeypatch):
+    context_id = str(ObjectId())
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {"status": "not_ready", "services": [], "rag": {"status": "requires_refresh"}},
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "generate_full_policy_pipeline",
+        lambda current_context_id: pytest.fail("pipeline must not run when runtime is not ready"),
+    )
+
+    response = client.post(f"/context/{context_id}/generate_policy", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith(f"/context/{context_id}")
+    with client.session_transaction() as session:
+        flashes = session.get("_flashes", [])
+    assert ("danger", "Application runtime is not ready. Update state before generating a policy.") in flashes
+
+
+def test_context_system_refresh_redirects_back_to_context(client, monkeypatch):
+    context_id = str(ObjectId())
+    monkeypatch.setattr(
+        routes_module,
+        "refresh_system_state",
+        lambda: {"success": True, "status": {"status": "ready"}},
+    )
+
+    response = client.post(f"/context/{context_id}/system/refresh", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith(f"/context/{context_id}")
+    with client.session_transaction() as session:
+        flashes = session.get("_flashes", [])
+    assert ("success", "System state refreshed successfully.") in flashes
 
 
 def test_get_diagnostics_route_returns_document(client, monkeypatch):
@@ -232,6 +460,11 @@ def test_get_diagnostics_route_returns_404_when_missing(client, monkeypatch):
 
 def test_dashboard_route_adds_security_headers(client, monkeypatch):
     monkeypatch.setattr(routes_module.mongo, "db", FakeDB(), raising=False)
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
 
     response = client.get("/")
 

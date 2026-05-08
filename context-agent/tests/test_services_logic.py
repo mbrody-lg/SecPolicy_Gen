@@ -60,6 +60,7 @@ class FakeResponse:
     def __init__(self, payload, status_code=200):
         self._payload = payload
         self.status_code = status_code
+        self.content = b"{}"
 
     def raise_for_status(self):
         if self.status_code >= 400:
@@ -216,6 +217,152 @@ def test_get_readiness_status_reports_mongo_failure(app_context, monkeypatch):
             "config": {"status": "ok", "missing": []},
             "mongo": {"status": "error", "reason": "ping_failed"},
         },
+    }
+
+
+def test_get_system_status_aggregates_services_and_rag(app_context, monkeypatch):
+    def fake_get(url, timeout):
+        if url.endswith("/rag/status"):
+            return FakeResponse(
+                {
+                    "status": "not_ready",
+                    "rag": {
+                        "status": "requires_refresh",
+                        "missing_collections": ["normativa"],
+                    },
+                },
+                503,
+            )
+        return FakeResponse({"status": "ready", "checks": {"config": {"status": "ok"}}}, 200)
+
+    monkeypatch.setattr(logic.requests, "get", fake_get)
+    monkeypatch.setattr(
+        logic,
+        "get_readiness_status",
+        lambda: {"status": "ready", "checks": {"mongo": {"status": "ok"}}},
+    )
+
+    result = logic.get_system_status()
+
+    assert result["status"] == "not_ready"
+    assert [service["service"] for service in result["services"]] == [
+        "context-agent",
+        "policy-agent",
+        "validator-agent",
+    ]
+    assert result["rag"]["status"] == "requires_refresh"
+
+
+def test_service_endpoint_status_reports_unreachable(monkeypatch):
+    def fake_get(url, timeout):
+        raise requests.exceptions.Timeout("timed out")
+
+    monkeypatch.setattr(logic.requests, "get", fake_get)
+
+    result = logic._service_endpoint_status("policy-agent", "http://policy-agent:5000")
+
+    assert result == {
+        "service": "policy-agent",
+        "status": "unreachable",
+        "status_code": None,
+        "checks": {},
+    }
+
+
+def test_get_system_status_returns_ready_when_services_and_rag_are_ready(app_context, monkeypatch):
+    def fake_get(url, timeout):
+        if url.endswith("/rag/status"):
+            return FakeResponse(
+                {
+                    "status": "ready",
+                    "rag": {
+                        "status": "ready",
+                        "missing_collections": [],
+                    },
+                },
+                200,
+            )
+        return FakeResponse({"status": "ready", "checks": {"config": {"status": "ok"}}}, 200)
+
+    monkeypatch.setattr(logic.requests, "get", fake_get)
+    monkeypatch.setattr(
+        logic,
+        "get_readiness_status",
+        lambda: {"status": "ready", "checks": {"mongo": {"status": "ok"}}},
+    )
+
+    result = logic.get_system_status()
+
+    assert result["status"] == "ready"
+    assert all(service["status"] == "ready" for service in result["services"])
+    assert result["rag"]["status"] == "ready"
+
+
+def test_refresh_system_state_calls_policy_rag_refresh(app_context, monkeypatch):
+    calls = []
+
+    def fake_post(url, timeout):
+        calls.append((url, timeout))
+        return FakeResponse({"success": True, "stage": "rag_refresh"}, 200)
+
+    monkeypatch.setattr(logic.requests, "post", fake_post)
+    monkeypatch.setattr(
+        logic,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
+
+    result = logic.refresh_system_state()
+
+    assert result["success"] is True
+    assert calls[0][0].endswith("/rag/refresh")
+    assert result["status"]["status"] == "ready"
+
+
+def test_refresh_system_state_reports_policy_refresh_failure(app_context, monkeypatch):
+    def fake_post(url, timeout):
+        return FakeResponse(
+            {
+                "success": False,
+                "error_code": "rag_refresh_disabled",
+                "message": "RAG refresh is disabled for this runtime.",
+            },
+            403,
+        )
+
+    monkeypatch.setattr(logic.requests, "post", fake_post)
+    monkeypatch.setattr(
+        logic,
+        "get_system_status",
+        lambda: {"status": "not_ready", "services": [], "rag": {"status": "requires_refresh"}},
+    )
+
+    result = logic.refresh_system_state()
+
+    assert result["success"] is False
+    assert result["status_code"] == 403
+    assert result["response"]["error_code"] == "rag_refresh_disabled"
+    assert result["status"]["status"] == "not_ready"
+
+
+def test_refresh_system_state_handles_unreachable_policy_agent(app_context, monkeypatch):
+    def fake_post(url, timeout):
+        raise requests.exceptions.ConnectionError("policy-agent unavailable")
+
+    monkeypatch.setattr(logic.requests, "post", fake_post)
+    monkeypatch.setattr(
+        logic,
+        "get_system_status",
+        lambda: {"status": "not_ready", "services": [], "rag": {"status": "unknown"}},
+    )
+
+    result = logic.refresh_system_state()
+
+    assert result == {
+        "success": False,
+        "error_code": "policy_agent_unreachable",
+        "message": "Policy agent is unreachable.",
+        "status": {"status": "not_ready", "services": [], "rag": {"status": "unknown"}},
     }
 
 
