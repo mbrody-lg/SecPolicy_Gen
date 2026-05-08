@@ -3,6 +3,52 @@
 <div class="max-w-4xl mx-auto mt-6">
   <h2 class="text-2xl font-bold mb-4">Generated contexts</h2>
 
+  {% if system_status %}
+    {% set rag = system_status.rag %}
+    <section class="mb-6 bg-white shadow rounded p-4">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div>
+          <h3 class="text-lg font-semibold">Application readiness</h3>
+          <p class="text-sm text-gray-600">Service health and RAG index state</p>
+        </div>
+        <form method="post" action="{{ url_for('main.system_refresh') }}">
+          <button type="submit" class="bg-slate-800 text-white px-3 py-2 rounded hover:bg-slate-700">
+            Update state
+          </button>
+        </form>
+      </div>
+
+      <div class="grid gap-3 md:grid-cols-4">
+        {% for service in system_status.services %}
+          {% set ready = service.status == 'ready' %}
+          <div class="border rounded p-3 {% if ready %}border-green-200 bg-green-50{% else %}border-red-200 bg-red-50{% endif %}">
+            <div class="text-sm font-semibold">{{ service.service }}</div>
+            <div class="text-xs uppercase tracking-wide {% if ready %}text-green-700{% else %}text-red-700{% endif %}">
+              {{ service.status }}
+            </div>
+          </div>
+        {% endfor %}
+        {% set rag_ready = rag.status == 'ready' %}
+        <div class="border rounded p-3 {% if rag_ready %}border-green-200 bg-green-50{% else %}border-amber-200 bg-amber-50{% endif %}">
+          <div class="text-sm font-semibold">policy-agent RAG</div>
+          <div class="text-xs uppercase tracking-wide {% if rag_ready %}text-green-700{% else %}text-amber-700{% endif %}">
+            {{ rag.status }}
+          </div>
+          {% if rag.missing_collections %}
+            <div class="mt-2 text-xs text-gray-700">
+              Missing: {{ rag.missing_collections | join(', ') }}
+            </div>
+          {% endif %}
+          {% if rag.refresh_job %}
+            <div class="mt-2 text-xs text-gray-700">
+              Refresh: {{ rag.refresh_job.status }}
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </section>
+  {% endif %}
+
   <form method="get" action="{{ url_for('main.index') }}" class="mb-4 flex flex-wrap gap-4 items-end">
     <div>
       <label class="block text-sm font-medium">Filter by status:</label>

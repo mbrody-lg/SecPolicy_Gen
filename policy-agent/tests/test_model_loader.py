@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock, patch
+import inspect
 
 import pytest
 
@@ -40,6 +41,8 @@ def test_local_embedding_function_uses_preloaded_model():
     result = embedding_fn(["doc one", "doc two"])
 
     assert result == [[0.1, 0.2], [0.3, 0.4]]
+    assert embedding_fn.name() == "local_sentence_transformer"
+    assert list(inspect.signature(embedding_fn.__call__).parameters) == ["input"]
     model.encode.assert_called_once_with(
         ["doc one", "doc two"],
         normalize_embeddings=True,

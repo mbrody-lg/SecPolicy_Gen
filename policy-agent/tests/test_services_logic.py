@@ -300,6 +300,461 @@ def test_get_readiness_status_reads_yaml_style_chroma_vector_entry(app, monkeypa
     }
 
 
+def test_get_rag_runtime_status_reports_missing_collections(app, monkeypatch):
+    class FakeCollection:
+        def __init__(self, name):
+            self.name = name
+
+    class FakeChromaClient:
+        def heartbeat(self):
+            return 1
+
+        def list_collections(self):
+            return [FakeCollection("normativa")]
+
+    monkeypatch.setattr(
+        logic,
+        "load_policy_config",
+        lambda: {
+            "roles": [
+                {
+                    "vector": [
+                        {
+                            "chroma": {
+                                "collection": ["normativa", "guia"],
+                                "model": "intfloat/e5-base",
+                            }
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(logic, "_get_chroma_http_client", lambda: FakeChromaClient())
+
+    with app.app_context():
+        payload, status_code = logic.get_rag_runtime_status()
+
+    assert status_code == 503
+    assert payload["rag"]["status"] == "requires_refresh"
+    assert payload["rag"]["missing_collections"] == ["guia"]
+
+
+def test_get_rag_runtime_status_reports_ready_when_all_collections_exist(app, monkeypatch):
+    class FakeCollection:
+        def __init__(self, name):
+            self.name = name
+
+    class FakeChromaClient:
+        def heartbeat(self):
+            return 1
+
+        def list_collections(self):
+            return [FakeCollection("normativa"), "guia"]
+
+    monkeypatch.setattr(
+        logic,
+        "load_policy_config",
+        lambda: {
+            "roles": [
+                {
+                    "vector": [
+                        {
+                            "chroma": {
+                                "collection": ["normativa", "guia"],
+                                "model": "intfloat/e5-base",
+                            }
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(logic, "_get_chroma_http_client", lambda: FakeChromaClient())
+    monkeypatch.setattr(logic, "is_model_cached", lambda model_id: True)
+    monkeypatch.setattr(logic, "has_safetensors_weights", lambda model_id: True)
+    monkeypatch.setattr(
+        logic,
+        "_chroma_collection_runtime_checks",
+        lambda config, client, configured_collections: [
+            {"collection": name, "status": "ready"} for name in configured_collections
+        ],
+    )
+    monkeypatch.setattr(logic, "_RAG_REFRESH_JOB", None)
+
+    with app.app_context():
+        payload, status_code = logic.get_rag_runtime_status()
+
+    assert status_code == 200
+    assert payload["status"] == "ready"
+    assert payload["rag"]["status"] == "ready"
+    assert payload["rag"]["configured_collections"] == ["normativa", "guia"]
+    assert payload["rag"]["available_collections"] == ["guia", "normativa"]
+    assert payload["rag"]["missing_collections"] == []
+    assert payload["rag"]["embedding_models"] == [
+        {
+            "model": "intfloat/e5-base",
+            "revision": None,
+            "status": "ready",
+        }
+    ]
+    assert payload["rag"]["collection_checks"] == [
+        {"collection": "normativa", "status": "ready"},
+        {"collection": "guia", "status": "ready"},
+    ]
+    assert payload["rag"]["action"] == "none"
+
+
+def test_get_rag_runtime_status_requires_refresh_when_collection_embedding_is_incompatible(app, monkeypatch):
+    class FakeChromaClient:
+        def heartbeat(self):
+            return 1
+
+        def list_collections(self):
+            return ["normativa"]
+
+    monkeypatch.setattr(
+        logic,
+        "load_policy_config",
+        lambda: {
+            "roles": [
+                {
+                    "vector": [
+                        {
+                            "chroma": "Chroma Vector Database",
+                            "collection": ["normativa"],
+                            "model": "intfloat/multilingual-e5-base",
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(logic, "_get_chroma_http_client", lambda: FakeChromaClient())
+    monkeypatch.setattr(logic, "is_model_cached", lambda model_id: True)
+    monkeypatch.setattr(logic, "has_safetensors_weights", lambda model_id: True)
+    monkeypatch.setattr(
+        logic,
+        "_chroma_collection_runtime_checks",
+        lambda config, client, configured_collections: [
+            {
+                "collection": "normativa",
+                "status": "error",
+                "reason": "collection_embedding_incompatible",
+            }
+        ],
+    )
+    monkeypatch.setattr(logic, "_RAG_REFRESH_JOB", None)
+
+    with app.app_context():
+        payload, status_code = logic.get_rag_runtime_status()
+
+    assert status_code == 503
+    assert payload["rag"]["status"] == "requires_refresh"
+    assert payload["rag"]["collection_checks"] == [
+        {
+            "collection": "normativa",
+            "status": "error",
+            "reason": "collection_embedding_incompatible",
+        }
+    ]
+    assert payload["rag"]["action"] == "index_pdfs_to_chroma"
+
+
+def test_get_rag_runtime_status_requires_refresh_when_embedding_model_is_missing(app, monkeypatch):
+    class FakeChromaClient:
+        def heartbeat(self):
+            return 1
+
+        def list_collections(self):
+            return ["normativa"]
+
+    monkeypatch.setattr(
+        logic,
+        "load_policy_config",
+        lambda: {
+            "roles": [
+                {
+                    "vector": [
+                        {
+                            "chroma": "Chroma Vector Database",
+                            "collection": ["normativa"],
+                            "model": "intfloat/multilingual-e5-base",
+                            "revision": "rev-1",
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(logic, "_get_chroma_http_client", lambda: FakeChromaClient())
+    monkeypatch.setattr(logic, "is_model_cached", lambda model_id: False)
+
+    with app.app_context():
+        payload, status_code = logic.get_rag_runtime_status()
+
+    assert status_code == 503
+    assert payload["rag"]["status"] == "requires_refresh"
+    assert payload["rag"]["missing_collections"] == []
+    assert payload["rag"]["embedding_models"] == [
+        {
+            "model": "intfloat/multilingual-e5-base",
+            "revision": "rev-1",
+            "status": "missing",
+            "reason": "not_cached",
+        }
+    ]
+    assert payload["rag"]["action"] == "index_pdfs_to_chroma"
+
+
+def test_get_rag_runtime_status_requires_refresh_while_refresh_job_is_running(app, monkeypatch):
+    class FakeChromaClient:
+        def heartbeat(self):
+            return 1
+
+        def list_collections(self):
+            return ["normativa"]
+
+    monkeypatch.setattr(
+        logic,
+        "load_policy_config",
+        lambda: {
+            "roles": [
+                {
+                    "vector": [
+                        {
+                            "chroma": "Chroma Vector Database",
+                            "collection": ["normativa"],
+                            "model": "intfloat/multilingual-e5-base",
+                            "revision": "rev-1",
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(logic, "_get_chroma_http_client", lambda: FakeChromaClient())
+    monkeypatch.setattr(logic, "is_model_cached", lambda model_id: True)
+    monkeypatch.setattr(logic, "has_safetensors_weights", lambda model_id: True)
+    monkeypatch.setattr(
+        logic,
+        "_RAG_REFRESH_JOB",
+        {
+            "id": "job-1",
+            "status": "running",
+            "started_at": "2026-05-08T00:00:00+00:00",
+        },
+    )
+
+    with app.app_context():
+        payload, status_code = logic.get_rag_runtime_status()
+
+    assert status_code == 503
+    assert payload["rag"]["status"] == "requires_refresh"
+    assert payload["rag"]["action"] == "wait_for_refresh"
+    assert payload["rag"]["refresh_job"]["status"] == "running"
+
+
+def test_get_rag_runtime_status_handles_chroma_error(app, monkeypatch):
+    class FailingChromaClient:
+        def heartbeat(self):
+            return 1
+
+        def list_collections(self):
+            raise RuntimeError("chroma unavailable")
+
+    monkeypatch.setattr(
+        logic,
+        "load_policy_config",
+        lambda: {
+            "roles": [
+                {
+                    "vector": [
+                        {
+                            "chroma": {
+                                "collection": ["normativa"],
+                            }
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(logic, "_get_chroma_http_client", lambda: FailingChromaClient())
+
+    with app.app_context():
+        payload, status_code = logic.get_rag_runtime_status()
+
+    assert status_code == 503
+    assert payload == {
+        "status": "not_ready",
+        "service": "policy-agent",
+        "rag": {
+            "status": "error",
+            "reason": "rag_status_unavailable",
+        },
+    }
+
+
+def test_refresh_rag_runtime_rejects_when_disabled(app, monkeypatch):
+    monkeypatch.delenv("POLICY_AGENT_ALLOW_RAG_REFRESH", raising=False)
+    monkeypatch.setattr(logic, "_RAG_REFRESH_JOB", None)
+
+    with app.app_context():
+        payload, status_code = logic.refresh_rag_runtime()
+
+    assert status_code == 403
+    assert payload["error_code"] == "rag_refresh_disabled"
+
+
+def test_refresh_rag_runtime_returns_existing_running_job(app, monkeypatch):
+    running_job = {
+        "id": "job-running",
+        "status": "running",
+        "started_at": "2026-05-08T00:00:00+00:00",
+    }
+
+    class FailingThread:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("refresh_rag_runtime must not start another thread")
+
+    monkeypatch.setenv("POLICY_AGENT_ALLOW_RAG_REFRESH", "1")
+    monkeypatch.setattr(logic, "_RAG_REFRESH_JOB", running_job)
+    monkeypatch.setattr(logic.threading, "Thread", FailingThread)
+
+    with app.app_context():
+        payload, status_code = logic.refresh_rag_runtime()
+
+    assert status_code == 202
+    assert payload["success"] is True
+    assert payload["message"] == "RAG refresh is already running."
+    assert payload["job"] == running_job
+
+
+def test_run_rag_refresh_command_uses_fixed_index_command(app, monkeypatch):
+    captured = {}
+
+    class Completed:
+        returncode = 0
+        stdout = "indexed"
+        stderr = ""
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return Completed()
+
+    monkeypatch.setenv("POLICY_AGENT_ALLOW_RAG_REFRESH", "1")
+    monkeypatch.setattr(logic.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        logic,
+        "get_rag_runtime_status",
+        lambda: ({"status": "ready", "rag": {"status": "ready"}}, 200),
+    )
+
+    with app.app_context():
+        payload = logic._run_rag_refresh_command()
+
+    assert payload["success"] is True
+    assert captured["command"][-1] == "scripts/index_pdfs_to_chroma.py"
+    assert captured["kwargs"]["check"] is False
+
+
+def test_run_rag_refresh_command_reports_failed_process(app, monkeypatch):
+    class Completed:
+        returncode = 2
+        stdout = "indexed before failure"
+        stderr = "chroma write failed"
+
+    monkeypatch.setenv("POLICY_AGENT_ALLOW_RAG_REFRESH", "1")
+    monkeypatch.setattr(logic.subprocess, "run", lambda *args, **kwargs: Completed())
+
+    with app.app_context():
+        payload = logic._run_rag_refresh_command()
+
+    assert payload["success"] is False
+    assert payload["error_code"] == "rag_refresh_failed"
+    assert payload["details"] == {
+        "return_code": 2,
+        "stdout": "indexed before failure",
+        "stderr": "chroma write failed",
+    }
+
+
+def test_refresh_rag_runtime_starts_background_job(app, monkeypatch):
+    captured = {}
+
+    class FakeThread:
+        def __init__(self, target, args, daemon):
+            captured["target"] = target
+            captured["args"] = args
+            captured["daemon"] = daemon
+
+        def start(self):
+            captured["started"] = True
+
+    monkeypatch.setenv("POLICY_AGENT_ALLOW_RAG_REFRESH", "1")
+    monkeypatch.setattr(logic.threading, "Thread", FakeThread)
+    monkeypatch.setattr(logic, "_RAG_REFRESH_JOB", None)
+
+    with app.app_context():
+        payload, status_code = logic.refresh_rag_runtime()
+
+    assert status_code == 202
+    assert payload["success"] is True
+    assert payload["job"]["status"] == "running"
+    assert captured["daemon"] is True
+    assert captured["started"] is True
+
+
+def test_run_rag_refresh_job_updates_job_result_on_success(app, monkeypatch):
+    monkeypatch.setattr(
+        logic,
+        "_RAG_REFRESH_JOB",
+        {
+            "id": "job-1",
+            "status": "running",
+            "started_at": "2026-05-08T00:00:00+00:00",
+        },
+    )
+    monkeypatch.setattr(
+        logic,
+        "_run_rag_refresh_command",
+        lambda: {"success": True, "stage": "rag_refresh"},
+    )
+
+    logic._run_rag_refresh_job("job-1", app)
+
+    job = logic.get_rag_refresh_job_status()
+    assert job["status"] == "completed"
+    assert job["completed_at"]
+    assert job["result"] == {"success": True, "stage": "rag_refresh"}
+
+
+def test_run_rag_refresh_job_updates_job_result_on_failure(app, monkeypatch):
+    monkeypatch.setattr(
+        logic,
+        "_RAG_REFRESH_JOB",
+        {
+            "id": "job-1",
+            "status": "running",
+            "started_at": "2026-05-08T00:00:00+00:00",
+        },
+    )
+    monkeypatch.setattr(
+        logic,
+        "_run_rag_refresh_command",
+        lambda: {"success": False, "error_code": "rag_refresh_failed"},
+    )
+
+    logic._run_rag_refresh_job("job-1", app)
+
+    job = logic.get_rag_refresh_job_status()
+    assert job["status"] == "failed"
+    assert job["completed_at"]
+    assert job["result"] == {"success": False, "error_code": "rag_refresh_failed"}
+
+
 def test_run_generation_pipeline_rejects_invalid_json_body(app_context):
     result = logic.run_generation_pipeline(None)
 

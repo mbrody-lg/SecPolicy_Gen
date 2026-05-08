@@ -26,7 +26,7 @@ class ChromaVectorClient(VectorClient):
     def load_collection(self, name: str):
         """Load an existing Chroma collection by name."""
         try:
-            self.collection = self.client.get_collection(name)
+            self.collection = self.client.get_collection(name, embedding_function=self.embedding_fn)
             return self.collection
         except chromadb.errors.NotFoundError:
             log_event(

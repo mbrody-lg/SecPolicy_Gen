@@ -2,7 +2,12 @@
 
 import logging
 import os
+import subprocess
+import sys
+import threading
+import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 import yaml
 from flask import current_app
@@ -10,6 +15,12 @@ from flask import current_app
 from app import CORRELATION_ID_HEADER, get_request_correlation_id, mongo
 from app.agents.factory import create_agent_from_config
 from app.agents.vector.chroma.config import get_chroma_host, get_chroma_port
+from app.agents.vector.model_loader import (
+    LocalSentenceTransformerEmbeddingFunction,
+    has_safetensors_weights,
+    is_model_cached,
+    load_model,
+)
 from app.observability import build_log_event, log_event
 from app.rag.context import build_retrieval_context
 from app.rag.planner import build_retrieval_plan
@@ -44,6 +55,9 @@ MAX_FEEDBACK_ITEM_LENGTH = 1000
 
 logger = logging.getLogger(__name__)
 SERVICE_NAME = "policy-agent"
+RAG_REFRESH_OUTPUT_LIMIT = 4000
+_RAG_REFRESH_LOCK = threading.Lock()
+_RAG_REFRESH_JOB: dict | None = None
 
 
 class PipelineStepError(Exception):
@@ -352,6 +366,309 @@ def _check_live_chroma() -> None:
     if not callable(heartbeat):
         raise RuntimeError("Chroma client does not expose heartbeat.")
     heartbeat()
+
+
+def _configured_chroma_collections(config: dict | None = None) -> list[str]:
+    """Return configured Chroma collection names from policy-agent config."""
+    chroma_entries = _collect_chroma_vector_entries(config or load_policy_config())
+    collections: list[str] = []
+    for entry in chroma_entries:
+        configured = entry.get("collection", [])
+        if isinstance(configured, list):
+            collections.extend(str(name) for name in configured if str(name).strip())
+    return collections
+
+
+def _configured_embedding_models(config: dict | None = None) -> list[dict]:
+    """Return unique embedding models configured for Chroma-backed retrieval."""
+    chroma_entries = _collect_chroma_vector_entries(config or load_policy_config())
+    models: list[dict] = []
+    seen: set[tuple[str, str | None]] = set()
+    for entry in chroma_entries:
+        model = str(entry.get("model", "")).strip()
+        if not model:
+            continue
+        revision = entry.get("revision")
+        key = (model, str(revision) if revision is not None else None)
+        if key in seen:
+            continue
+        seen.add(key)
+        models.append({"model": key[0], "revision": key[1]})
+    return models
+
+
+def _embedding_model_runtime_status(configured_models: list[dict]) -> list[dict]:
+    """Report local cache readiness for configured embedding models without downloading."""
+    statuses = []
+    for model_config in configured_models:
+        model = model_config["model"]
+        status = {
+            "model": model,
+            "revision": model_config.get("revision"),
+        }
+        try:
+            if not is_model_cached(model):
+                status.update({"status": "missing", "reason": "not_cached"})
+            elif not has_safetensors_weights(model):
+                status.update({"status": "error", "reason": "missing_safetensors"})
+            else:
+                status.update({"status": "ready"})
+        except Exception:
+            status.update({"status": "error", "reason": "model_cache_unavailable"})
+        statuses.append(status)
+    return statuses
+
+
+def _chroma_collection_runtime_checks(config: dict, client, configured_collections: list[str]) -> list[dict]:
+    """Probe collection query compatibility with the configured embedding function."""
+    checks: list[dict] = []
+    model_cache: dict[tuple[str, str | None], object] = {}
+    collection_models: dict[str, tuple[str, str | None]] = {}
+
+    for entry in _collect_chroma_vector_entries(config):
+        model = str(entry.get("model", "")).strip()
+        if not model:
+            continue
+        revision = entry.get("revision")
+        model_key = (model, str(revision) if revision is not None else None)
+        for collection in entry.get("collection", []):
+            collection_models.setdefault(str(collection), model_key)
+
+    for collection in configured_collections:
+        model_key = collection_models.get(collection)
+        if not model_key:
+            checks.append(
+                {
+                    "collection": collection,
+                    "status": "error",
+                    "reason": "missing_embedding_model",
+                }
+            )
+            continue
+
+        try:
+            model = model_cache.get(model_key)
+            if model is None:
+                model = load_model(model_key[0], revision=model_key[1])
+                model_cache[model_key] = model
+            embedding_fn = LocalSentenceTransformerEmbeddingFunction(model)
+            chroma_collection = client.get_collection(collection, embedding_function=embedding_fn)
+            chroma_collection.query(query_texts=["readiness probe"], n_results=1, include=["distances"])
+            checks.append({"collection": collection, "status": "ready"})
+        except Exception:
+            checks.append(
+                {
+                    "collection": collection,
+                    "status": "error",
+                    "reason": "collection_embedding_incompatible",
+                }
+            )
+
+    return checks
+
+
+def _collection_name(collection) -> str | None:
+    """Normalize Chroma list_collections entries across client versions."""
+    if isinstance(collection, str):
+        return collection
+    name = getattr(collection, "name", None)
+    return str(name) if name else None
+
+
+def get_rag_runtime_status() -> tuple[dict, int]:
+    """Return RAG runtime status, including missing configured Chroma collections."""
+    try:
+        config = load_policy_config()
+        configured_collections = _configured_chroma_collections(config)
+        configured_models = _configured_embedding_models(config)
+        embedding_models = _embedding_model_runtime_status(configured_models)
+        client = _get_chroma_http_client()
+        heartbeat = getattr(client, "heartbeat", None)
+        if callable(heartbeat):
+            heartbeat()
+        available_collections = sorted(
+            name
+            for name in (_collection_name(collection) for collection in client.list_collections())
+            if name
+        )
+        missing_collections = [
+            name for name in configured_collections if name not in set(available_collections)
+        ]
+    except Exception:
+        return {
+            "status": "not_ready",
+            "service": SERVICE_NAME,
+            "rag": {
+                "status": "error",
+                "reason": "rag_status_unavailable",
+            },
+        }, 503
+
+    refresh_job = get_rag_refresh_job_status()
+    refresh_running = bool(refresh_job and refresh_job.get("status") == "running")
+    missing_models = [model for model in embedding_models if model.get("status") != "ready"]
+    collection_checks = []
+    if not missing_collections and not missing_models and not refresh_running:
+        collection_checks = _chroma_collection_runtime_checks(config, client, configured_collections)
+    incompatible_collections = [
+        check for check in collection_checks if check.get("status") != "ready"
+    ]
+    rag_status = (
+        "ready"
+        if not missing_collections and not missing_models and not refresh_running and not incompatible_collections
+        else "requires_refresh"
+    )
+    status_code = 200 if rag_status == "ready" else 503
+    return {
+        "status": "ready" if rag_status == "ready" else "not_ready",
+        "service": SERVICE_NAME,
+        "rag": {
+            "status": rag_status,
+            "configured_collections": configured_collections,
+            "available_collections": available_collections,
+            "missing_collections": missing_collections,
+            "embedding_models": embedding_models,
+            "collection_checks": collection_checks,
+            "action": "none" if rag_status == "ready" else "wait_for_refresh" if refresh_running else "index_pdfs_to_chroma",
+            "refresh_job": refresh_job,
+        },
+    }, status_code
+
+
+def _rag_refresh_enabled() -> bool:
+    return os.getenv("POLICY_AGENT_ALLOW_RAG_REFRESH", "0").strip().lower() in {"1", "true", "yes"}
+
+
+def _rag_refresh_timeout_seconds() -> int:
+    raw_value = os.getenv("POLICY_AGENT_RAG_REFRESH_TIMEOUT_SECONDS", "900").strip()
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return 900
+    return min(max(value, 30), 3600)
+
+
+def _run_rag_refresh_command() -> dict:
+    """Run the fixed RAG indexing command and return a bounded result payload."""
+    service_root = Path(current_app.root_path).parent
+    command = [sys.executable, "scripts/index_pdfs_to_chroma.py"]
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=service_root,
+            capture_output=True,
+            text=True,
+            timeout=_rag_refresh_timeout_seconds(),
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "success": False,
+            "error_type": "runtime_error",
+            "error_code": "rag_refresh_timeout",
+            "message": "RAG refresh timed out.",
+            "details": {"timeout_seconds": _rag_refresh_timeout_seconds()},
+        }
+    except Exception:
+        return {
+            "success": False,
+            "error_type": "runtime_error",
+            "error_code": "rag_refresh_failed_to_start",
+            "message": "RAG refresh could not be started.",
+            "details": {},
+        }
+
+    output = (completed.stdout or "")[-RAG_REFRESH_OUTPUT_LIMIT:]
+    error_output = (completed.stderr or "")[-RAG_REFRESH_OUTPUT_LIMIT:]
+    if completed.returncode != 0:
+        return {
+            "success": False,
+            "error_type": "runtime_error",
+            "error_code": "rag_refresh_failed",
+            "message": "RAG refresh finished with errors.",
+            "details": {
+                "return_code": completed.returncode,
+                "stdout": output,
+                "stderr": error_output,
+            },
+        }
+
+    status_payload, _ = get_rag_runtime_status()
+    return {
+        "success": True,
+        "stage": "rag_refresh",
+        "message": "RAG refresh completed.",
+        "details": {
+            "return_code": completed.returncode,
+            "stdout": output,
+            "stderr": error_output,
+        },
+        "status": status_payload,
+    }
+
+
+def get_rag_refresh_job_status() -> dict | None:
+    """Return the latest in-memory RAG refresh job status."""
+    with _RAG_REFRESH_LOCK:
+        return dict(_RAG_REFRESH_JOB) if _RAG_REFRESH_JOB else None
+
+
+def _run_rag_refresh_job(job_id: str, app) -> None:
+    global _RAG_REFRESH_JOB
+    with app.app_context():
+        result = _run_rag_refresh_command()
+    with _RAG_REFRESH_LOCK:
+        if _RAG_REFRESH_JOB and _RAG_REFRESH_JOB.get("id") == job_id:
+            _RAG_REFRESH_JOB.update(
+                {
+                    "status": "completed" if result.get("success") else "failed",
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                    "result": result,
+                }
+            )
+
+
+def refresh_rag_runtime() -> tuple[dict, int]:
+    """Start the fixed RAG indexing command as a local background job when enabled."""
+    global _RAG_REFRESH_JOB
+    if not _rag_refresh_enabled():
+        return {
+            "success": False,
+            "error_type": "authorization_error",
+            "error_code": "rag_refresh_disabled",
+            "message": "RAG refresh is disabled for this runtime.",
+            "details": {"env": "POLICY_AGENT_ALLOW_RAG_REFRESH"},
+        }, 403
+
+    with _RAG_REFRESH_LOCK:
+        if _RAG_REFRESH_JOB and _RAG_REFRESH_JOB.get("status") == "running":
+            return {
+                "success": True,
+                "stage": "rag_refresh",
+                "message": "RAG refresh is already running.",
+                "job": dict(_RAG_REFRESH_JOB),
+            }, 202
+
+        job_id = str(uuid.uuid4())
+        _RAG_REFRESH_JOB = {
+            "id": job_id,
+            "status": "running",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    thread = threading.Thread(
+        target=_run_rag_refresh_job,
+        args=(job_id, current_app._get_current_object()),
+        daemon=True,
+    )
+    thread.start()
+
+    return {
+        "success": True,
+        "stage": "rag_refresh",
+        "message": "RAG refresh started.",
+        "job": get_rag_refresh_job_status(),
+    }, 202
 
 
 def get_readiness_status() -> tuple[dict, int]:

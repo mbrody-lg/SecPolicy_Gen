@@ -133,9 +133,13 @@ class LocalSentenceTransformerEmbeddingFunction:
         self.model = model
         self.normalize_embeddings = normalize_embeddings
 
-    def __call__(self, input_texts: Iterable[str]):
+    def name(self) -> str:
+        """Return a stable Chroma embedding function identifier."""
+        return "local_sentence_transformer"
+
+    def __call__(self, input: Iterable[str]):
         embeddings = self.model.encode(
-            list(input_texts),
+            list(input),
             normalize_embeddings=self.normalize_embeddings,
         )
         return embeddings.tolist() if hasattr(embeddings, "tolist") else embeddings

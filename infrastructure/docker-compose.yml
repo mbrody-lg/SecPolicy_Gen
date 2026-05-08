@@ -49,7 +49,7 @@ services:
       - VALIDATOR_AGENT_TIMEOUT_SECONDS=${VALIDATOR_AGENT_TIMEOUT_SECONDS:-30}
       - MAX_CONTENT_LENGTH=${MAX_CONTENT_LENGTH:-262144}
       - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
-      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-localhost,context-agent,policy-agent,validator-agent}
+      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-localhost,127.0.0.1,context-agent,policy-agent,validator-agent}
       - CONFIG_PATH=/context-agent/app/config/context_agent.yaml
       - QUESTIONS_CONFIG_PATH=/context-agent/app/config/context_questions.yaml
     depends_on:
@@ -85,10 +85,12 @@ services:
       - CHROMA_PORT=${CHROMA_PORT}
       - CHROMA_READINESS_MODE=${CHROMA_READINESS_MODE:-live}
       - RAG_VALIDATE_CHROMA=${RAG_VALIDATE_CHROMA:-false}
+      - POLICY_AGENT_ALLOW_RAG_REFRESH=${POLICY_AGENT_ALLOW_RAG_REFRESH:-true}
+      - POLICY_AGENT_RAG_REFRESH_TIMEOUT_SECONDS=${POLICY_AGENT_RAG_REFRESH_TIMEOUT_SECONDS:-900}
       - POLICY_AGENT_ALLOW_MODEL_DOWNLOAD=${POLICY_AGENT_ALLOW_MODEL_DOWNLOAD:-0}
       - MAX_CONTENT_LENGTH=${MAX_CONTENT_LENGTH:-262144}
       - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
-      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-localhost,context-agent,policy-agent,validator-agent}
+      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-localhost,127.0.0.1,context-agent,policy-agent,validator-agent}
       - RAG_SOURCES_PATH=/policy-agent/app/config/rag_sources.yaml
       - CONFIG_PATH=/policy-agent/app/config/policy_agent.yaml
     depends_on:
@@ -126,7 +128,7 @@ services:
       - POLICY_AGENT_TIMEOUT_SECONDS=${POLICY_AGENT_TIMEOUT_SECONDS:-30}
       - MAX_CONTENT_LENGTH=${MAX_CONTENT_LENGTH:-262144}
       - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
-      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-localhost,context-agent,policy-agent,validator-agent}
+      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-localhost,127.0.0.1,context-agent,policy-agent,validator-agent}
       - CONFIG_PATH=/validator-agent/app/config/validator_agent.yaml
     volumes:
       - ../validator-agent:/validator-agent

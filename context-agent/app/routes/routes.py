@@ -9,8 +9,10 @@ from app import mongo
 from app.services.logic import (
     PipelineStepError,
     get_health_status,
+    get_system_status,
     get_pipeline_diagnostic,
     get_readiness_status,
+    refresh_system_state,
     generate_context_prompt,
     run_with_agent,
     load_questions,
@@ -41,6 +43,31 @@ def ready():
     payload = get_readiness_status()
     status_code = 200 if payload.get("status") == "ready" else 503
     return jsonify(payload), status_code
+
+
+@main.route("/system/status", methods=["GET"])
+def system_status():
+    """Return aggregated application readiness for the frontend."""
+    payload = get_system_status()
+    status_code = 200 if payload.get("status") == "ready" else 503
+    return jsonify(payload), status_code
+
+
+@main.route("/system/refresh", methods=["POST"])
+def system_refresh():
+    """Attempt controlled local maintenance actions and return to dashboard."""
+    _flash_system_refresh_result(refresh_system_state())
+    return redirect(url_for("main.index"))
+
+
+def _flash_system_refresh_result(result: dict) -> None:
+    """Flash a concise status message for controlled maintenance actions."""
+    if result.get("success"):
+        flash("System state refreshed successfully.", "success")
+    else:
+        message = result.get("response", {}).get("message") or result.get("message") or "System refresh did not complete."
+        flash(message, "danger")
+
 
 @main.route("/")
 def index():
@@ -84,7 +111,8 @@ def index():
         per_page=per_page,
         total_count=total_count,
         status_filter=status_filter,
-        sort_order=sort_order
+        sort_order=sort_order,
+        system_status=get_system_status(),
     )
 
 @main.route("/create", methods=["GET", "POST"])
@@ -186,7 +214,8 @@ def context_detail(context_id):
     return render_template(
         "context_detail.html",
         context=context,
-        interactions=interactions
+        interactions=interactions,
+        system_status=get_system_status(),
     )
 
 @main.route("/context/<context_id>/continue", methods=["POST"])
@@ -296,11 +325,23 @@ def send_policy_to_context(context_id):
 @main.route("/context/<context_id>/generate_policy", methods=["POST"])
 def trigger_policy_generation(context_id):
     """Run end-to-end policy generation and validation for a context."""
+    system_status = get_system_status()
+    if system_status.get("status") != "ready":
+        flash("Application runtime is not ready. Update state before generating a policy.", "danger")
+        return redirect(url_for("main.context_detail", context_id=context_id))
+
     result = generate_full_policy_pipeline(context_id)
     if result.get("success"):
         flash("Policy successfully generated and validated.", "success")
     else:
         flash(_pipeline_flash_message(result), "danger")
+    return redirect(url_for("main.context_detail", context_id=context_id))
+
+
+@main.route("/context/<context_id>/system/refresh", methods=["POST"])
+def context_system_refresh(context_id):
+    """Attempt controlled local maintenance actions and return to the context detail."""
+    _flash_system_refresh_result(refresh_system_state())
     return redirect(url_for("main.context_detail", context_id=context_id))
 
 

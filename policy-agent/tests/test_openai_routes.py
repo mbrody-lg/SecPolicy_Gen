@@ -68,6 +68,66 @@ def test_ready_route_reports_controlled_failure(client):
     assert "details" not in response.get_json()["checks"]["mongo"]
 
 
+def test_rag_status_route_reports_runtime_status(client):
+    with patch(
+        "app.routes.routes.get_rag_runtime_status",
+        return_value=(
+            {
+                "status": "not_ready",
+                "service": "policy-agent",
+                "rag": {
+                    "status": "requires_refresh",
+                    "missing_collections": ["normativa"],
+                },
+            },
+            503,
+        ),
+    ):
+        response = client.get("/rag/status")
+
+    assert response.status_code == 503
+    assert response.get_json()["rag"]["status"] == "requires_refresh"
+
+
+def test_rag_refresh_route_runs_controlled_refresh(client):
+    with patch(
+        "app.routes.routes.refresh_rag_runtime",
+        return_value=(
+            {
+                "success": True,
+                "stage": "rag_refresh",
+                "message": "RAG refresh started.",
+                "job": {"id": "job-1", "status": "running"},
+            },
+            202,
+        ),
+    ):
+        response = client.post("/rag/refresh")
+
+    assert response.status_code == 202
+    assert response.get_json()["job"] == {"id": "job-1", "status": "running"}
+
+
+def test_rag_refresh_route_reports_disabled_runtime(client):
+    with patch(
+        "app.routes.routes.refresh_rag_runtime",
+        return_value=(
+            {
+                "success": False,
+                "error_type": "authorization_error",
+                "error_code": "rag_refresh_disabled",
+                "message": "RAG refresh is disabled for this runtime.",
+                "details": {"env": "POLICY_AGENT_ALLOW_RAG_REFRESH"},
+            },
+            403,
+        ),
+    ):
+        response = client.post("/rag/refresh")
+
+    assert response.status_code == 403
+    assert response.get_json()["error_code"] == "rag_refresh_disabled"
+
+
 def test_generate_policy_route_rejects_missing_required_fields(client):
     with patch(
         "app.routes.routes.run_generation_pipeline",
