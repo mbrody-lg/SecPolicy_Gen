@@ -23,7 +23,7 @@ def health():
 def ready():
     """Return readiness checks for validator-agent dependencies."""
     result = get_readiness_status()
-    status_code = result.pop("status_code", 200)
+    status_code = 200 if result.get("status") == "ready" else 503
     return jsonify(result), status_code
 
 
