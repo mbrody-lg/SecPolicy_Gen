@@ -1,7 +1,10 @@
 """HTTP routes for policy generation and policy revision workflow."""
 
+import logging
+
 from flask import Blueprint, jsonify, request
 
+from app.observability import log_event
 from app.services.logic import (
     get_health_status,
     get_readiness_status,
@@ -13,6 +16,7 @@ from app.services.logic import (
 
 
 routes = Blueprint("routes", __name__)
+logger = logging.getLogger(__name__)
 
 
 @routes.route("/health", methods=["GET"])
@@ -25,7 +29,25 @@ def health():
 def ready():
     """Return readiness based on minimal safe dependency and config checks."""
     payload, status_code = get_readiness_status()
+    _log_readiness_response(payload, status_code)
     return jsonify(payload), status_code
+
+
+def _log_readiness_response(payload: dict, status_code: int) -> None:
+    """Emit a bounded structured event for readiness responses."""
+    is_ready = payload.get("status") == "ready"
+    log_event(
+        logger,
+        logging.INFO if is_ready else logging.WARNING,
+        event="readiness.route.completed",
+        stage="readiness",
+        route="/ready",
+        method="GET",
+        status_code=status_code,
+        result="success" if is_ready else "failure",
+        readiness_status=payload.get("status", "unknown"),
+        error_code=None if is_ready else "service_not_ready",
+    )
 
 
 @routes.route("/rag/status", methods=["GET"])

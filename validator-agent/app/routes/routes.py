@@ -24,7 +24,25 @@ def ready():
     """Return readiness checks for validator-agent dependencies."""
     result = get_readiness_status()
     status_code = result.pop("status_code", 200)
+    _log_readiness_response(result, status_code)
     return jsonify(result), status_code
+
+
+def _log_readiness_response(payload: dict, status_code: int) -> None:
+    """Emit a bounded structured event for readiness responses."""
+    is_ready = payload.get("status") == "ready"
+    log_event(
+        logger,
+        logging.INFO if is_ready else logging.WARNING,
+        event="readiness.route.completed",
+        stage="readiness",
+        route="/ready",
+        method="GET",
+        status_code=status_code,
+        result="success" if is_ready else "failure",
+        readiness_status=payload.get("status", "unknown"),
+        error_code=None if is_ready else "service_not_ready",
+    )
 
 
 @routes.route("/validate-policy", methods=["POST"])
