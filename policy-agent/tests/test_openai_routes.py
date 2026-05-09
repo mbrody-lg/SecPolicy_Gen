@@ -1,4 +1,5 @@
 import json
+import logging
 from unittest.mock import patch
 
 import pytest
@@ -66,6 +67,37 @@ def test_ready_route_reports_controlled_failure(client):
     assert response.get_json()["status"] == "not_ready"
     assert response.get_json()["checks"]["mongo"]["reason"] == "ping_failed"
     assert "details" not in response.get_json()["checks"]["mongo"]
+
+
+def test_ready_route_emits_structured_readiness_event(client, caplog):
+    with patch(
+        "app.routes.routes.get_readiness_status",
+        return_value=(
+            {
+                "status": "not_ready",
+                "service": "policy-agent",
+                "checks": {"mongo": {"status": "error", "reason": "ping_failed"}},
+            },
+            503,
+        ),
+    ):
+        caplog.set_level(logging.WARNING)
+        response = client.get("/ready", headers={"X-Correlation-ID": "corr-ready"})
+
+    assert response.status_code == 503
+    event = json.loads(caplog.records[-1].message)
+    assert event == {
+        "correlation_id": "corr-ready",
+        "error_code": "service_not_ready",
+        "event": "readiness.route.completed",
+        "method": "GET",
+        "readiness_status": "not_ready",
+        "result": "failure",
+        "route": "/ready",
+        "service": "policy-agent",
+        "stage": "readiness",
+        "status_code": 503,
+    }
 
 
 def test_rag_status_route_reports_runtime_status(client):

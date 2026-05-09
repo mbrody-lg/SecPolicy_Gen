@@ -1,11 +1,13 @@
 """HTTP routes for context creation, iteration, and policy handoff."""
 
 from datetime import datetime, timezone
+import logging
 
 from bson import ObjectId
 from flask import Blueprint, render_template, request, redirect, url_for, abort, flash, jsonify
 
 from app import mongo
+from app.observability import log_event
 from app.services.logic import (
     PipelineStepError,
     get_health_status,
@@ -22,6 +24,7 @@ from app.services.logic import (
 )
 
 main = Blueprint("main", __name__)
+logger = logging.getLogger(__name__)
 
 
 def _pipeline_flash_message(result: dict) -> str:
@@ -42,7 +45,25 @@ def ready():
     """Expose a minimal readiness probe for config and Mongo."""
     payload = get_readiness_status()
     status_code = 200 if payload.get("status") == "ready" else 503
+    _log_readiness_response(payload, status_code)
     return jsonify(payload), status_code
+
+
+def _log_readiness_response(payload: dict, status_code: int) -> None:
+    """Emit a bounded structured event for readiness responses."""
+    is_ready = payload.get("status") == "ready"
+    log_event(
+        logger,
+        logging.INFO if is_ready else logging.WARNING,
+        event="readiness.route.completed",
+        stage="readiness",
+        route="/ready",
+        method="GET",
+        status_code=status_code,
+        result="success" if is_ready else "failure",
+        readiness_status=payload.get("status", "unknown"),
+        error_code=None if is_ready else "service_not_ready",
+    )
 
 
 @main.route("/system/status", methods=["GET"])

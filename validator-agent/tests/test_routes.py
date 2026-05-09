@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime, timezone
 from unittest.mock import patch
 
@@ -54,6 +55,35 @@ def test_ready_route_reports_unready_when_dependency_check_fails(client):
         "checks": {"mongo": {"status": "error", "reason": "ping_failed"}},
     }
     assert response.headers["X-Correlation-ID"] == "corr-ready-fail"
+
+
+def test_ready_route_emits_structured_readiness_event(client, caplog):
+    with patch(
+        "app.routes.routes.get_readiness_status",
+        return_value={
+            "status": "not_ready",
+            "service": "validator-agent",
+            "checks": {"mongo": {"status": "error", "reason": "ping_failed"}},
+            "status_code": 503,
+        },
+    ):
+        caplog.set_level(logging.WARNING)
+        response = client.get("/ready", headers={"X-Correlation-ID": "corr-ready"})
+
+    assert response.status_code == 503
+    event = json.loads(caplog.records[-1].message)
+    assert event == {
+        "correlation_id": "corr-ready",
+        "error_code": "service_not_ready",
+        "event": "readiness.route.completed",
+        "method": "GET",
+        "readiness_status": "not_ready",
+        "result": "failure",
+        "route": "/ready",
+        "service": "validator-agent",
+        "stage": "readiness",
+        "status_code": 503,
+    }
 
 
 def test_validate_policy_route_rejects_missing_required_fields(client):

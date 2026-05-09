@@ -1,3 +1,6 @@
+import json
+import logging
+
 from bson import ObjectId
 import pytest
 from uuid import UUID
@@ -207,6 +210,36 @@ def test_ready_route_returns_503_when_service_is_not_ready(client, monkeypatch):
             "config": {"status": "error", "missing": ["MONGO_URI"]},
             "mongo": {"status": "error", "message": "mongo unavailable"},
         },
+    }
+
+
+def test_ready_route_emits_structured_readiness_event(client, monkeypatch, caplog):
+    monkeypatch.setattr(
+        routes_module,
+        "get_readiness_status",
+        lambda: {
+            "status": "not_ready",
+            "service": "context-agent",
+            "checks": {"mongo": {"status": "error", "reason": "ping_failed"}},
+        },
+    )
+    caplog.set_level(logging.WARNING)
+
+    response = client.get("/ready", headers={"X-Correlation-ID": "corr-ready"})
+
+    assert response.status_code == 503
+    event = json.loads(caplog.records[-1].message)
+    assert event == {
+        "correlation_id": "corr-ready",
+        "error_code": "service_not_ready",
+        "event": "readiness.route.completed",
+        "method": "GET",
+        "readiness_status": "not_ready",
+        "result": "failure",
+        "route": "/ready",
+        "service": "context-agent",
+        "stage": "readiness",
+        "status_code": 503,
     }
 
 
