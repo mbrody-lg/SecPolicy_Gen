@@ -8,6 +8,7 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 
 import yaml
 from flask import current_app
@@ -530,6 +531,7 @@ def get_rag_runtime_status() -> tuple[dict, int]:
             "embedding_models": embedding_models,
             "collection_checks": collection_checks,
             "action": "none" if rag_status == "ready" else "wait_for_refresh" if refresh_running else "index_pdfs_to_chroma",
+            "refresh_available": _rag_refresh_enabled(),
             "refresh_job": refresh_job,
         },
     }, status_code
@@ -580,6 +582,11 @@ def _run_rag_refresh_command() -> dict:
 
     output = (completed.stdout or "")[-RAG_REFRESH_OUTPUT_LIMIT:]
     error_output = (completed.stderr or "")[-RAG_REFRESH_OUTPUT_LIMIT:]
+    output_summary = {
+        "stdout_chars": len(output),
+        "stderr_chars": len(error_output),
+        "output_suppressed": True,
+    }
     if completed.returncode != 0:
         return {
             "success": False,
@@ -588,8 +595,7 @@ def _run_rag_refresh_command() -> dict:
             "message": "RAG refresh finished with errors.",
             "details": {
                 "return_code": completed.returncode,
-                "stdout": output,
-                "stderr": error_output,
+                **output_summary,
             },
         }
 
@@ -600,8 +606,7 @@ def _run_rag_refresh_command() -> dict:
         "message": "RAG refresh completed.",
         "details": {
             "return_code": completed.returncode,
-            "stdout": output,
-            "stderr": error_output,
+            **output_summary,
         },
         "status": status_payload,
     }
@@ -613,8 +618,17 @@ def get_rag_refresh_job_status() -> dict | None:
         return dict(_RAG_REFRESH_JOB) if _RAG_REFRESH_JOB else None
 
 
-def _run_rag_refresh_job(job_id: str, app) -> None:
+def _run_rag_refresh_job(job_id: str, app, correlation_id: str | None) -> None:
     global _RAG_REFRESH_JOB
+    log_event(
+        logger,
+        logging.INFO,
+        event="policy.rag_refresh.job_started",
+        stage="rag_refresh",
+        correlation_id=correlation_id,
+        result="started",
+        job_id=job_id,
+    )
     with app.app_context():
         result = _run_rag_refresh_command()
     with _RAG_REFRESH_LOCK:
@@ -626,12 +640,32 @@ def _run_rag_refresh_job(job_id: str, app) -> None:
                     "result": result,
                 }
             )
+    log_event(
+        logger,
+        logging.INFO if result.get("success") else logging.WARNING,
+        event="policy.rag_refresh.job_completed",
+        stage="rag_refresh",
+        correlation_id=correlation_id,
+        result="success" if result.get("success") else "failure",
+        job_id=job_id,
+        error_code=result.get("error_code"),
+    )
 
 
 def refresh_rag_runtime() -> tuple[dict, int]:
     """Start the fixed RAG indexing command as a local background job when enabled."""
     global _RAG_REFRESH_JOB
+    correlation_id = get_request_correlation_id()
     if not _rag_refresh_enabled():
+        log_event(
+            logger,
+            logging.WARNING,
+            event="policy.rag_refresh.request_rejected",
+            stage="rag_refresh",
+            correlation_id=correlation_id,
+            result="failure",
+            error_code="rag_refresh_disabled",
+        )
         return {
             "success": False,
             "error_type": "authorization_error",
@@ -642,6 +676,16 @@ def refresh_rag_runtime() -> tuple[dict, int]:
 
     with _RAG_REFRESH_LOCK:
         if _RAG_REFRESH_JOB and _RAG_REFRESH_JOB.get("status") == "running":
+            log_event(
+                logger,
+                logging.INFO,
+                event="policy.rag_refresh.request_accepted",
+                stage="rag_refresh",
+                correlation_id=correlation_id,
+                result="success",
+                job_id=_RAG_REFRESH_JOB.get("id"),
+                refresh_status="running",
+            )
             return {
                 "success": True,
                 "stage": "rag_refresh",
@@ -654,14 +698,25 @@ def refresh_rag_runtime() -> tuple[dict, int]:
             "id": job_id,
             "status": "running",
             "started_at": datetime.now(timezone.utc).isoformat(),
+            "correlation_id": correlation_id,
         }
 
     thread = threading.Thread(
         target=_run_rag_refresh_job,
-        args=(job_id, current_app._get_current_object()),
+        args=(job_id, current_app._get_current_object(), correlation_id),
         daemon=True,
     )
     thread.start()
+    log_event(
+        logger,
+        logging.INFO,
+        event="policy.rag_refresh.request_accepted",
+        stage="rag_refresh",
+        correlation_id=correlation_id,
+        result="success",
+        job_id=job_id,
+        refresh_status="running",
+    )
 
     return {
         "success": True,
@@ -1115,6 +1170,7 @@ def generate_policy_payload(payload: dict | None) -> dict:
     """Validate payload, run generation flow, and normalize the persisted response."""
     data = validate_generation_payload(payload)
     correlation_id = data["correlation_id"]
+    started_perf = perf_counter()
 
     try:
         result_object = run_with_agent(
@@ -1213,6 +1269,7 @@ def generate_policy_payload(payload: dict | None) -> dict:
         correlation_id=correlation_id,
         model_version=data["model_version"],
         lifecycle_status=result["lifecycle_status"],
+        duration_ms=round((perf_counter() - started_perf) * 1000, 3),
     )
     return _pipeline_success(stage="completed", policy=result)
 
@@ -1238,6 +1295,7 @@ def update_policy_payload(payload: dict | None, path_context_id: str) -> dict:
     """Validate update payload, run revision flow, and normalize the persisted response."""
     data, policy = validate_policy_update_payload(payload, path_context_id)
     correlation_id = data["correlation_id"]
+    started_perf = perf_counter()
     prompt = build_policy_update_prompt(
         data["policy_text"],
         data["reasons"],
@@ -1369,6 +1427,7 @@ def update_policy_payload(payload: dict | None, path_context_id: str) -> dict:
         model_version=policy.get("model_version"),
         lifecycle_status=result["lifecycle_status"],
         revision_count=result["revision_count"],
+        duration_ms=round((perf_counter() - started_perf) * 1000, 3),
     )
     return _pipeline_success(stage="completed", policy=result)
 

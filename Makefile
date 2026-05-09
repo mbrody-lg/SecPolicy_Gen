@@ -71,6 +71,9 @@ validator-tests:
 functional-smoke:
 	./scripts/run_docker_functional_smoke.sh
 
+validate-smoke-artifact:
+	python3 scripts/validate_smoke_artifact.py migration/functional-smoke-result.json
+
 ## Run the critical Context -> Policy -> Validator validation path with CI-aligned evidence
 critical-path-validation:
 	./scripts/run_critical_path_validation.sh

@@ -301,8 +301,8 @@ def test_get_system_status_returns_ready_when_services_and_rag_are_ready(app_con
 def test_refresh_system_state_calls_policy_rag_refresh(app_context, monkeypatch):
     calls = []
 
-    def fake_post(url, timeout):
-        calls.append((url, timeout))
+    def fake_post(url, timeout, headers):
+        calls.append((url, timeout, headers))
         return FakeResponse({"success": True, "stage": "rag_refresh"}, 200)
 
     monkeypatch.setattr(logic.requests, "post", fake_post)
@@ -316,11 +316,13 @@ def test_refresh_system_state_calls_policy_rag_refresh(app_context, monkeypatch)
 
     assert result["success"] is True
     assert calls[0][0].endswith("/rag/refresh")
+    assert "X-Correlation-ID" in calls[0][2]
     assert result["status"]["status"] == "ready"
 
 
 def test_refresh_system_state_reports_policy_refresh_failure(app_context, monkeypatch):
-    def fake_post(url, timeout):
+    def fake_post(url, timeout, headers):
+        assert "X-Correlation-ID" in headers
         return FakeResponse(
             {
                 "success": False,
@@ -346,7 +348,8 @@ def test_refresh_system_state_reports_policy_refresh_failure(app_context, monkey
 
 
 def test_refresh_system_state_handles_unreachable_policy_agent(app_context, monkeypatch):
-    def fake_post(url, timeout):
+    def fake_post(url, timeout, headers):
+        assert "X-Correlation-ID" in headers
         raise requests.exceptions.ConnectionError("policy-agent unavailable")
 
     monkeypatch.setattr(logic.requests, "post", fake_post)

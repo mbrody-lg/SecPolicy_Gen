@@ -682,8 +682,9 @@ def test_run_rag_refresh_command_reports_failed_process(app, monkeypatch):
     assert payload["error_code"] == "rag_refresh_failed"
     assert payload["details"] == {
         "return_code": 2,
-        "stdout": "indexed before failure",
-        "stderr": "chroma write failed",
+        "stdout_chars": len("indexed before failure"),
+        "stderr_chars": len("chroma write failed"),
+        "output_suppressed": True,
     }
 
 
@@ -729,7 +730,7 @@ def test_run_rag_refresh_job_updates_job_result_on_success(app, monkeypatch):
         lambda: {"success": True, "stage": "rag_refresh"},
     )
 
-    logic._run_rag_refresh_job("job-1", app)
+    logic._run_rag_refresh_job("job-1", app, "corr-1")
 
     job = logic.get_rag_refresh_job_status()
     assert job["status"] == "completed"
@@ -753,7 +754,7 @@ def test_run_rag_refresh_job_updates_job_result_on_failure(app, monkeypatch):
         lambda: {"success": False, "error_code": "rag_refresh_failed"},
     )
 
-    logic._run_rag_refresh_job("job-1", app)
+    logic._run_rag_refresh_job("job-1", app, "corr-1")
 
     job = logic.get_rag_refresh_job_status()
     assert job["status"] == "failed"

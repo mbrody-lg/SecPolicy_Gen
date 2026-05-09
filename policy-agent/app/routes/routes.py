@@ -54,6 +54,18 @@ def _log_readiness_response(payload: dict, status_code: int) -> None:
 def rag_status():
     """Return RAG runtime status and missing configured Chroma collections."""
     payload, status_code = get_rag_runtime_status()
+    log_event(
+        logger,
+        logging.INFO if status_code < 400 else logging.WARNING,
+        event="rag.status.route.completed",
+        stage="rag_status",
+        route="/rag/status",
+        method="GET",
+        status_code=status_code,
+        result="success" if status_code < 400 else "failure",
+        rag_status=payload.get("rag", {}).get("status"),
+        error_code=None if status_code < 400 else payload.get("rag", {}).get("reason", "rag_not_ready"),
+    )
     return jsonify(payload), status_code
 
 
@@ -61,6 +73,18 @@ def rag_status():
 def rag_refresh():
     """Run the controlled local RAG refresh action when enabled."""
     payload, status_code = refresh_rag_runtime()
+    log_event(
+        logger,
+        logging.INFO if status_code < 400 else logging.WARNING,
+        event="rag.refresh.route.completed",
+        stage="rag_refresh",
+        route="/rag/refresh",
+        method="POST",
+        status_code=status_code,
+        result="success" if status_code < 400 else "failure",
+        refresh_status=payload.get("job", {}).get("status"),
+        error_code=payload.get("error_code"),
+    )
     return jsonify(payload), status_code
 
 
