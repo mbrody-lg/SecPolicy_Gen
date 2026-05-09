@@ -14,7 +14,7 @@ from app.agents.roles.evaluator import Evaluator
 @pytest.fixture
 def app():
     app = Flask(__name__)
-    app.config["CONFIG_PATH"] = "/validator-agent/app/config/validator_agent.yaml"  # This file must exist for the test
+    app.config["CONFIG_PATH"] = str(ROOT_PATH / "app" / "config" / "validator_agent.yaml")
     with app.app_context():
         yield app
 

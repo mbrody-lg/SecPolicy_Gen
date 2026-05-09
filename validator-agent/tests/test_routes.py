@@ -44,7 +44,6 @@ def test_ready_route_reports_unready_when_dependency_check_fails(client):
             "status": "not_ready",
             "service": "validator-agent",
             "checks": {"mongo": {"status": "error", "reason": "ping_failed"}},
-            "status_code": 503,
         },
     ):
         response = client.get("/ready", headers={"X-Correlation-ID": "corr-ready-fail"})
