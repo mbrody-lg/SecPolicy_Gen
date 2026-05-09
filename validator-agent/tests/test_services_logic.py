@@ -49,7 +49,6 @@ def test_get_readiness_status_returns_dependency_error_when_mongo_fails(app, mon
             "mongo": {"status": "error", "reason": "ping_failed"},
             "config": {"status": "ok", "source": "loaded"},
         },
-        "status_code": 503,
     }
 
 

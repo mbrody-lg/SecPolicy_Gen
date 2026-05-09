@@ -81,7 +81,6 @@ def get_readiness_status() -> dict:
             "status": "not_ready",
             "service": "validator-agent",
             "checks": checks,
-            "status_code": 503,
         }
 
     return {
