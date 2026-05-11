@@ -42,14 +42,20 @@
     </form>
   </div>
 
-  <div class="bg-white rounded-lg shadow p-4">
+  <div id="system-readiness-panel" class="bg-white rounded-lg shadow p-4">
     <h2 class="text-xl font-semibold mb-2">Generate policies</h2>
     {% set runtime_ready = system_status and system_status.status == 'ready' %}
     {% if not runtime_ready %}
       <div class="mb-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
         <div class="font-semibold">Application runtime is not ready</div>
+        <div class="mt-1">
+          Current state: <span id="system-status-value">{{ system_status.status if system_status else 'unknown' }}</span>
+        </div>
         {% if system_status and system_status.rag %}
-          <div class="mt-1">RAG status: {{ system_status.rag.status }}</div>
+          <div class="mt-1">RAG status: <span id="rag-status-value">{{ system_status.rag.status }}</span></div>
+          {% if system_status.rag.action %}
+            <div class="mt-1">Action: <span id="rag-action-value">{{ system_status.rag.action }}</span></div>
+          {% endif %}
           {% if system_status.rag.missing_collections %}
             <div class="mt-1">Missing collections: {{ system_status.rag.missing_collections | join(', ') }}</div>
           {% endif %}
@@ -63,19 +69,26 @@
           {% endif %}
         {% endif %}
       </div>
-      <form method="post" action="{{ url_for('main.context_system_refresh', context_id=context._id) }}" class="mb-3">
+      <form method="post" action="{{ url_for('main.context_system_refresh', context_id=context._id) }}" class="mb-3" data-system-refresh-form>
         <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
           Update state
         </button>
       </form>
+      <div class="mb-3 text-sm text-gray-700">
+        Refresh: <span id="rag-refresh-job-value">{{ system_status.rag.refresh_job.status if system_status and system_status.rag and system_status.rag.refresh_job else 'idle' }}</span>
+      </div>
     {% endif %}
     <form method="post" action="{{ url_for('main.trigger_policy_generation', context_id=context._id) }}">
       <button type="submit"
         class="{% if runtime_ready %}bg-green-600 hover:bg-green-700{% else %}bg-gray-400 cursor-not-allowed{% endif %} text-white px-4 py-2 rounded"
+        data-generate-policy-button
         {% if not runtime_ready %}disabled{% endif %}>
         Generate and validate
       </button>
     </form>
   </div>
 </div>
+{% endblock %}
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/system-status.js') }}"></script>
 {% endblock %}

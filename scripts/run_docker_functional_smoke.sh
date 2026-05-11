@@ -315,6 +315,7 @@ mkdir -p "$(dirname "$RESULT_FILE")"
 log "running full context -> policy -> validation pipeline and collecting evidence"
 if ! docker exec -i "$CONTEXT_CONTAINER" python - > "$RESULT_FILE" 2> "$ERROR_FILE" <<'PY'
 import json
+import os
 import time
 from uuid import uuid4
 from datetime import datetime, timezone
@@ -335,6 +336,9 @@ SERVICE_ENDPOINTS = {
 
 def utc_now():
     return datetime.now(timezone.utc).isoformat()
+
+
+RUN_STARTED_AT = utc_now()
 
 
 def probe_service(base_url):
@@ -448,7 +452,7 @@ policy_db = client.policydb
 validator_db = client.validatordb
 fallback_db = client.contextdb
 
-summary = []
+contexts = []
 failed = []
 
 for context_id in context_ids:
@@ -496,7 +500,7 @@ for context_id in context_ids:
     if reasons:
         failed.append({"context_id": context_id, "reasons": reasons})
 
-    summary.append({
+    contexts.append({
         "context_id": context_id,
         "generate_status": generate_status,
         "validated_policy_records": validated_count,
@@ -511,20 +515,44 @@ for context_id in context_ids:
 if not context_ids:
     failed = [{"context_id": "n/a", "reasons": ["no_contexts_loaded"]}]
 
-result = {
-    "smoke_timestamp": utc_now(),
-    "total_contexts": len(context_ids),
-    "service_checks": service_checks,
-    "preflight_failures": preflight_failures,
-    "failed_contexts": failed,
-    "summary": summary,
-}
-
 if preflight_failures:
     if not failed:
         failed.append({"context_id": "preflight", "reasons": preflight_failures})
     else:
         failed.insert(0, {"context_id": "preflight", "reasons": preflight_failures})
+
+finished_at = utc_now()
+result = {
+    "schema_version": "1.0",
+    "run": {
+        "id": f"smoke-{RUN_STARTED_AT.replace(':', '').replace('+', 'Z')}",
+        "started_at": RUN_STARTED_AT,
+        "finished_at": finished_at,
+        "status": "failed" if failed or preflight_failures else "passed",
+        "mode": "mock" if os.getenv("SMOKE_USE_MOCK_CONFIGS", "1") not in {"0", "false", "False"} else "runtime",
+        "clean_db": os.getenv("SMOKE_CLEAN_DB", "1") not in {"0", "false", "False"},
+        "golden_dir": os.getenv("GOLDEN_DIR", "/migration/golden-contexts"),
+    },
+    "environment": {
+        "compose_file": "infrastructure/docker-compose.yml",
+        "services": sorted(SERVICE_ENDPOINTS.keys()),
+        "redaction": "applied",
+    },
+    "contexts": contexts,
+    "failures": failed,
+    "summary": {
+        "total_contexts": len(context_ids),
+        "passed_contexts": len([item for item in contexts if not item["failure_reasons"]]),
+        "failed_contexts": len([item for item in contexts if item["failure_reasons"]]),
+        "preflight_failure_count": len(preflight_failures),
+    },
+    "smoke_timestamp": finished_at,
+    "total_contexts": len(context_ids),
+    "service_checks": service_checks,
+    "preflight_failures": preflight_failures,
+    "failed_contexts": failed,
+    "legacy_summary": contexts,
+}
 
 print(json.dumps(result, indent=2))
 
@@ -535,5 +563,7 @@ then
   echo "functional smoke pipeline failed. See $RESULT_FILE and $ERROR_FILE"
   exit 1
 fi
+
+python3 "$ROOT_DIR/scripts/validate_smoke_artifact.py" "$RESULT_FILE"
 
 echo "functional smoke completed. Report: $RESULT_FILE"

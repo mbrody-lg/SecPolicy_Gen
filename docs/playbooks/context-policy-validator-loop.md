@@ -45,7 +45,7 @@ The loop uses `X-Correlation-ID` as the shared trace key:
 - JSON error payloads keep `correlation_id` aligned with the response header
 - cross-service calls reuse that same value
 
-All three agents emit compact JSON log lines with stable keys such as `event`, `service`, `stage`, `correlation_id`, and `context_id`.
+All three agents emit compact JSON log lines with stable keys such as `event`, `service`, `stage`, `correlation_id`, and `context_id`. The canonical field contract is maintained in the [Observability Log Contract](./observability-log-contract.md).
 
 Use that combination to follow one request across services:
 
@@ -97,13 +97,16 @@ make functional-smoke
 Evidence artifact:
 - `migration/functional-smoke-result.json`
 
-The smoke report records:
-- `smoke_timestamp`
-- `total_contexts`
+The smoke report uses `schema_version: "1.0"` and records:
+- `run`: id, started/finished timestamps, status, mode, fixture directory, and clean-db mode
+- `environment`: compose file, service names, and redaction mode
 - `service_checks`
 - `preflight_failures`
-- `failed_contexts`
-- per-context summary with `generate_status`, `validated_policy_records`, `policy_records`, `validation_rounds`, `last_status`, `failure_reasons`, and `observability`
+- `contexts`: per-context `generate_status`, `validated_policy_records`, `policy_records`, `validation_rounds`, `last_status`, `failure_reasons`, and `observability`
+- `summary`: aggregate counts
+- `failures`: attachable failure reasons
+
+Legacy aliases such as `smoke_timestamp`, `total_contexts`, `failed_contexts`, and `legacy_summary` remain in the artifact for transition compatibility.
 
 Treat that JSON file as the default attachable evidence for I9-T4.5 and for any change that affects the end-to-end loop.
 

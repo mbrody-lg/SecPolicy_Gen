@@ -3,6 +3,7 @@
 import logging
 import os
 from pathlib import Path
+from time import perf_counter
 
 import requests
 from flask import current_app, g, has_app_context, has_request_context, request
@@ -522,6 +523,7 @@ def send_policy_update_to_policy_agent(
     }
     correlation_id = _get_correlation_id(payload)
     timeout_seconds = _dependency_timeout("POLICY_AGENT_TIMEOUT_SECONDS")
+    started_perf = perf_counter()
     log_event(
         logger,
         logging.INFO,
@@ -553,6 +555,7 @@ def send_policy_update_to_policy_agent(
             operation="generate_policy_update",
             status_code=response.status_code,
             result="success",
+            duration_ms=round((perf_counter() - started_perf) * 1000, 3),
         )
         return response.json()
     except requests.exceptions.RequestException as exc:
@@ -567,7 +570,7 @@ def send_policy_update_to_policy_agent(
                 operation="generate_policy_update",
                 status_code=response.status_code if response is not None else None,
                 result="failure",
-                target=update_endpoint,
+                duration_ms=round((perf_counter() - started_perf) * 1000, 3),
             ),
             exc_info=exc,
         )

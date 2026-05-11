@@ -472,14 +472,36 @@ def test_get_diagnostics_route_returns_document(client, monkeypatch):
             "correlation_id": correlation_id,
             "context_id": "ctx-1",
             "status": "completed",
-            "hops": [],
+            "raw_response": "must-not-leak",
+            "hops": [
+                {
+                    "service": "context-agent",
+                    "stage": "validation",
+                    "operation": "validate_policy",
+                    "target_service": "validator-agent",
+                    "outcome": "success",
+                    "raw_response": "must-not-leak",
+                }
+            ],
         },
     )
 
     response = client.get("/diagnostics/corr-1")
 
     assert response.status_code == 200
-    assert response.get_json()["correlation_id"] == "corr-1"
+    payload = response.get_json()
+    assert payload["correlation_id"] == "corr-1"
+    assert payload["hops"] == [
+        {
+            "service": "context-agent",
+            "stage": "validation",
+            "operation": "validate_policy",
+            "target_service": "validator-agent",
+            "outcome": "success",
+        }
+    ]
+    assert "_id" not in payload
+    assert "raw_response" not in payload
 
 
 def test_get_diagnostics_route_returns_404_when_missing(client, monkeypatch):

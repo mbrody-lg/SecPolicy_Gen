@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import logging
 import os
 from time import perf_counter
+from uuid import uuid4
 
 import requests
 import yaml
@@ -12,6 +13,7 @@ from flask import current_app, has_app_context
 from markdown import markdown
 
 from app import (
+    CORRELATION_ID_HEADER,
     DEFAULT_CONFIG_PATH,
     DEFAULT_QUESTIONS_CONFIG_PATH,
     get_request_correlation_id,
@@ -156,16 +158,17 @@ def get_system_status() -> dict:
     rag_status = _service_endpoint_status("policy-agent-rag", policy_agent_url, path="/rag/status")
     all_ready = all(service.get("status") == "ready" for service in services)
     rag_ready = rag_status.get("payload", {}).get("rag", {}).get("status") == "ready"
+    rag_payload = rag_status.get("payload", {}).get("rag", {
+        "status": rag_status.get("status", "unknown"),
+        "reason": "rag_status_unavailable",
+    })
 
     return {
         "status": "ready" if all_ready and rag_ready else "not_ready",
         "services": services,
-        "rag": rag_status.get("payload", {}).get("rag", {
-            "status": rag_status.get("status", "unknown"),
-            "reason": "rag_status_unavailable",
-        }),
+        "rag": rag_payload,
         "actions": {
-            "rag_refresh_available": True,
+            "rag_refresh_available": bool(rag_payload.get("refresh_available", False)),
             "rag_refresh_path": "/system/refresh",
         },
     }
@@ -174,13 +177,35 @@ def get_system_status() -> dict:
 def refresh_system_state() -> dict:
     """Attempt a controlled dependency refresh and return the updated system status."""
     policy_agent_url = current_app.config.get("POLICY_AGENT_URL", "http://policy-agent:5000")
+    correlation_id = _get_correlation_id() or str(uuid4())
+    log_event(
+        logger,
+        logging.INFO,
+        event="context.system_refresh.request",
+        stage="rag_refresh",
+        correlation_id=correlation_id,
+        target_service="policy-agent",
+        operation="rag_refresh",
+    )
     try:
         response = requests.post(
             f"{policy_agent_url.rstrip('/')}/rag/refresh",
+            headers={CORRELATION_ID_HEADER: correlation_id} if correlation_id else {},
             timeout=_dependency_timeout("POLICY_AGENT_TIMEOUT_SECONDS"),
         )
         payload = response.json() if response.content else {}
     except requests.RequestException:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="context.system_refresh.response",
+            stage="rag_refresh",
+            correlation_id=correlation_id,
+            target_service="policy-agent",
+            operation="rag_refresh",
+            result="failure",
+            error_code="policy_agent_unreachable",
+        )
         return {
             "success": False,
             "error_code": "policy_agent_unreachable",
@@ -188,6 +213,18 @@ def refresh_system_state() -> dict:
             "status": get_system_status(),
         }
     except ValueError:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="context.system_refresh.response",
+            stage="rag_refresh",
+            correlation_id=correlation_id,
+            target_service="policy-agent",
+            operation="rag_refresh",
+            result="failure",
+            status_code=response.status_code,
+            error_code="invalid_policy_agent_response",
+        )
         return {
             "success": False,
             "error_code": "invalid_policy_agent_response",
@@ -195,6 +232,20 @@ def refresh_system_state() -> dict:
             "status": get_system_status(),
         }
 
+    result = "success" if response.status_code < 400 and payload.get("success") is True else "failure"
+    log_event(
+        logger,
+        logging.INFO if result == "success" else logging.WARNING,
+        event="context.system_refresh.response",
+        stage="rag_refresh",
+        correlation_id=correlation_id,
+        target_service="policy-agent",
+        operation="rag_refresh",
+        status_code=response.status_code,
+        result=result,
+        refresh_status=payload.get("job", {}).get("status"),
+        error_code=payload.get("error_code"),
+    )
     return {
         "success": response.status_code < 400 and payload.get("success") is True,
         "status_code": response.status_code,
@@ -856,6 +907,7 @@ def generate_full_policy_pipeline(context_id: str) -> dict:
     """Execute policy generation, validation, and context persistence pipeline."""
     correlation_id = _get_correlation_id(context_id=context_id)
     started_at = datetime.now(timezone.utc)
+    started_perf = perf_counter()
     _upsert_pipeline_diagnostic(
         correlation_id=correlation_id,
         context_id=context_id,
@@ -895,6 +947,7 @@ def generate_full_policy_pipeline(context_id: str) -> dict:
                     "operation": "generate_full_policy_pipeline",
                     "outcome": "failure",
                     "completed_at": datetime.now(timezone.utc),
+                    "duration_ms": round((perf_counter() - started_perf) * 1000, 3),
                     "error_type": policy_result.get("error_type"),
                     "error_code": policy_result.get("error_code"),
                 },
@@ -915,6 +968,7 @@ def generate_full_policy_pipeline(context_id: str) -> dict:
                 "operation": "generate_full_policy_pipeline",
                 "outcome": "success",
                 "completed_at": datetime.now(timezone.utc),
+                "duration_ms": round((perf_counter() - started_perf) * 1000, 3),
                 "validation_status": validated_data.get("status"),
             },
         )
@@ -927,6 +981,7 @@ def generate_full_policy_pipeline(context_id: str) -> dict:
             correlation_id=_get_correlation_id(validated_data, context_id),
             result="success",
             validation_status=validated_data.get("status"),
+            duration_ms=round((perf_counter() - started_perf) * 1000, 3),
         )
         return _pipeline_success(
             stage="completed",
@@ -950,6 +1005,7 @@ def generate_full_policy_pipeline(context_id: str) -> dict:
                 "operation": "generate_full_policy_pipeline",
                 "outcome": "failure",
                 "completed_at": datetime.now(timezone.utc),
+                "duration_ms": round((perf_counter() - started_perf) * 1000, 3),
                 "error_type": exc.error_type,
                 "error_code": exc.error_code,
             },
@@ -964,6 +1020,7 @@ def generate_full_policy_pipeline(context_id: str) -> dict:
             result="failure",
             error_code=exc.error_code,
             error_type=exc.error_type,
+            duration_ms=round((perf_counter() - started_perf) * 1000, 3),
         )
         return _pipeline_error(exc)
     except Exception:

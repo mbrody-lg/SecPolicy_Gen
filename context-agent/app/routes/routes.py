@@ -77,16 +77,33 @@ def system_status():
 @main.route("/system/refresh", methods=["POST"])
 def system_refresh():
     """Attempt controlled local maintenance actions and return to dashboard."""
-    _flash_system_refresh_result(refresh_system_state())
+    result = refresh_system_state()
+    if _wants_json_response():
+        return jsonify(result), 202 if result.get("success") else 503
+    _flash_system_refresh_result(result)
     return redirect(url_for("main.index"))
+
+
+def _wants_json_response() -> bool:
+    """Detect progressive-enhancement requests from the operator UI."""
+    return (
+        request.headers.get("X-Requested-With") == "XMLHttpRequest"
+        or request.accept_mimetypes.best == "application/json"
+    )
 
 
 def _flash_system_refresh_result(result: dict) -> None:
     """Flash a concise status message for controlled maintenance actions."""
-    if result.get("success"):
+    response = result.get("response", {})
+    job = response.get("job") if isinstance(response, dict) else None
+    if result.get("success") and result.get("status_code") == 202:
+        job_status = job.get("status") if isinstance(job, dict) else "running"
+        flash(f"System refresh started. Current job status: {job_status}.", "info")
+    elif result.get("success"):
         flash("System state refreshed successfully.", "success")
     else:
-        message = result.get("response", {}).get("message") or result.get("message") or "System refresh did not complete."
+        message = response.get("message") if isinstance(response, dict) else None
+        message = message or result.get("message") or "System refresh did not complete."
         flash(message, "danger")
 
 
@@ -362,8 +379,61 @@ def trigger_policy_generation(context_id):
 @main.route("/context/<context_id>/system/refresh", methods=["POST"])
 def context_system_refresh(context_id):
     """Attempt controlled local maintenance actions and return to the context detail."""
-    _flash_system_refresh_result(refresh_system_state())
+    result = refresh_system_state()
+    if _wants_json_response():
+        return jsonify(result), 202 if result.get("success") else 503
+    _flash_system_refresh_result(result)
     return redirect(url_for("main.context_detail", context_id=context_id))
+
+
+def _public_pipeline_diagnostic(diagnostic: dict) -> dict:
+    """Return the public allowlisted diagnostic view for operator lookup."""
+    allowed_top_level = {
+        "correlation_id",
+        "context_id",
+        "status",
+        "created_at",
+        "updated_at",
+        "completed_at",
+    }
+    allowed_hop_fields = {
+        "service",
+        "stage",
+        "operation",
+        "target_service",
+        "outcome",
+        "started_at",
+        "completed_at",
+        "duration_ms",
+        "status_code",
+        "error_type",
+        "error_code",
+        "validation_status",
+    }
+    allowed_error_fields = {"stage", "error_type", "error_code"}
+
+    public = {
+        key: diagnostic[key]
+        for key in allowed_top_level
+        if key in diagnostic and diagnostic[key] is not None
+    }
+    public["hops"] = [
+        {
+            key: hop[key]
+            for key in allowed_hop_fields
+            if isinstance(hop, dict) and key in hop and hop[key] is not None
+        }
+        for hop in diagnostic.get("hops", [])
+        if isinstance(hop, dict)
+    ]
+    last_error = diagnostic.get("last_error")
+    if isinstance(last_error, dict):
+        public["last_error"] = {
+            key: last_error[key]
+            for key in allowed_error_fields
+            if key in last_error and last_error[key] is not None
+        }
+    return public
 
 
 @main.route("/diagnostics/<correlation_id>", methods=["GET"])
@@ -379,4 +449,4 @@ def get_diagnostics(correlation_id):
             "details": {"correlation_id": correlation_id},
             "correlation_id": correlation_id,
         }), 404
-    return jsonify(diagnostic), 200
+    return jsonify(_public_pipeline_diagnostic(diagnostic)), 200

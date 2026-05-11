@@ -5,13 +5,16 @@
 
   {% if system_status %}
     {% set rag = system_status.rag %}
-    <section class="mb-6 bg-white shadow rounded p-4">
+    <section id="system-readiness-panel" class="mb-6 bg-white shadow rounded p-4">
       <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div>
           <h3 class="text-lg font-semibold">Application readiness</h3>
-          <p class="text-sm text-gray-600">Service health and RAG index state</p>
+          <p class="text-sm text-gray-600">
+            Service health and RAG index state:
+            <span id="system-status-value" class="font-semibold">{{ system_status.status }}</span>
+          </p>
         </div>
-        <form method="post" action="{{ url_for('main.system_refresh') }}">
+        <form method="post" action="{{ url_for('main.system_refresh') }}" data-system-refresh-form>
           <button type="submit" class="bg-slate-800 text-white px-3 py-2 rounded hover:bg-slate-700">
             Update state
           </button>
@@ -32,8 +35,13 @@
         <div class="border rounded p-3 {% if rag_ready %}border-green-200 bg-green-50{% else %}border-amber-200 bg-amber-50{% endif %}">
           <div class="text-sm font-semibold">policy-agent RAG</div>
           <div class="text-xs uppercase tracking-wide {% if rag_ready %}text-green-700{% else %}text-amber-700{% endif %}">
-            {{ rag.status }}
+            <span id="rag-status-value">{{ rag.status }}</span>
           </div>
+          {% if rag.action %}
+            <div class="mt-2 text-xs text-gray-700">
+              Action: <span id="rag-action-value">{{ rag.action }}</span>
+            </div>
+          {% endif %}
           {% if rag.missing_collections %}
             <div class="mt-2 text-xs text-gray-700">
               Missing: {{ rag.missing_collections | join(', ') }}
@@ -41,7 +49,11 @@
           {% endif %}
           {% if rag.refresh_job %}
             <div class="mt-2 text-xs text-gray-700">
-              Refresh: {{ rag.refresh_job.status }}
+              Refresh: <span id="rag-refresh-job-value">{{ rag.refresh_job.status }}</span>
+            </div>
+          {% else %}
+            <div class="mt-2 text-xs text-gray-700">
+              Refresh: <span id="rag-refresh-job-value">idle</span>
             </div>
           {% endif %}
         </div>
@@ -112,5 +124,8 @@
       {% endfor %}
     </div>
   {% endif %}
-  {% endblock %}
 </div>
+{% endblock %}
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/system-status.js') }}"></script>
+{% endblock %}
