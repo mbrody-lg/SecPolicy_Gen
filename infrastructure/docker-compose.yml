@@ -70,6 +70,7 @@ services:
       - "5002:5000"
     volumes:
       - ../policy-agent:/policy-agent
+      - policy_model_cache:/root/.cache/huggingface
     working_dir: /policy-agent
     environment:
       - FLASK_APP=app
@@ -146,5 +147,6 @@ services:
 volumes:
   mongo_data:
   chroma_data:
+  policy_model_cache:
 networks:
   internal:

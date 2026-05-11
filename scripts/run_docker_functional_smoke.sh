@@ -22,12 +22,20 @@ VALIDATOR_CONTAINER_CONFIG=""
 MOCK_MODE="${MIGRATION_SMOKE_MOCK:-1}"
 CLEAN_DB="${MIGRATION_SMOKE_CLEAN_DB:-1}"
 KEEP_STACK="${MIGRATION_SMOKE_KEEP_STACK:-0}"
+REQUIRE_REAL_CONFIG="${MIGRATION_SMOKE_REQUIRE_REAL_CONFIG:-0}"
+REQUIRE_RAG_READY="${MIGRATION_SMOKE_REQUIRE_RAG_READY:-0}"
+RAG_MODE="${MIGRATION_SMOKE_RAG_MODE:-refresh}"
+RAG_READY_TIMEOUT_SECONDS="${MIGRATION_SMOKE_RAG_READY_TIMEOUT_SECONDS:-900}"
+RAG_READY_POLL_SECONDS="${MIGRATION_SMOKE_RAG_READY_POLL_SECONDS:-5}"
+CHROMA_BACKUP_FILE="${MIGRATION_SMOKE_CHROMA_BACKUP_FILE:-}"
+CHROMA_BACKUP_AFTER_REFRESH="${MIGRATION_SMOKE_CHROMA_BACKUP_AFTER_REFRESH:-0}"
 TMP_BACKUP_DIR=""
 GOLDEN_DIR="${MIGRATION_SMOKE_GOLDEN_DIR:-/migration/golden-contexts}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 PROBE_MAX_ATTEMPTS="${MIGRATION_SMOKE_PROBE_ATTEMPTS:-60}"
 PROBE_DELAY_SECONDS="${MIGRATION_SMOKE_PROBE_DELAY_SECONDS:-2}"
 LOG_TAIL_LINES="${MIGRATION_SMOKE_LOG_TAIL_LINES:-80}"
+RAG_PREFLIGHT_FILE="$ROOT_DIR/migration/functional-smoke-rag-preflight.json"
 
 declare -a SERVICE_PROBE_DEFINITIONS=(
   "context-agent|http://localhost:5003|context-agent"
@@ -37,6 +45,27 @@ declare -a SERVICE_PROBE_DEFINITIONS=(
 
 log() {
   printf "[functional-smoke] %s\n" "$*"
+}
+
+is_truthy() {
+  case "${1:-}" in
+    1|true|TRUE|True|yes|YES|Yes) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+is_mock_mode() {
+  is_truthy "$MOCK_MODE"
+}
+
+validate_rag_mode() {
+  case "$RAG_MODE" in
+    refresh|backup) return 0 ;;
+    *)
+      echo "MIGRATION_SMOKE_RAG_MODE must be 'refresh' or 'backup'."
+      return 1
+      ;;
+  esac
 }
 
 resolve_service_config_path() {
@@ -225,6 +254,277 @@ run_service_probe_validation() {
   done
 }
 
+validate_real_config_env() {
+  if is_mock_mode || ! is_truthy "$REQUIRE_REAL_CONFIG"; then
+    return 0
+  fi
+
+  if [[ "$TMP_ENV_TEMP_CREATED" -eq 1 || "$TMP_ENV_FILE" != "$INFRA_ENV_FILE" ]]; then
+    echo "Real-config smoke requires infrastructure/.env; refusing to use .env.example."
+    return 1
+  fi
+
+  "$PYTHON_BIN" - "$TMP_ENV_FILE" <<'PY'
+import os
+import re
+import sys
+
+env_path = sys.argv[1]
+required_keys = [
+    "FLASK_SECRET_KEY",
+    "MONGO_URI",
+    "CHROMA_HOST",
+    "CHROMA_PORT",
+    "OPENAI_API_KEY",
+]
+placeholder_patterns = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"^$",
+        r"changeme",
+        r"fake",
+        r"mock",
+        r"placeholder",
+        r"example",
+        r"test[-_]",
+        r"your[-_]",
+    )
+]
+
+values = {}
+with open(env_path, encoding="utf-8") as handle:
+    for raw_line in handle:
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("\"'")
+        values[key] = value
+
+missing = [key for key in required_keys if not values.get(key) and not os.environ.get(key)]
+placeholder = []
+for key in required_keys:
+    value = os.environ.get(key) or values.get(key, "")
+    if any(pattern.search(value) for pattern in placeholder_patterns):
+        placeholder.append(key)
+
+if missing or placeholder:
+    reasons = []
+    if missing:
+        reasons.append("missing=" + ",".join(sorted(missing)))
+    if placeholder:
+        reasons.append("placeholder=" + ",".join(sorted(placeholder)))
+    raise SystemExit("Real-config smoke environment is not valid: " + "; ".join(reasons))
+PY
+
+  log "real-config environment contract validated"
+}
+
+collect_rag_preflight_diagnostics() {
+  log "policy-agent /rag/status response:"
+  curl -sS "http://localhost:5002/rag/status" 2>&1 | redact_sensitive_output || true
+  printf "\n"
+
+  log "recent policy-agent logs (tail=$LOG_TAIL_LINES):"
+  "${DOCKER_COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$TMP_ENV_FILE" logs --tail "$LOG_TAIL_LINES" "policy-agent" 2>&1 \
+    | redact_sensitive_output || true
+}
+
+backup_chroma_data() {
+  if is_mock_mode || ! is_truthy "$CHROMA_BACKUP_AFTER_REFRESH"; then
+    return 0
+  fi
+
+  log "creating Chroma backup"
+  if [[ -n "$CHROMA_BACKUP_FILE" ]]; then
+    CHROMA_BACKUP_FILE="$CHROMA_BACKUP_FILE" "$ROOT_DIR/scripts/chroma_backup.sh" backup
+  else
+    "$ROOT_DIR/scripts/chroma_backup.sh" backup
+  fi
+}
+
+restore_chroma_backup() {
+  if is_mock_mode || [[ "$RAG_MODE" != "backup" ]]; then
+    return 0
+  fi
+
+  log "restoring Chroma backup"
+  if [[ -n "$CHROMA_BACKUP_FILE" ]]; then
+    CHROMA_BACKUP_FILE="$CHROMA_BACKUP_FILE" "$ROOT_DIR/scripts/chroma_backup.sh" restore
+  else
+    "$ROOT_DIR/scripts/chroma_backup.sh" restore
+  fi
+  wait_for_http "http://localhost:8000/api/v1/heartbeat"
+}
+
+write_rag_preflight_snapshot() {
+  local payload_file=$1
+  local stage=$2
+  local http_code=$3
+
+  "$PYTHON_BIN" - "$payload_file" "$RAG_PREFLIGHT_FILE" "$stage" "$http_code" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload_path, output_path, stage, http_code = sys.argv[1:5]
+try:
+    with open(payload_path, encoding="utf-8") as handle:
+        payload = json.load(handle)
+except Exception as exc:
+    payload = {"status": "not_ready", "rag": {"status": "error", "reason": str(exc)}}
+
+rag = payload.get("rag", {}) if isinstance(payload, dict) else {}
+snapshot = {
+    "stage": stage,
+    "http_status": int(http_code) if str(http_code).isdigit() else 0,
+    "status": payload.get("status") if isinstance(payload, dict) else None,
+    "rag_status": rag.get("status") if isinstance(rag, dict) else None,
+    "action": rag.get("action") if isinstance(rag, dict) else None,
+    "refresh_available": bool(rag.get("refresh_available")) if isinstance(rag, dict) else False,
+    "configured_collections": rag.get("configured_collections", []) if isinstance(rag, dict) else [],
+    "available_collections": rag.get("available_collections", []) if isinstance(rag, dict) else [],
+    "missing_collections": rag.get("missing_collections", []) if isinstance(rag, dict) else [],
+    "embedding_models": [
+        {
+            "model": item.get("model"),
+            "revision": item.get("revision"),
+            "status": item.get("status"),
+        }
+        for item in (rag.get("embedding_models", []) if isinstance(rag, dict) else [])
+        if isinstance(item, dict)
+    ],
+    "refresh_job": (
+        {
+            "id": rag.get("refresh_job", {}).get("id"),
+            "status": rag.get("refresh_job", {}).get("status"),
+            "started_at": rag.get("refresh_job", {}).get("started_at"),
+            "completed_at": rag.get("refresh_job", {}).get("completed_at"),
+            "correlation_id": rag.get("refresh_job", {}).get("correlation_id"),
+            "result_success": rag.get("refresh_job", {}).get("result", {}).get("success"),
+            "result_error_code": rag.get("refresh_job", {}).get("result", {}).get("error_code"),
+        }
+        if isinstance(rag.get("refresh_job"), dict)
+        else None
+    ) if isinstance(rag, dict) else None,
+}
+Path(output_path).write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
+PY
+}
+
+rag_status_is_ready() {
+  local payload_file=$1
+  "$PYTHON_BIN" - "$payload_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    payload = json.load(handle)
+if payload.get("rag", {}).get("status") == "ready":
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+rag_refresh_available() {
+  local payload_file=$1
+  "$PYTHON_BIN" - "$payload_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    payload = json.load(handle)
+if payload.get("rag", {}).get("refresh_available") is True:
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+rag_refresh_job_finished() {
+  local payload_file=$1
+  "$PYTHON_BIN" - "$payload_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    payload = json.load(handle)
+status = payload.get("rag", {}).get("refresh_job", {}).get("status")
+if status in {"completed", "failed"}:
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+wait_for_rag_ready() {
+  if is_mock_mode || ! is_truthy "$REQUIRE_RAG_READY"; then
+    return 0
+  fi
+
+  local payload_file refresh_body http_code deadline now
+  payload_file="$(mktemp)"
+  refresh_body="$(mktemp)"
+
+  http_code="$(curl -sS -o "$payload_file" -w "%{http_code}" "http://localhost:5002/rag/status" || echo 000)"
+  write_rag_preflight_snapshot "$payload_file" "initial_status" "$http_code"
+  if [[ "$http_code" == "200" ]] && rag_status_is_ready "$payload_file"; then
+    log "RAG runtime is ready"
+    rm -f "$payload_file" "$refresh_body"
+    return 0
+  fi
+
+  if ! rag_refresh_available "$payload_file"; then
+    log "RAG runtime is not ready and refresh is not available"
+    collect_rag_preflight_diagnostics
+    rm -f "$payload_file" "$refresh_body"
+    return 1
+  fi
+
+  if [[ "$RAG_MODE" == "backup" ]]; then
+    log "RAG runtime is not ready after backup restore; full refresh is required"
+    collect_rag_preflight_diagnostics
+    rm -f "$payload_file" "$refresh_body"
+    return 1
+  fi
+
+  log "RAG runtime requires refresh; starting controlled refresh"
+  http_code="$(curl -sS -X POST -H "X-Correlation-ID: functional-smoke-rag-refresh" -o "$refresh_body" -w "%{http_code}" "http://localhost:5002/rag/refresh" || echo 000)"
+  if [[ "$http_code" != "202" ]]; then
+    log "RAG refresh returned HTTP $http_code"
+    collect_rag_preflight_diagnostics
+    rm -f "$payload_file" "$refresh_body"
+    return 1
+  fi
+
+  deadline=$(( $(date +%s) + RAG_READY_TIMEOUT_SECONDS ))
+  while true; do
+    http_code="$(curl -sS -o "$payload_file" -w "%{http_code}" "http://localhost:5002/rag/status" || echo 000)"
+    write_rag_preflight_snapshot "$payload_file" "poll_status" "$http_code"
+    if [[ "$http_code" == "200" ]] && rag_status_is_ready "$payload_file"; then
+      log "RAG runtime is ready after refresh"
+      backup_chroma_data
+      rm -f "$payload_file" "$refresh_body"
+      return 0
+    fi
+    if rag_refresh_job_finished "$payload_file"; then
+      log "RAG refresh job finished but runtime is still not ready"
+      collect_rag_preflight_diagnostics
+      rm -f "$payload_file" "$refresh_body"
+      return 1
+    fi
+
+    now="$(date +%s)"
+    if (( now >= deadline )); then
+      log "timeout waiting for RAG runtime readiness"
+      collect_rag_preflight_diagnostics
+      rm -f "$payload_file" "$refresh_body"
+      return 1
+    fi
+
+    sleep "$RAG_READY_POLL_SECONDS"
+  done
+}
+
 if ! command -v docker >/dev/null 2>&1; then
   echo "docker is required for functional smoke tests."
   exit 1
@@ -240,8 +540,13 @@ if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
   exit 1
 fi
 
+validate_rag_mode
+
 if [[ ! -f "$INFRA_ENV_FILE" ]]; then
-  if [[ -f "$INFRA_DIR/.env.example" ]]; then
+  if is_truthy "$REQUIRE_REAL_CONFIG"; then
+    echo "Missing infrastructure/.env; real-config smoke cannot use .env.example."
+    exit 1
+  elif [[ -f "$INFRA_DIR/.env.example" ]]; then
     TMP_ENV_FILE="$(mktemp)"
     TMP_ENV_TEMP_CREATED=1
     cp "$INFRA_DIR/.env.example" "$TMP_ENV_FILE"
@@ -253,6 +558,10 @@ if [[ ! -f "$INFRA_ENV_FILE" ]]; then
 else
   TMP_ENV_FILE="$INFRA_ENV_FILE"
 fi
+
+validate_real_config_env
+mkdir -p "$(dirname "$RAG_PREFLIGHT_FILE")"
+rm -f "$RAG_PREFLIGHT_FILE"
 
 log "starting docker stack for functional smoke tests"
 "${DOCKER_COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$TMP_ENV_FILE" up --build -d
@@ -285,7 +594,7 @@ client.validatordb.validations.delete_many({})
 PY
 fi
 
-if [[ "$MOCK_MODE" == "1" || "$MOCK_MODE" == "true" ]]; then
+if is_mock_mode; then
   CONTEXT_CONTAINER_CONFIG="$(resolve_service_config_path "$CONTEXT_CONTAINER")"
   POLICY_CONTAINER_CONFIG="$(resolve_service_config_path "$POLICY_CONTAINER")"
   VALIDATOR_CONTAINER_CONFIG="$(resolve_service_config_path "$VALIDATOR_CONTAINER")"
@@ -304,6 +613,11 @@ fi
 log "validating health and readiness probes for all services"
 run_service_probe_validation
 
+restore_chroma_backup
+
+log "validating RAG runtime readiness contract"
+wait_for_rag_ready
+
 log "loading golden fixtures into context-agent"
 docker exec "$CONTEXT_CONTAINER" python generate_context_from_yaml.py "$GOLDEN_DIR"
 
@@ -313,7 +627,14 @@ mkdir -p "$(dirname "$RESULT_FILE")"
 : > "$ERROR_FILE"
 
 log "running full context -> policy -> validation pipeline and collecting evidence"
-if ! docker exec -i "$CONTEXT_CONTAINER" python - > "$RESULT_FILE" 2> "$ERROR_FILE" <<'PY'
+if ! docker exec -i \
+  -e MIGRATION_SMOKE_MOCK="$MOCK_MODE" \
+  -e MIGRATION_SMOKE_CLEAN_DB="$CLEAN_DB" \
+  -e MIGRATION_SMOKE_GOLDEN_DIR="$GOLDEN_DIR" \
+  -e MIGRATION_SMOKE_REQUIRE_RAG_READY="$REQUIRE_RAG_READY" \
+  -e MIGRATION_SMOKE_RAG_MODE="$RAG_MODE" \
+  -e MIGRATION_SMOKE_RAG_PREFLIGHT_FILE="/migration/functional-smoke-rag-preflight.json" \
+  "$CONTEXT_CONTAINER" python - > "$RESULT_FILE" 2> "$ERROR_FILE" <<'PY'
 import json
 import os
 import time
@@ -339,6 +660,27 @@ def utc_now():
 
 
 RUN_STARTED_AT = utc_now()
+
+
+def env_flag(name, default=False):
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in {"1", "true", "yes"}
+
+
+MOCK_MODE = env_flag("MIGRATION_SMOKE_MOCK", True)
+REQUIRE_RAG_READY = env_flag("MIGRATION_SMOKE_REQUIRE_RAG_READY", False)
+
+
+def load_json_file(path):
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except FileNotFoundError:
+        return None
 
 
 def probe_service(base_url):
@@ -462,8 +804,14 @@ for context_id in context_ids:
         "question_id": "validated_policy",
     })
     policy_records = policy_db.policies.count_documents({"context_id": context_id})
+    policy_doc = policy_db.policies.find_one({"context_id": context_id})
     if policy_records == 0:
         policy_records = fallback_db.policies.count_documents({"context_id": context_id})
+        policy_doc = fallback_db.policies.find_one({"context_id": context_id})
+    retrieval_evidence = []
+    if isinstance(policy_doc, dict) and isinstance(policy_doc.get("retrieval_evidence"), list):
+        retrieval_evidence = policy_doc["retrieval_evidence"]
+    retrieval_evidence_count = len(retrieval_evidence)
 
     validation_docs = list(
         validator_db.validations.find({"context_id": context_id}).sort("timestamp", -1)
@@ -496,6 +844,8 @@ for context_id in context_ids:
         reasons.append("missing_validated_policy")
     if policy_records == 0:
         reasons.append("missing_policy_record")
+    if not MOCK_MODE and REQUIRE_RAG_READY and retrieval_evidence_count == 0:
+        reasons.append("missing_retrieval_evidence")
 
     if reasons:
         failed.append({"context_id": context_id, "reasons": reasons})
@@ -505,6 +855,7 @@ for context_id in context_ids:
         "generate_status": generate_status,
         "validated_policy_records": validated_count,
         "policy_records": policy_records,
+        "retrieval_evidence_count": retrieval_evidence_count,
         "validation_rounds": len(validation_docs),
         "last_status": validation_docs[0].get("final_decision") if validation_docs else None,
         "pipeline_time": utc_now(),
@@ -522,6 +873,7 @@ if preflight_failures:
         failed.insert(0, {"context_id": "preflight", "reasons": preflight_failures})
 
 finished_at = utc_now()
+rag_preflight = load_json_file(os.getenv("MIGRATION_SMOKE_RAG_PREFLIGHT_FILE"))
 result = {
     "schema_version": "1.0",
     "run": {
@@ -529,9 +881,10 @@ result = {
         "started_at": RUN_STARTED_AT,
         "finished_at": finished_at,
         "status": "failed" if failed or preflight_failures else "passed",
-        "mode": "mock" if os.getenv("SMOKE_USE_MOCK_CONFIGS", "1") not in {"0", "false", "False"} else "runtime",
-        "clean_db": os.getenv("SMOKE_CLEAN_DB", "1") not in {"0", "false", "False"},
-        "golden_dir": os.getenv("GOLDEN_DIR", "/migration/golden-contexts"),
+        "mode": "mock" if MOCK_MODE else "runtime",
+        "clean_db": env_flag("MIGRATION_SMOKE_CLEAN_DB", True),
+        "golden_dir": os.getenv("MIGRATION_SMOKE_GOLDEN_DIR", "/migration/golden-contexts"),
+        "rag_mode": os.getenv("MIGRATION_SMOKE_RAG_MODE", "refresh"),
     },
     "environment": {
         "compose_file": "infrastructure/docker-compose.yml",
@@ -549,6 +902,7 @@ result = {
     "smoke_timestamp": finished_at,
     "total_contexts": len(context_ids),
     "service_checks": service_checks,
+    "rag_preflight": rag_preflight,
     "preflight_failures": preflight_failures,
     "failed_contexts": failed,
     "legacy_summary": contexts,

@@ -5,7 +5,7 @@ DOCKER_COMPOSE_CMD=$(shell scripts/docker_preflight.sh --print-compose 2>/dev/nu
 COMPOSE=$(DOCKER_COMPOSE_CMD) -f $(INFRA_DIR)/docker-compose.yml --env-file $(INFRA_DIR)/.env
 LINT_PYTHON=$(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi)
 
-.PHONY: all docker-preflight up down clean rebuild logs shell-context context-tests context-import policy-shell policy-tests policy-vectorize policy-rag-validate validator-shell validator-tests functional-smoke critical-path-validation bootstrap-test-env host-fast-tests lint help
+.PHONY: all docker-preflight up down clean rebuild logs shell-context context-tests context-import policy-shell policy-tests policy-vectorize policy-rag-validate policy-rag-backup policy-rag-restore validator-shell validator-tests functional-smoke functional-smoke-real functional-smoke-real-full functional-smoke-real-backup critical-path-validation bootstrap-test-env host-fast-tests lint help
 
 ## Verify docker and compose prerequisites
 docker-preflight:
@@ -59,6 +59,14 @@ policy-vectorize:
 policy-rag-validate:
 	docker exec policy_agent_service python scripts/index_pdfs_to_chroma.py --validate-only --validate-chroma
 
+## Export current Chroma data to a local backup
+policy-rag-backup:
+	./scripts/chroma_backup.sh backup
+
+## Restore local Chroma data backup
+policy-rag-restore:
+	./scripts/chroma_backup.sh restore
+
 ## Enter the validator-agent container
 validator-shell: 
 	docker exec -it validator_agent_service bash
@@ -70,6 +78,17 @@ validator-tests:
 ## Run full functional smoke in docker (end-to-end) using example fixtures
 functional-smoke:
 	./scripts/run_docker_functional_smoke.sh
+
+## Run full functional smoke against real service configs and require RAG readiness
+functional-smoke-real: functional-smoke-real-full
+
+## Run full real-config smoke and refresh RAG from source documents
+functional-smoke-real-full:
+	MIGRATION_SMOKE_MOCK=0 MIGRATION_SMOKE_REQUIRE_REAL_CONFIG=1 MIGRATION_SMOKE_REQUIRE_RAG_READY=1 MIGRATION_SMOKE_RAG_MODE=refresh MIGRATION_SMOKE_RAG_READY_TIMEOUT_SECONDS=2400 MIGRATION_SMOKE_CHROMA_BACKUP_AFTER_REFRESH=1 ./scripts/run_docker_functional_smoke.sh
+
+## Run real-config smoke by restoring a compatible local Chroma backup
+functional-smoke-real-backup:
+	MIGRATION_SMOKE_MOCK=0 MIGRATION_SMOKE_REQUIRE_REAL_CONFIG=1 MIGRATION_SMOKE_REQUIRE_RAG_READY=1 MIGRATION_SMOKE_RAG_MODE=backup ./scripts/run_docker_functional_smoke.sh
 
 validate-smoke-artifact:
 	python3 scripts/validate_smoke_artifact.py migration/functional-smoke-result.json
@@ -107,9 +126,13 @@ help:
 	@echo "make policy-tests 	-> Run tests inside policy-agent"
 	@echo "make policy-vectorize 	-> Run data vectorization inside policy-agent"
 	@echo "make policy-rag-validate -> Validate RAG manifest/source paths without indexing"
+	@echo "make policy-rag-backup -> Export current Chroma data to a local backup"
+	@echo "make policy-rag-restore -> Restore local Chroma data backup"
 	@echo "make validator-shell 	-> Access validator-agent shell"
 	@echo "make validator-tests 	-> Run tests within validator-agent"
 	@echo "make functional-smoke 	-> Run full docker functional smoke pipeline"
+	@echo "make functional-smoke-real-full -> Run real smoke and refresh RAG from source documents"
+	@echo "make functional-smoke-real-backup -> Run real smoke from a local Chroma backup"
 	@echo "make critical-path-validation -> Run context/policy/validator suites plus smoke"
 	@echo "make bootstrap-test-env -> Install local test dependencies into .venv"
 	@echo "make host-fast-tests 	-> Run fast/route host tests per service"

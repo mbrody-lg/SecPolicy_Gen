@@ -25,6 +25,7 @@ from app.observability import build_log_event, log_event
 logger = logging.getLogger(__name__)
 MAX_PIPELINE_DIAGNOSTIC_HOPS = 25
 SYSTEM_STATUS_TIMEOUT_SECONDS = 2.0
+SYSTEM_RAG_STATUS_TIMEOUT_SECONDS = 10.0
 
 
 class PipelineStepError(Exception):
@@ -109,10 +110,15 @@ def get_readiness_status() -> dict:
 
 def _service_endpoint_status(name: str, base_url: str, *, path: str = "/ready") -> dict:
     """Return bounded service status from a dependency endpoint."""
+    timeout_seconds = (
+        SYSTEM_RAG_STATUS_TIMEOUT_SECONDS
+        if path == "/rag/status"
+        else SYSTEM_STATUS_TIMEOUT_SECONDS
+    )
     try:
         response = requests.get(
             f"{base_url.rstrip('/')}{path}",
-            timeout=SYSTEM_STATUS_TIMEOUT_SECONDS,
+            timeout=timeout_seconds,
         )
         payload = response.json() if response.content else {}
     except requests.RequestException:

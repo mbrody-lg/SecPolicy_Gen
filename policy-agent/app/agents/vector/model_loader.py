@@ -143,3 +143,10 @@ class LocalSentenceTransformerEmbeddingFunction:
             normalize_embeddings=self.normalize_embeddings,
         )
         return embeddings.tolist() if hasattr(embeddings, "tolist") else embeddings
+
+    def embed_query(self, input: Iterable[str]):
+        """Support newer Chroma query embedding protocol."""
+        return self.model.encode(
+            list(input),
+            normalize_embeddings=self.normalize_embeddings,
+        )
