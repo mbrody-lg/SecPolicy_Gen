@@ -26,6 +26,7 @@ from app.services.pipeline_jobs import (
     find_active_pipeline_job,
     get_pipeline_job,
 )
+from app.services.pipeline_worker import start_pipeline_job_worker
 
 main = Blueprint("main", __name__)
 logger = logging.getLogger(__name__)
@@ -402,6 +403,7 @@ def trigger_policy_generation(context_id):
         command="generate_policy",
         correlation_id=request.headers.get("X-Correlation-ID"),
     )
+    start_pipeline_job_worker(job)
     payload = {
         "success": True,
         "status": "accepted",
