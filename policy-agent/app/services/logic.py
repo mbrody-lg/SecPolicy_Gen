@@ -480,6 +480,23 @@ def get_rag_runtime_status() -> tuple[dict, int]:
     """Return RAG runtime status, including missing configured Chroma collections."""
     try:
         config = load_policy_config()
+        if str(config.get("type", "")).strip().lower() == "mock":
+            return {
+                "status": "ready",
+                "service": SERVICE_NAME,
+                "rag": {
+                    "status": "ready",
+                    "configured_collections": [],
+                    "available_collections": [],
+                    "missing_collections": [],
+                    "embedding_models": [],
+                    "collection_checks": [],
+                    "action": "none",
+                    "refresh_available": False,
+                    "refresh_job": get_rag_refresh_job_status(),
+                    "mode": "mock",
+                },
+            }, 200
         configured_collections = _configured_chroma_collections(config)
         configured_models = _configured_embedding_models(config)
         embedding_models = _embedding_model_runtime_status(configured_models)
