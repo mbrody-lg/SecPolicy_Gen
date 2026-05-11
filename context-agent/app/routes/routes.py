@@ -259,6 +259,7 @@ def context_detail(context_id):
         context=context,
         interactions=interactions,
         system_status=get_system_status(),
+        active_pipeline_job=find_active_pipeline_job(str(context_id)),
     )
 
 @main.route("/context/<context_id>/continue", methods=["POST"])

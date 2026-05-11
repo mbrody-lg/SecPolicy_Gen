@@ -78,11 +78,22 @@
         Refresh: <span id="rag-refresh-job-value">{{ system_status.rag.refresh_job.status if system_status and system_status.rag and system_status.rag.refresh_job else 'idle' }}</span>
       </div>
     {% endif %}
-    <form method="post" action="{{ url_for('main.trigger_policy_generation', context_id=context._id) }}">
+    {% set pipeline_active = active_pipeline_job and active_pipeline_job.status in ['queued', 'running', 'policy_generating', 'policy_generated', 'validating'] %}
+    <div id="pipeline-job-panel"
+      class="{% if pipeline_active %}mb-4 rounded border border-blue-300 bg-blue-50 p-3 text-sm text-blue-950{% else %}hidden mb-4 rounded border border-blue-300 bg-blue-50 p-3 text-sm text-blue-950{% endif %}"
+      data-context-id="{{ context._id }}"
+      data-active-job-id="{{ active_pipeline_job.job_id if active_pipeline_job else '' }}">
+      <div class="font-semibold">Policy pipeline</div>
+      <div class="mt-1">Status: <span id="pipeline-job-status">{{ active_pipeline_job.status if active_pipeline_job else 'idle' }}</span></div>
+      <div class="mt-1">Stage: <span id="pipeline-job-stage">{{ active_pipeline_job.current_stage if active_pipeline_job else 'idle' }}</span></div>
+      <div class="mt-1">Correlation: <span id="pipeline-job-correlation">{{ active_pipeline_job.correlation_id if active_pipeline_job else '' }}</span></div>
+      <div id="pipeline-job-error" class="mt-2 hidden rounded border border-red-300 bg-red-50 p-2 text-red-900"></div>
+    </div>
+    <form method="post" action="{{ url_for('main.trigger_policy_generation', context_id=context._id) }}" data-generate-policy-form>
       <button type="submit"
-        class="{% if runtime_ready %}bg-green-600 hover:bg-green-700{% else %}bg-gray-400 cursor-not-allowed{% endif %} text-white px-4 py-2 rounded"
+        class="{% if runtime_ready and not pipeline_active %}bg-green-600 hover:bg-green-700{% else %}bg-gray-400 cursor-not-allowed{% endif %} text-white px-4 py-2 rounded"
         data-generate-policy-button
-        {% if not runtime_ready %}disabled{% endif %}>
+        {% if not runtime_ready or pipeline_active %}disabled{% endif %}>
         Generate and validate
       </button>
     </form>
