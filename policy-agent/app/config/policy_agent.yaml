@@ -17,8 +17,8 @@ roles:
     vector:
       - chroma: Chroma Vector Database
         collection: [legal_norms, sector_norms, security_frameworks, risk_methodologies, implementation_guides]
-        model: intfloat/e5-base
-        revision: b533fe4636f4a2507c08ddab40644d20b0006d6a
+        model: intfloat/multilingual-e5-base
+        revision: d128750597153bb5987e10b1c3493a34e5a4502a
         chunk_size: 300
         chunk_overlap: 50
   - MPG: Multi-Path Plan Generator

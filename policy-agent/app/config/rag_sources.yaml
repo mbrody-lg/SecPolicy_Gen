@@ -2,8 +2,8 @@ version: 1
 
 embedding_defaults:
   backend: chroma
-  model: intfloat/e5-base
-  revision: b533fe4636f4a2507c08ddab40644d20b0006d6a
+  model: intfloat/multilingual-e5-base
+  revision: d128750597153bb5987e10b1c3493a34e5a4502a
   chunk_size: 300
   chunk_overlap: 50
   file_types:

@@ -73,3 +73,5 @@ htmlcov/
 /.local-workspace/
 /tasks/
 /migration/
+AGENTS.md
+RTK.md
