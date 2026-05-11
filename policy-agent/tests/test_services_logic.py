@@ -346,6 +346,47 @@ def test_get_rag_runtime_status_reports_missing_collections(app, monkeypatch):
     assert payload["rag"]["missing_collections"] == ["guia"]
 
 
+def test_get_rag_runtime_status_treats_mock_policy_as_ready(app, monkeypatch):
+    monkeypatch.setattr(
+        logic,
+        "load_policy_config",
+        lambda: {
+            "type": "mock",
+            "roles": [
+                {
+                    "vector": [
+                        {
+                            "chroma": {
+                                "collection": ["legal_norms"],
+                                "model": "intfloat/e5-base",
+                            }
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(logic, "_RAG_REFRESH_JOB", None)
+
+    with app.app_context():
+        payload, status_code = logic.get_rag_runtime_status()
+
+    assert status_code == 200
+    assert payload["status"] == "ready"
+    assert payload["rag"] == {
+        "status": "ready",
+        "configured_collections": [],
+        "available_collections": [],
+        "missing_collections": [],
+        "embedding_models": [],
+        "collection_checks": [],
+        "action": "none",
+        "refresh_available": False,
+        "refresh_job": None,
+        "mode": "mock",
+    }
+
+
 def test_get_rag_runtime_status_reports_ready_when_all_collections_exist(app, monkeypatch):
     class FakeCollection:
         def __init__(self, name):
