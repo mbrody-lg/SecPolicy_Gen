@@ -18,9 +18,13 @@ from app.services.logic import (
     generate_context_prompt,
     run_with_agent,
     load_questions,
-    generate_full_policy_pipeline,
     render_markdown,
     store_validated_policy,
+)
+from app.services.pipeline_jobs import (
+    create_pipeline_job,
+    find_active_pipeline_job,
+    get_pipeline_job,
 )
 
 main = Blueprint("main", __name__)
@@ -362,17 +366,51 @@ def send_policy_to_context(context_id):
 
 @main.route("/context/<context_id>/generate_policy", methods=["POST"])
 def trigger_policy_generation(context_id):
-    """Run end-to-end policy generation and validation for a context."""
+    """Start end-to-end policy generation and validation for a context."""
     system_status = get_system_status()
     if system_status.get("status") != "ready":
-        flash("Application runtime is not ready. Update state before generating a policy.", "danger")
+        payload = {
+            "success": False,
+            "error_type": "readiness_error",
+            "error_code": "runtime_not_ready",
+            "message": "Application runtime is not ready. Update state before generating a policy.",
+            "details": {"context_id": context_id},
+        }
+        if _wants_json_response():
+            return jsonify(payload), 503
+        flash(payload["message"], "danger")
         return redirect(url_for("main.context_detail", context_id=context_id))
 
-    result = generate_full_policy_pipeline(context_id)
-    if result.get("success"):
-        flash("Policy successfully generated and validated.", "success")
-    else:
-        flash(_pipeline_flash_message(result), "danger")
+    active_job = find_active_pipeline_job(context_id)
+    if active_job:
+        payload = {
+            "success": True,
+            "status": "accepted",
+            "message": "Policy generation is already running.",
+            "job": _public_pipeline_job(active_job),
+        }
+        if _wants_json_response():
+            return jsonify(payload), 202
+        flash(
+            f"Policy generation is already running. Current stage: {active_job['current_stage']}.",
+            "info",
+        )
+        return redirect(url_for("main.context_detail", context_id=context_id))
+
+    job = create_pipeline_job(
+        context_id=context_id,
+        command="generate_policy",
+        correlation_id=request.headers.get("X-Correlation-ID"),
+    )
+    payload = {
+        "success": True,
+        "status": "accepted",
+        "message": "Policy generation started.",
+        "job": _public_pipeline_job(job),
+    }
+    if _wants_json_response():
+        return jsonify(payload), 202
+    flash("Policy generation started. Current stage: queued.", "info")
     return redirect(url_for("main.context_detail", context_id=context_id))
 
 
@@ -434,6 +472,73 @@ def _public_pipeline_diagnostic(diagnostic: dict) -> dict:
             if key in last_error and last_error[key] is not None
         }
     return public
+
+
+def _public_pipeline_job(job: dict) -> dict:
+    """Return the public allowlisted pipeline job view."""
+    allowed_top_level = {
+        "job_id",
+        "context_id",
+        "correlation_id",
+        "command",
+        "status",
+        "current_stage",
+        "created_at",
+        "updated_at",
+        "started_at",
+        "completed_at",
+        "result_refs",
+    }
+    allowed_error_fields = {
+        "failed_stage",
+        "error_type",
+        "error_code",
+        "safe_message",
+        "status_code",
+    }
+    public = {
+        key: job[key]
+        for key in allowed_top_level
+        if key in job and job[key] is not None
+    }
+    last_error = job.get("last_error")
+    if isinstance(last_error, dict):
+        public["last_error"] = {
+            key: last_error[key]
+            for key in allowed_error_fields
+            if key in last_error and last_error[key] is not None
+        }
+    return public
+
+
+@main.route("/pipeline/jobs/<job_id>", methods=["GET"])
+def get_pipeline_job_status(job_id):
+    """Return a bounded pipeline job status document."""
+    job = get_pipeline_job(job_id)
+    if not job:
+        return jsonify({
+            "success": False,
+            "error_type": "validation_error",
+            "error_code": "pipeline_job_not_found",
+            "message": "Pipeline job not found.",
+            "details": {"job_id": job_id},
+        }), 404
+    return jsonify({"success": True, "job": _public_pipeline_job(job)}), 200
+
+
+@main.route("/context/<context_id>/pipeline/jobs/active", methods=["GET"])
+def get_active_pipeline_job_status(context_id):
+    """Return the active pipeline job for a context when one exists."""
+    job = find_active_pipeline_job(context_id)
+    if not job:
+        return jsonify({
+            "success": False,
+            "error_type": "validation_error",
+            "error_code": "active_pipeline_job_not_found",
+            "message": "Active pipeline job not found.",
+            "details": {"context_id": context_id},
+        }), 404
+    return jsonify({"success": True, "job": _public_pipeline_job(job)}), 200
 
 
 @main.route("/diagnostics/<correlation_id>", methods=["GET"])
