@@ -38,7 +38,15 @@ class FakeContextsCollection:
 
     def find_one(self, query):
         for doc in self.docs:
-            if all(doc.get(key) == value for key, value in query.items()):
+            matches = True
+            for key, value in query.items():
+                if isinstance(value, dict) and "$in" in value:
+                    matches = doc.get(key) in value["$in"]
+                else:
+                    matches = doc.get(key) == value
+                if not matches:
+                    break
+            if matches:
                 return doc
         return None
 
@@ -55,9 +63,10 @@ class FakeInteractionsCollection:
 
 
 class FakeDB:
-    def __init__(self, contexts=None, interactions=None):
+    def __init__(self, contexts=None, interactions=None, pipeline_jobs=None):
         self.contexts = FakeContextsCollection(contexts)
         self.interactions = FakeInteractionsCollection(interactions)
+        self.pipeline_jobs = FakeContextsCollection(pipeline_jobs)
 
 
 def test_dashboard_route(client, monkeypatch):
@@ -152,6 +161,43 @@ def test_context_detail_disables_policy_generation_when_runtime_is_not_ready(cli
     assert b"Application runtime is not ready" in response.data
     assert b"intfloat/multilingual-e5-base (missing)" in response.data
     assert b"Update state" in response.data
+    assert b"disabled" in response.data
+
+
+def test_context_detail_shows_active_pipeline_job(client, monkeypatch):
+    context_id = ObjectId()
+    monkeypatch.setattr(
+        routes_module.mongo,
+        "db",
+        FakeDB(
+            contexts=[{"_id": context_id, "status": "completed"}],
+            interactions=[],
+            pipeline_jobs=[
+                {
+                    "job_id": "job-1",
+                    "context_id": str(context_id),
+                    "correlation_id": "corr-1",
+                    "command": "generate_policy",
+                    "status": "policy_generating",
+                    "current_stage": "policy_generation",
+                }
+            ],
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
+
+    response = client.get(f"/context/{context_id}")
+
+    assert response.status_code == 200
+    assert b"Policy pipeline" in response.data
+    assert b"policy_generating" in response.data
+    assert b"policy_generation" in response.data
+    assert b"corr-1" in response.data
     assert b"disabled" in response.data
 
 
