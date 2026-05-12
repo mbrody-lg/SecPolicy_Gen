@@ -402,6 +402,11 @@ def test_trigger_policy_generation_redirects_after_starting_job(client, monkeypa
         }
 
     monkeypatch.setattr(routes_module, "create_pipeline_job", fake_create_pipeline_job)
+    monkeypatch.setattr(
+        routes_module,
+        "start_pipeline_job_worker",
+        lambda job: {"started": True, "job_id": job["job_id"]},
+    )
 
     response = client.post(f"/context/{context_id}/generate_policy", follow_redirects=False)
 
@@ -474,6 +479,11 @@ def test_trigger_policy_generation_returns_json_accepted_job(client, monkeypatch
                 "raw_exception": "must not leak",
             },
         },
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "start_pipeline_job_worker",
+        lambda job: {"started": True, "job_id": job["job_id"]},
     )
 
     response = client.post(
