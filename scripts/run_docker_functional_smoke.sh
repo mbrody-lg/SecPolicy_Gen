@@ -27,6 +27,8 @@ REQUIRE_RAG_READY="${MIGRATION_SMOKE_REQUIRE_RAG_READY:-0}"
 RAG_MODE="${MIGRATION_SMOKE_RAG_MODE:-refresh}"
 RAG_READY_TIMEOUT_SECONDS="${MIGRATION_SMOKE_RAG_READY_TIMEOUT_SECONDS:-900}"
 RAG_READY_POLL_SECONDS="${MIGRATION_SMOKE_RAG_READY_POLL_SECONDS:-5}"
+PIPELINE_JOB_TIMEOUT_SECONDS="${MIGRATION_SMOKE_PIPELINE_JOB_TIMEOUT_SECONDS:-180}"
+PIPELINE_JOB_POLL_SECONDS="${MIGRATION_SMOKE_PIPELINE_JOB_POLL_SECONDS:-2}"
 CHROMA_BACKUP_FILE="${MIGRATION_SMOKE_CHROMA_BACKUP_FILE:-}"
 CHROMA_BACKUP_AFTER_REFRESH="${MIGRATION_SMOKE_CHROMA_BACKUP_AFTER_REFRESH:-0}"
 TMP_BACKUP_DIR=""
@@ -634,6 +636,8 @@ if ! docker exec -i \
   -e MIGRATION_SMOKE_REQUIRE_RAG_READY="$REQUIRE_RAG_READY" \
   -e MIGRATION_SMOKE_RAG_MODE="$RAG_MODE" \
   -e MIGRATION_SMOKE_RAG_PREFLIGHT_FILE="/migration/functional-smoke-rag-preflight.json" \
+  -e MIGRATION_SMOKE_PIPELINE_JOB_TIMEOUT_SECONDS="$PIPELINE_JOB_TIMEOUT_SECONDS" \
+  -e MIGRATION_SMOKE_PIPELINE_JOB_POLL_SECONDS="$PIPELINE_JOB_POLL_SECONDS" \
   "$CONTEXT_CONTAINER" python - > "$RESULT_FILE" 2> "$ERROR_FILE" <<'PY'
 import json
 import os
@@ -671,6 +675,8 @@ def env_flag(name, default=False):
 
 MOCK_MODE = env_flag("MIGRATION_SMOKE_MOCK", True)
 REQUIRE_RAG_READY = env_flag("MIGRATION_SMOKE_REQUIRE_RAG_READY", False)
+PIPELINE_JOB_TIMEOUT_SECONDS = int(os.getenv("MIGRATION_SMOKE_PIPELINE_JOB_TIMEOUT_SECONDS", "180"))
+PIPELINE_JOB_POLL_SECONDS = float(os.getenv("MIGRATION_SMOKE_PIPELINE_JOB_POLL_SECONDS", "2"))
 
 
 def load_json_file(path):
@@ -740,6 +746,43 @@ def lookup_diagnostics(correlation_id):
     return last_result
 
 
+def poll_pipeline_job(job_id):
+    deadline = time.time() + PIPELINE_JOB_TIMEOUT_SECONDS
+    last_result = {
+        "job_id": job_id,
+        "status_code": 0,
+        "job_status": None,
+        "job_stage": None,
+        "job_correlation_id": None,
+        "job_error_code": None,
+    }
+    while time.time() < deadline:
+        try:
+            response = requests.get(
+                f"http://localhost:5000/pipeline/jobs/{job_id}",
+                headers={"Accept": "application/json"},
+                timeout=15,
+            )
+            last_result["status_code"] = response.status_code
+            payload = response.json() if response.headers.get("Content-Type", "").startswith("application/json") else {}
+            job = payload.get("job") if isinstance(payload, dict) else None
+            if isinstance(job, dict):
+                last_result["job_status"] = job.get("status")
+                last_result["job_stage"] = job.get("current_stage")
+                last_result["job_correlation_id"] = job.get("correlation_id")
+                last_error = job.get("last_error")
+                if isinstance(last_error, dict):
+                    last_result["job_error_code"] = last_error.get("error_code")
+                    last_result["job_failed_stage"] = last_error.get("failed_stage")
+                if job.get("status") in {"completed", "failed", "cancelled"}:
+                    return last_result
+        except Exception as exc:  # pragma: no cover - smoke-only diagnostics
+            last_result["error"] = str(exc)
+        time.sleep(PIPELINE_JOB_POLL_SECONDS)
+    last_result["timed_out"] = True
+    return last_result
+
+
 service_checks = {
     service_name: probe_service(base_url)
     for service_name, base_url in SERVICE_ENDPOINTS.items()
@@ -763,12 +806,21 @@ for context_id in context_ids:
     try:
         response = requests.post(
             f"http://localhost:5000/context/{context_id}/generate_policy",
-            headers={"X-Correlation-ID": correlation_id},
+            headers={
+                "Accept": "application/json",
+                "X-Requested-With": "XMLHttpRequest",
+                "X-Correlation-ID": correlation_id,
+            },
             allow_redirects=False,
-            timeout=120,
+            timeout=30,
         )
         generate_status = response.status_code
         response_correlation_id = response.headers.get("X-Correlation-ID")
+        response_payload = response.json() if response.headers.get("Content-Type", "").startswith("application/json") else {}
+        job = response_payload.get("job") if isinstance(response_payload, dict) else None
+        if isinstance(job, dict) and job.get("job_id"):
+            observability_by_context.setdefault(context_id, {})
+            observability_by_context[context_id]["pipeline_job"] = poll_pipeline_job(job["job_id"])
     except Exception as exc:
         generate_status = 0
         response_correlation_id = None
@@ -824,8 +876,19 @@ for context_id in context_ids:
     reasons = []
     generate_status = status_by_context.get(context_id, 0)
     observability = observability_by_context.get(context_id, {})
-    if generate_status not in (200, 302):
+    job_observability = observability.get("pipeline_job", {})
+    if generate_status not in (200, 202, 302):
         reasons.append(f"generate_status:{generate_status}")
+    if generate_status == 202 and not job_observability.get("job_id"):
+        reasons.append("missing_pipeline_job")
+    if job_observability.get("status_code") not in (None, 200):
+        reasons.append(f"pipeline_job_status:{job_observability.get('status_code')}")
+    if job_observability.get("job_status") and job_observability.get("job_status") != "completed":
+        reasons.append(f"pipeline_job_terminal_status:{job_observability.get('job_status')}")
+    if job_observability.get("timed_out"):
+        reasons.append(f"pipeline_job_timeout_stage:{job_observability.get('job_stage')}")
+    if job_observability.get("job_correlation_id") and job_observability.get("job_correlation_id") != observability.get("requested_correlation_id"):
+        reasons.append("missing_or_mismatched_job_correlation_id")
     if observability.get("generate_response_correlation_id") != observability.get("requested_correlation_id"):
         reasons.append("missing_or_mismatched_response_correlation_id")
     if observability.get("status_code") != 200:
