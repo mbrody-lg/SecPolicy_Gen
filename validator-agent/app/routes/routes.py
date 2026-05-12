@@ -6,6 +6,7 @@ from bson import ObjectId
 from flask import Blueprint, abort, current_app, jsonify, request
 
 from app import mongo
+from app.metrics import metrics_response
 from app.observability import log_event
 from app.services.logic import get_health_status, get_readiness_status, run_validation_pipeline
 
@@ -26,6 +27,12 @@ def ready():
     status_code = 200 if result.get("status") == "ready" else 503
     _log_readiness_response(result, status_code)
     return jsonify(result), status_code
+
+
+@routes.route("/metrics", methods=["GET"])
+def metrics():
+    """Expose Prometheus metrics for local observability."""
+    return metrics_response()
 
 
 def _log_readiness_response(payload: dict, status_code: int) -> None:

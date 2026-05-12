@@ -13,6 +13,8 @@ from flask import request
 from flask_pymongo import PyMongo
 from dotenv import load_dotenv
 
+from app.metrics import record_request_metrics, start_request_timer
+
 # Initialize global Mongo object
 mongo = PyMongo()
 
@@ -147,9 +149,11 @@ def create_app():
     @app.before_request
     def assign_correlation_id():
         g.correlation_id = _resolve_request_correlation_id()
+        start_request_timer()
 
     @app.after_request
     def apply_security_headers(response):
+        record_request_metrics(response)
         correlation_id = get_request_correlation_id()
         if response.is_json and correlation_id:
             payload = response.get_json(silent=True)

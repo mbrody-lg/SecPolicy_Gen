@@ -69,6 +69,14 @@ def test_ready_route_reports_controlled_failure(client):
     assert "details" not in response.get_json()["checks"]["mongo"]
 
 
+def test_metrics_route_exposes_prometheus_payload(client):
+    response = client.get("/metrics")
+
+    assert response.status_code == 200
+    assert response.content_type.startswith("text/plain")
+    assert b"secpolicy_http_requests_total" in response.data
+
+
 def test_ready_route_emits_structured_readiness_event(client, caplog):
     with patch(
         "app.routes.routes.get_readiness_status",

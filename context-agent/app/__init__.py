@@ -9,6 +9,8 @@ from flask import Flask, g, has_request_context, request
 from flask_pymongo import PyMongo
 from dotenv import load_dotenv
 
+from app.metrics import record_request_metrics, start_request_timer
+
 mongo = PyMongo()
 
 TEST_ONLY_SECRET_KEY = "test-only-secret-key"
@@ -181,9 +183,11 @@ def create_app():
     @app.before_request
     def bind_correlation_id():
         g.correlation_id = _ensure_correlation_id()
+        start_request_timer()
 
     @app.after_request
     def apply_security_headers(response):
+        record_request_metrics(response)
         correlation_id = get_request_correlation_id()
         if correlation_id:
             response.headers[CORRELATION_ID_HEADER] = correlation_id
