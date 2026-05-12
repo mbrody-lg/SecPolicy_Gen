@@ -47,3 +47,16 @@ def test_local_embedding_function_uses_preloaded_model():
         ["doc one", "doc two"],
         normalize_embeddings=True,
     )
+
+
+def test_local_embedding_function_supports_chroma_query_protocol():
+    model = MagicMock()
+    embeddings = MagicMock()
+    model.encode.return_value = embeddings
+    embedding_fn = LocalSentenceTransformerEmbeddingFunction(model)
+
+    assert embedding_fn.embed_query(["query"]) is embeddings
+    model.encode.assert_called_once_with(
+        ["query"],
+        normalize_embeddings=True,
+    )

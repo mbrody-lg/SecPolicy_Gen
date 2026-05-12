@@ -703,7 +703,7 @@ def test_run_rag_refresh_command_uses_fixed_index_command(app, monkeypatch):
         payload = logic._run_rag_refresh_command()
 
     assert payload["success"] is True
-    assert captured["command"][-1] == "scripts/index_pdfs_to_chroma.py"
+    assert captured["command"][-2:] == ["scripts/index_pdfs_to_chroma.py", "--reindex"]
     assert captured["kwargs"]["check"] is False
 
 

@@ -221,7 +221,10 @@ def test_get_readiness_status_reports_mongo_failure(app_context, monkeypatch):
 
 
 def test_get_system_status_aggregates_services_and_rag(app_context, monkeypatch):
+    calls = []
+
     def fake_get(url, timeout):
+        calls.append((url, timeout))
         if url.endswith("/rag/status"):
             return FakeResponse(
                 {
@@ -251,6 +254,8 @@ def test_get_system_status_aggregates_services_and_rag(app_context, monkeypatch)
         "validator-agent",
     ]
     assert result["rag"]["status"] == "requires_refresh"
+    assert calls[-1][0].endswith("/rag/status")
+    assert calls[-1][1] == logic.SYSTEM_RAG_STATUS_TIMEOUT_SECONDS
 
 
 def test_service_endpoint_status_reports_unreachable(monkeypatch):

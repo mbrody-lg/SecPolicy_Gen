@@ -570,7 +570,7 @@ def _rag_refresh_timeout_seconds() -> int:
 def _run_rag_refresh_command() -> dict:
     """Run the fixed RAG indexing command and return a bounded result payload."""
     service_root = Path(current_app.root_path).parent
-    command = [sys.executable, "scripts/index_pdfs_to_chroma.py"]
+    command = [sys.executable, "scripts/index_pdfs_to_chroma.py", "--reindex"]
     try:
         completed = subprocess.run(
             command,
