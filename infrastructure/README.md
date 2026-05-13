@@ -166,6 +166,9 @@ The three Flask services expose `/metrics` for Prometheus. The first dashboard,
 - p95 request latency by service
 - recent 5xx errors
 - recent failure logs from `context-agent`, `policy-agent`, and `validator-agent`
+- pipeline job transitions for `Generate and Validate`
+- terminal pipeline outcomes by stage and bounded error code
+- p95 pipeline duration by terminal status
 
 This observability stack is for local/development operation. It exposes ports on
 localhost and mounts the Docker socket read-only for Promtail container log
