@@ -170,6 +170,11 @@ The three Flask services expose `/metrics` for Prometheus. The first dashboard,
 - terminal pipeline outcomes by stage and bounded error code
 - p95 pipeline duration by terminal status
 
+Active policy pipeline jobs are considered stale after
+`PIPELINE_JOB_STALE_AFTER_SECONDS` seconds, default `1800`. When this happens,
+the job is moved to `failed` with bounded error code `pipeline_job_stale` so the
+operator UI is not permanently blocked after a worker or process interruption.
+
 This observability stack is for local/development operation. It exposes ports on
 localhost and mounts the Docker socket read-only for Promtail container log
 discovery; do not promote this Compose configuration to production as-is.

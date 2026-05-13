@@ -51,6 +51,7 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | `OPENAI_API_URL` | `runtime knob` | Safe provider default may be documented | OpenAI client | Compose should pass explicitly when used |
 | `POLICY_AGENT_TIMEOUT_SECONDS` | `runtime knob` | Safe default `30` | Policy handoff HTTP calls | Parse as positive numeric value |
 | `VALIDATOR_AGENT_TIMEOUT_SECONDS` | `runtime knob` | Safe default `30` | Validator handoff HTTP calls | Parse as positive numeric value |
+| `PIPELINE_JOB_STALE_AFTER_SECONDS` | `runtime knob` | Safe default `1800` | Async policy pipeline job recovery | Parse as positive numeric value |
 | `MAX_CONTENT_LENGTH` | `runtime knob` | Safe default `262144` | Flask request limits | Parse as positive integer |
 | `SESSION_COOKIE_SECURE` | `runtime knob` | Local default `false`; non-local should be `true` | Flask session cookie | Parse as explicit truthy flag |
 | `TRUSTED_HOSTS` | `runtime knob` | Optional local list | Flask host validation | Parse comma-separated host list |

@@ -50,6 +50,7 @@ def test_create_app_requires_runtime_config_outside_testing(monkeypatch, missing
         ("POLICY_AGENT_TIMEOUT_SECONDS", "0", "POLICY_AGENT_TIMEOUT_SECONDS must be a positive number"),
         ("POLICY_AGENT_TIMEOUT_SECONDS", "not-a-number", "POLICY_AGENT_TIMEOUT_SECONDS must be a positive number"),
         ("VALIDATOR_AGENT_TIMEOUT_SECONDS", "-1", "VALIDATOR_AGENT_TIMEOUT_SECONDS must be a positive number"),
+        ("PIPELINE_JOB_STALE_AFTER_SECONDS", "0", "PIPELINE_JOB_STALE_AFTER_SECONDS must be a positive number"),
         ("MAX_CONTENT_LENGTH", "0", "MAX_CONTENT_LENGTH must be a positive integer"),
         ("MAX_CONTENT_LENGTH", "not-an-int", "MAX_CONTENT_LENGTH must be a positive integer"),
         ("TRUSTED_HOSTS", " , , ", "TRUSTED_HOSTS must include at least one value"),
@@ -108,6 +109,7 @@ def test_create_app_sets_dependency_timeouts_and_secure_defaults(monkeypatch):
     monkeypatch.setenv("FLASK_SECRET_KEY", "configured-test-secret")
     monkeypatch.delenv("POLICY_AGENT_TIMEOUT_SECONDS", raising=False)
     monkeypatch.delenv("VALIDATOR_AGENT_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("PIPELINE_JOB_STALE_AFTER_SECONDS", raising=False)
     monkeypatch.delenv("MAX_CONTENT_LENGTH", raising=False)
     monkeypatch.delenv("SESSION_COOKIE_SECURE", raising=False)
     monkeypatch.delenv("TRUSTED_HOSTS", raising=False)
@@ -120,6 +122,7 @@ def test_create_app_sets_dependency_timeouts_and_secure_defaults(monkeypatch):
     assert app.config["QUESTIONS_CONFIG_PATH"] == app_module.DEFAULT_QUESTIONS_CONFIG_PATH
     assert app.config["POLICY_AGENT_TIMEOUT_SECONDS"] == 30.0
     assert app.config["VALIDATOR_AGENT_TIMEOUT_SECONDS"] == 30.0
+    assert app.config["PIPELINE_JOB_STALE_AFTER_SECONDS"] == 1800.0
     assert app.config["MAX_CONTENT_LENGTH"] == 256 * 1024
     assert app.config["SESSION_COOKIE_HTTPONLY"] is True
     assert app.config["SESSION_COOKIE_SAMESITE"] == "Lax"
@@ -132,6 +135,7 @@ def test_create_app_reads_timeout_and_trusted_host_overrides(monkeypatch):
     monkeypatch.setenv("FLASK_SECRET_KEY", "configured-test-secret")
     monkeypatch.setenv("POLICY_AGENT_TIMEOUT_SECONDS", "12.5")
     monkeypatch.setenv("VALIDATOR_AGENT_TIMEOUT_SECONDS", "45")
+    monkeypatch.setenv("PIPELINE_JOB_STALE_AFTER_SECONDS", "90")
     monkeypatch.setenv("MAX_CONTENT_LENGTH", "4096")
     monkeypatch.setenv("SESSION_COOKIE_SECURE", "true")
     monkeypatch.setenv("TRUSTED_HOSTS", "localhost,context-agent.internal")
@@ -144,6 +148,7 @@ def test_create_app_reads_timeout_and_trusted_host_overrides(monkeypatch):
     assert app.config["QUESTIONS_CONFIG_PATH"] == "/config/context_questions.yaml"
     assert app.config["POLICY_AGENT_TIMEOUT_SECONDS"] == 12.5
     assert app.config["VALIDATOR_AGENT_TIMEOUT_SECONDS"] == 45.0
+    assert app.config["PIPELINE_JOB_STALE_AFTER_SECONDS"] == 90.0
     assert app.config["MAX_CONTENT_LENGTH"] == 4096
     assert app.config["SESSION_COOKIE_SECURE"] is True
     assert app.config["TRUSTED_HOSTS"] == ["localhost", "context-agent.internal"]

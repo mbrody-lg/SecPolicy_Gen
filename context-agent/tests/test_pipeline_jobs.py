@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -100,6 +101,67 @@ def test_find_active_pipeline_job_ignores_terminal_jobs(monkeypatch):
     job = pipeline_jobs.find_active_pipeline_job("ctx-1")
 
     assert job["job_id"] == "job-active"
+
+
+def test_find_active_pipeline_job_marks_stale_job_failed(monkeypatch):
+    old_updated_at = datetime.now(timezone.utc) - timedelta(seconds=120)
+    fake_db = FakeDB(
+        pipeline_jobs_docs=[
+            {
+                "job_id": "job-stale",
+                "context_id": "ctx-1",
+                "correlation_id": "corr-1",
+                "command": "generate_policy",
+                "status": "policy_generating",
+                "current_stage": "policy_generation",
+                "created_at": old_updated_at,
+                "updated_at": old_updated_at,
+            }
+        ]
+    )
+    monkeypatch.setattr(pipeline_jobs.mongo, "db", fake_db, raising=False)
+    monkeypatch.setattr(pipeline_jobs, "_pipeline_job_stale_after_seconds", lambda: 60.0)
+
+    job = pipeline_jobs.find_active_pipeline_job("ctx-1")
+
+    assert job is None
+    stale_job = fake_db.pipeline_jobs.docs[0]
+    assert stale_job["status"] == "failed"
+    assert stale_job["current_stage"] == "policy_generation"
+    assert stale_job["last_error"] == {
+        "error_type": "runtime_error",
+        "error_code": "pipeline_job_stale",
+        "safe_message": "Policy pipeline job expired before reaching a terminal state.",
+        "status_code": 504,
+        "failed_stage": "policy_generation",
+    }
+    assert fake_db.pipeline_events.docs[-1]["status"] == "failed"
+    assert fake_db.pipeline_events.docs[-1]["error"]["error_code"] == "pipeline_job_stale"
+
+
+def test_get_pipeline_job_marks_stale_active_job_failed(monkeypatch):
+    old_updated_at = datetime.now(timezone.utc) - timedelta(seconds=120)
+    fake_db = FakeDB(
+        pipeline_jobs_docs=[
+            {
+                "job_id": "job-stale",
+                "context_id": "ctx-1",
+                "correlation_id": "corr-1",
+                "command": "generate_policy",
+                "status": "running",
+                "current_stage": "pipeline",
+                "created_at": old_updated_at,
+                "updated_at": old_updated_at,
+            }
+        ]
+    )
+    monkeypatch.setattr(pipeline_jobs.mongo, "db", fake_db, raising=False)
+    monkeypatch.setattr(pipeline_jobs, "_pipeline_job_stale_after_seconds", lambda: 60.0)
+
+    job = pipeline_jobs.get_pipeline_job("job-stale")
+
+    assert job["status"] == "failed"
+    assert job["last_error"]["error_code"] == "pipeline_job_stale"
 
 
 def test_update_pipeline_job_state_records_event_and_sanitizes_error(monkeypatch):
