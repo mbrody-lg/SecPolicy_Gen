@@ -9,4 +9,4 @@ pytest
 coverage
 mongomock
 mistralai
-
+prometheus-client

@@ -4,6 +4,7 @@ import logging
 
 from flask import Blueprint, jsonify, request
 
+from app.metrics import metrics_response
 from app.observability import log_event
 from app.services.logic import (
     get_health_status,
@@ -31,6 +32,12 @@ def ready():
     payload, status_code = get_readiness_status()
     _log_readiness_response(payload, status_code)
     return jsonify(payload), status_code
+
+
+@routes.route("/metrics", methods=["GET"])
+def metrics():
+    """Expose Prometheus metrics for local observability."""
+    return metrics_response()
 
 
 def _log_readiness_response(payload: dict, status_code: int) -> None:

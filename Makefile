@@ -5,7 +5,7 @@ DOCKER_COMPOSE_CMD=$(shell scripts/docker_preflight.sh --print-compose 2>/dev/nu
 COMPOSE=$(DOCKER_COMPOSE_CMD) -f $(INFRA_DIR)/docker-compose.yml --env-file $(INFRA_DIR)/.env
 LINT_PYTHON=$(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi)
 
-.PHONY: all docker-preflight up down clean rebuild logs shell-context context-tests context-import policy-shell policy-tests policy-vectorize policy-rag-validate policy-rag-backup policy-rag-restore validator-shell validator-tests functional-smoke functional-smoke-real functional-smoke-real-full functional-smoke-real-backup critical-path-validation bootstrap-test-env host-fast-tests lint help
+.PHONY: all docker-preflight up down clean rebuild logs observability-urls shell-context context-tests context-import policy-shell policy-tests policy-vectorize policy-rag-validate policy-rag-backup policy-rag-restore validator-shell validator-tests functional-smoke functional-smoke-real functional-smoke-real-full functional-smoke-real-backup critical-path-validation bootstrap-test-env host-fast-tests lint help
 
 ## Verify docker and compose prerequisites
 docker-preflight:
@@ -30,6 +30,12 @@ rebuild: docker-preflight
 ## Show logs for all services
 logs: docker-preflight
 	$(COMPOSE) logs -f
+
+## Show local observability service URLs
+observability-urls:
+	@echo "Grafana:    http://localhost:3000"
+	@echo "Prometheus: http://localhost:9090"
+	@echo "Loki:       http://localhost:3100"
 
 ## Enter the container agent-context
 shell-context: 
@@ -119,6 +125,7 @@ help:
 	@echo "make clean 		-> Stop + remove volumes"
 	@echo "make rebuild 		-> Rebuild services"
 	@echo "make logs 		-> Show live logs"
+	@echo "make observability-urls -> Show Grafana/Prometheus/Loki URLs"
 	@echo "make context-shell 	-> Access context-agent shell"
 	@echo "make context-tests 	-> Run tests inside context-agent"
 	@echo "make context-import 	-> Run sample content import"

@@ -51,6 +51,9 @@ This starts:
 - **Context Agent** - Web/API service at http://localhost:5003
 - **Policy Agent** - API at http://localhost:5002
 - **Validator Agent** - API at http://localhost:5001
+- **Grafana** - Local observability UI at http://localhost:3000
+- **Prometheus** - Metrics store at http://localhost:9090
+- **Loki/Promtail** - Local Docker log aggregation at http://localhost:3100
 
 ### 4. Stop Services
 
@@ -95,6 +98,7 @@ All agents run on separate ports and use internal Docker DNS:
 | `make clean` | Stop and remove all data |
 | `make rebuild` | Force rebuild all containers |
 | `make logs` | View live logs from all services |
+| `make observability-urls` | Show Grafana, Prometheus, and Loki URLs |
 | `make host-fast-tests` | Run fast host-side checks across services |
 | `make shell-context` | Access Context Agent shell |
 | `make context-tests` | Run Context Agent tests |
@@ -132,8 +136,40 @@ docker-compose.yml services:
 ├── chroma             # Vector database for RAG
 ├── context-agent      # Context gathering service
 ├── policy-agent       # Policy generation service
-└── validator-agent    # Policy validation service
+├── validator-agent    # Policy validation service
+├── prometheus         # Metrics scraping and storage
+├── loki               # Log storage
+├── promtail           # Docker log collector
+└── grafana            # Local observability UI
 ```
+
+## Local Observability
+
+The local Compose stack includes a lightweight observability layer:
+
+| Service | URL | Purpose |
+|---------|-----|---------|
+| Grafana | http://localhost:3000 | Operational dashboards and log exploration |
+| Prometheus | http://localhost:9090 | Metrics scraping and query UI |
+| Loki | http://localhost:3100 | Log storage queried through Grafana |
+
+Default local Grafana credentials come from `infrastructure/.env`:
+
+```env
+GRAFANA_ADMIN_USER=admin
+GRAFANA_ADMIN_PASSWORD=admin
+```
+
+The three Flask services expose `/metrics` for Prometheus. The first dashboard,
+`SecPolicyGen Overview`, is provisioned automatically and shows:
+- request rate by service
+- p95 request latency by service
+- recent 5xx errors
+- recent failure logs from `context-agent`, `policy-agent`, and `validator-agent`
+
+This observability stack is for local/development operation. It exposes ports on
+localhost and mounts the Docker socket read-only for Promtail container log
+discovery; do not promote this Compose configuration to production as-is.
 
 ## Compose Readiness Map
 
