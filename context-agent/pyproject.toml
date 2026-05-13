@@ -1,5 +1,8 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+  "fast: fast static or unit checks",
+]
 
 [tool.coverage.run]
 branch = true
