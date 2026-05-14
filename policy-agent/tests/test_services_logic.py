@@ -420,6 +420,7 @@ def test_get_rag_runtime_status_reports_ready_when_all_collections_exist(app, mo
     monkeypatch.setattr(logic, "_get_chroma_http_client", lambda: FakeChromaClient())
     monkeypatch.setattr(logic, "is_model_cached", lambda model_id: True)
     monkeypatch.setattr(logic, "has_safetensors_weights", lambda model_id: True)
+    monkeypatch.setenv("RAG_VALIDATE_CHROMA", "true")
     monkeypatch.setattr(
         logic,
         "_chroma_collection_runtime_checks",
@@ -480,6 +481,7 @@ def test_get_rag_runtime_status_requires_refresh_when_collection_embedding_is_in
     monkeypatch.setattr(logic, "_get_chroma_http_client", lambda: FakeChromaClient())
     monkeypatch.setattr(logic, "is_model_cached", lambda model_id: True)
     monkeypatch.setattr(logic, "has_safetensors_weights", lambda model_id: True)
+    monkeypatch.setenv("RAG_VALIDATE_CHROMA", "true")
     monkeypatch.setattr(
         logic,
         "_chroma_collection_runtime_checks",
@@ -506,6 +508,50 @@ def test_get_rag_runtime_status_requires_refresh_when_collection_embedding_is_in
         }
     ]
     assert payload["rag"]["action"] == "index_pdfs_to_chroma"
+
+
+def test_get_rag_runtime_status_skips_deep_chroma_validation_by_default(app, monkeypatch):
+    class FakeChromaClient:
+        def heartbeat(self):
+            return 1
+
+        def list_collections(self):
+            return ["normativa"]
+
+    monkeypatch.setattr(
+        logic,
+        "load_policy_config",
+        lambda: {
+            "roles": [
+                {
+                    "vector": [
+                        {
+                            "chroma": "Chroma Vector Database",
+                            "collection": ["normativa"],
+                            "model": "intfloat/multilingual-e5-base",
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(logic, "_get_chroma_http_client", lambda: FakeChromaClient())
+    monkeypatch.setattr(logic, "is_model_cached", lambda model_id: True)
+    monkeypatch.setattr(logic, "has_safetensors_weights", lambda model_id: True)
+    monkeypatch.setattr(
+        logic,
+        "_chroma_collection_runtime_checks",
+        lambda config, client, configured_collections: pytest.fail("deep Chroma validation is opt-in"),
+    )
+    monkeypatch.delenv("RAG_VALIDATE_CHROMA", raising=False)
+    monkeypatch.setattr(logic, "_RAG_REFRESH_JOB", None)
+
+    with app.app_context():
+        payload, status_code = logic.get_rag_runtime_status()
+
+    assert status_code == 200
+    assert payload["rag"]["status"] == "ready"
+    assert payload["rag"]["collection_checks"] == []
 
 
 def test_get_rag_runtime_status_requires_refresh_when_embedding_model_is_missing(app, monkeypatch):
@@ -801,6 +847,31 @@ def test_run_rag_refresh_job_updates_job_result_on_failure(app, monkeypatch):
     assert job["status"] == "failed"
     assert job["completed_at"]
     assert job["result"] == {"success": False, "error_code": "rag_refresh_failed"}
+
+
+def test_run_rag_refresh_job_marks_unhandled_exception_failed(app, monkeypatch):
+    monkeypatch.setattr(
+        logic,
+        "_RAG_REFRESH_JOB",
+        {
+            "id": "job-1",
+            "status": "running",
+            "started_at": "2026-05-08T00:00:00+00:00",
+        },
+    )
+
+    def fail_refresh():
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(logic, "_run_rag_refresh_command", fail_refresh)
+
+    logic._run_rag_refresh_job("job-1", app, "corr-1")
+
+    job = logic.get_rag_refresh_job_status()
+    assert job["status"] == "failed"
+    assert job["completed_at"]
+    assert job["result"]["success"] is False
+    assert job["result"]["error_code"] == "rag_refresh_unhandled_exception"
 
 
 def test_run_generation_pipeline_rejects_invalid_json_body(app_context):

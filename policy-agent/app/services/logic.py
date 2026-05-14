@@ -468,6 +468,11 @@ def _chroma_collection_runtime_checks(config: dict, client, configured_collectio
     return checks
 
 
+def _rag_validate_chroma_enabled() -> bool:
+    """Return whether RAG status should run deep Chroma embedding probes."""
+    return os.getenv("RAG_VALIDATE_CHROMA", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _collection_name(collection) -> str | None:
     """Normalize Chroma list_collections entries across client versions."""
     if isinstance(collection, str):
@@ -526,7 +531,12 @@ def get_rag_runtime_status() -> tuple[dict, int]:
     refresh_running = bool(refresh_job and refresh_job.get("status") == "running")
     missing_models = [model for model in embedding_models if model.get("status") != "ready"]
     collection_checks = []
-    if not missing_collections and not missing_models and not refresh_running:
+    if (
+        _rag_validate_chroma_enabled()
+        and not missing_collections
+        and not missing_models
+        and not refresh_running
+    ):
         collection_checks = _chroma_collection_runtime_checks(config, client, configured_collections)
     incompatible_collections = [
         check for check in collection_checks if check.get("status") != "ready"
@@ -646,8 +656,18 @@ def _run_rag_refresh_job(job_id: str, app, correlation_id: str | None) -> None:
         result="started",
         job_id=job_id,
     )
-    with app.app_context():
-        result = _run_rag_refresh_command()
+    try:
+        with app.app_context():
+            result = _run_rag_refresh_command()
+    except Exception:
+        logger.exception("Unhandled RAG refresh job error")
+        result = {
+            "success": False,
+            "error_type": "runtime_error",
+            "error_code": "rag_refresh_unhandled_exception",
+            "message": "RAG refresh failed unexpectedly.",
+            "details": {},
+        }
     with _RAG_REFRESH_LOCK:
         if _RAG_REFRESH_JOB and _RAG_REFRESH_JOB.get("id") == job_id:
             _RAG_REFRESH_JOB.update(

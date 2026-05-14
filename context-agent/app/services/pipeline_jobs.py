@@ -3,8 +3,12 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from flask import current_app, has_app_context
+
 from app import get_request_correlation_id, mongo
 from app.metrics import record_pipeline_job_transition
+
+DEFAULT_PIPELINE_JOB_STALE_AFTER_SECONDS = 1800
 
 PIPELINE_JOB_STATUSES = frozenset(
     {
@@ -150,19 +154,27 @@ def create_pipeline_job(
 
 def find_active_pipeline_job(context_id: str, *, command: str = "generate_policy") -> dict | None:
     """Return the active job for a context/command when one is still running."""
-    job = _pipeline_jobs_collection().find_one(
-        {
-            "context_id": str(context_id),
-            "command": command,
-            "status": {"$in": sorted(PIPELINE_JOB_ACTIVE_STATUSES)},
-        }
-    )
-    return _serialize_pipeline_document(job)
+    query = {
+        "context_id": str(context_id),
+        "command": command,
+        "status": {"$in": sorted(PIPELINE_JOB_ACTIVE_STATUSES)},
+    }
+    for _ in range(10):
+        job = _pipeline_jobs_collection().find_one(query)
+        if not job:
+            return None
+        if not _is_pipeline_job_stale(job):
+            return _serialize_pipeline_document(job)
+        _mark_pipeline_job_stale(job)
+    return None
 
 
 def get_pipeline_job(job_id: str) -> dict | None:
     """Return a pipeline job by id."""
-    return _serialize_pipeline_document(_pipeline_jobs_collection().find_one({"job_id": job_id}))
+    job = _pipeline_jobs_collection().find_one({"job_id": job_id})
+    if job and job.get("status") in PIPELINE_JOB_ACTIVE_STATUSES and _is_pipeline_job_stale(job):
+        return _mark_pipeline_job_stale(job)
+    return _serialize_pipeline_document(job)
 
 
 def update_pipeline_job_state(
@@ -225,3 +237,43 @@ def _pipeline_duration_seconds(existing: dict, completed_at: datetime) -> float 
     if not started_at or not hasattr(started_at, "timestamp"):
         return None
     return (completed_at - started_at).total_seconds()
+
+
+def _mark_pipeline_job_stale(job: dict) -> dict | None:
+    """Move one stale active pipeline job to a bounded terminal failure."""
+    stage = job.get("current_stage", "pipeline")
+    return update_pipeline_job_state(
+        job_id=job["job_id"],
+        status="failed",
+        stage=stage,
+        error={
+            "stage": stage,
+            "error_type": "runtime_error",
+            "error_code": "pipeline_job_stale",
+            "safe_message": "Policy pipeline job expired before reaching a terminal state.",
+            "status_code": 504,
+        },
+    )
+
+
+def _is_pipeline_job_stale(job: dict, *, now: datetime | None = None) -> bool:
+    """Return whether an active job has exceeded the runtime stale threshold."""
+    reference_time = job.get("updated_at") or job.get("started_at") or job.get("created_at")
+    if not reference_time or not hasattr(reference_time, "timestamp"):
+        return False
+    current_time = now or datetime.now(timezone.utc)
+    if reference_time.tzinfo is None:
+        reference_time = reference_time.replace(tzinfo=timezone.utc)
+    return (current_time - reference_time).total_seconds() > _pipeline_job_stale_after_seconds()
+
+
+def _pipeline_job_stale_after_seconds() -> float:
+    """Read the stale-job threshold from app config when available."""
+    if has_app_context():
+        return float(
+            current_app.config.get(
+                "PIPELINE_JOB_STALE_AFTER_SECONDS",
+                DEFAULT_PIPELINE_JOB_STALE_AFTER_SECONDS,
+            )
+        )
+    return float(DEFAULT_PIPELINE_JOB_STALE_AFTER_SECONDS)
