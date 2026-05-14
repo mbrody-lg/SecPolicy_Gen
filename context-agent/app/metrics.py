@@ -17,6 +17,21 @@ REQUEST_LATENCY = Histogram(
     "HTTP request latency for SecPolicyGen services.",
     ["service", "method", "route"],
 )
+PIPELINE_JOB_TRANSITIONS = Counter(
+    "secpolicy_pipeline_job_transitions_total",
+    "Pipeline job state transitions observed by context-agent.",
+    ["status", "stage"],
+)
+PIPELINE_JOB_TERMINALS = Counter(
+    "secpolicy_pipeline_job_terminals_total",
+    "Terminal pipeline job outcomes observed by context-agent.",
+    ["status", "stage", "error_code"],
+)
+PIPELINE_JOB_DURATION = Histogram(
+    "secpolicy_pipeline_job_duration_seconds",
+    "Pipeline job duration from creation/start to terminal state.",
+    ["status"],
+)
 
 
 def start_request_timer() -> None:
@@ -39,3 +54,22 @@ def record_request_metrics(response) -> None:
 def metrics_response() -> Response:
     """Return Prometheus exposition payload."""
     return Response(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
+
+
+def record_pipeline_job_transition(
+    *,
+    status: str,
+    stage: str,
+    error_code: str | None = None,
+    duration_seconds: float | None = None,
+) -> None:
+    """Record bounded pipeline job metrics without job or context identifiers."""
+    PIPELINE_JOB_TRANSITIONS.labels(status=status, stage=stage).inc()
+    if status in {"completed", "failed", "cancelled"}:
+        PIPELINE_JOB_TERMINALS.labels(
+            status=status,
+            stage=stage,
+            error_code=error_code or "none",
+        ).inc()
+        if duration_seconds is not None:
+            PIPELINE_JOB_DURATION.labels(status=status).observe(max(duration_seconds, 0.0))

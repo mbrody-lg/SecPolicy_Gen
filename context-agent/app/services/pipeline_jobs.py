@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from app import get_request_correlation_id, mongo
+from app.metrics import record_pipeline_job_transition
 
 PIPELINE_JOB_STATUSES = frozenset(
     {
@@ -143,6 +144,7 @@ def create_pipeline_job(
         status="queued",
         stage="queued",
     )
+    record_pipeline_job_transition(status="queued", stage="queued")
     return _serialize_pipeline_document(job)
 
 
@@ -206,4 +208,20 @@ def update_pipeline_job_state(
         stage=current_stage,
         error=safe_error,
     )
+    record_pipeline_job_transition(
+        status=status,
+        stage=current_stage,
+        error_code=(safe_error or {}).get("error_code"),
+        duration_seconds=_pipeline_duration_seconds(existing, now)
+        if status in PIPELINE_JOB_TERMINAL_STATUSES
+        else None,
+    )
     return get_pipeline_job(job_id)
+
+
+def _pipeline_duration_seconds(existing: dict, completed_at: datetime) -> float | None:
+    """Return bounded terminal duration from started_at or created_at."""
+    started_at = existing.get("started_at") or existing.get("created_at")
+    if not started_at or not hasattr(started_at, "timestamp"):
+        return None
+    return (completed_at - started_at).total_seconds()

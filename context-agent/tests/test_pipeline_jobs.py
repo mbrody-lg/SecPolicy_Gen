@@ -44,7 +44,13 @@ class FakeDB:
 
 def test_create_pipeline_job_persists_job_and_initial_event(monkeypatch):
     fake_db = FakeDB()
+    captured_metrics = []
     monkeypatch.setattr(pipeline_jobs.mongo, "db", fake_db, raising=False)
+    monkeypatch.setattr(
+        pipeline_jobs,
+        "record_pipeline_job_transition",
+        lambda **kwargs: captured_metrics.append(kwargs),
+    )
 
     job = pipeline_jobs.create_pipeline_job(
         context_id="ctx-1",
@@ -64,6 +70,12 @@ def test_create_pipeline_job_persists_job_and_initial_event(monkeypatch):
     assert event["event_type"] == "job_created"
     assert event["job_id"] == job["job_id"]
     assert event["ownership"]["source_of_truth"] is False
+    assert captured_metrics == [
+        {
+            "status": "queued",
+            "stage": "queued",
+        }
+    ]
 
 
 def test_find_active_pipeline_job_ignores_terminal_jobs(monkeypatch):
@@ -92,7 +104,13 @@ def test_find_active_pipeline_job_ignores_terminal_jobs(monkeypatch):
 
 def test_update_pipeline_job_state_records_event_and_sanitizes_error(monkeypatch):
     fake_db = FakeDB()
+    captured_metrics = []
     monkeypatch.setattr(pipeline_jobs.mongo, "db", fake_db, raising=False)
+    monkeypatch.setattr(
+        pipeline_jobs,
+        "record_pipeline_job_transition",
+        lambda **kwargs: captured_metrics.append(kwargs),
+    )
     job = pipeline_jobs.create_pipeline_job(
         context_id="ctx-1",
         command="generate_policy",
@@ -130,6 +148,10 @@ def test_update_pipeline_job_state_records_event_and_sanitizes_error(monkeypatch
     assert "raw_exception" not in event["error"]
     assert "prompt" not in event["error"]
     assert "provider_payload" not in event["error"]
+    assert captured_metrics[-1]["status"] == "failed"
+    assert captured_metrics[-1]["stage"] == "policy_generation"
+    assert captured_metrics[-1]["error_code"] == "policy_agent_timeout"
+    assert captured_metrics[-1]["duration_seconds"] >= 0
 
 
 def test_update_pipeline_job_state_rejects_unknown_status(monkeypatch):
