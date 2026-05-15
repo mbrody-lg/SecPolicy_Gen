@@ -231,6 +231,142 @@ def test_create_route_get(client):
     assert b"Create a new context" in response.data
 
 
+def test_create_route_persists_security_context(client, monkeypatch):
+    monkeypatch.setattr(
+        routes_module,
+        "run_with_agent",
+        lambda prompt, context_id, model_version=None: "Refined context",
+    )
+
+    response = client.post(
+        "/create",
+        data={
+            "country": "Init05Land",
+            "region": "Catalonia",
+            "sector": "Healthcare",
+            "important_assets": "Medical records",
+            "critical_assets": "Patient data",
+            "current_security_operations": "Backups",
+            "methodology": "ISO 27001",
+            "generic": "Specific",
+            "need": "Protect patient data",
+        },
+    )
+
+    assert response.status_code == 302
+    context = routes_module.mongo.db.contexts.find_one({"country": "Init05Land"})
+    assert context["security_context_version"] == routes_module.SECURITY_CONTEXT_VERSION
+    assert context["security_context"]["profile"]["sector"] == "Healthcare"
+    assert context["security_context"]["information_assets"]["data_categories"] == [
+        "health_data"
+    ]
+    assert context["security_context"]["retrieval_hints"]["collection_families"] == [
+        "legal_norms",
+        "sector_norms",
+        "security_frameworks",
+        "risk_methodologies",
+        "implementation_guides",
+    ]
+
+
+def test_security_context_route_returns_persisted_context(client):
+    context_id = routes_module.mongo.db.contexts.insert_one(
+        {
+            "country": "France",
+            "sector": "E-commerce",
+            "critical_assets": "Payment system",
+            "need": "Protect sales",
+            "security_context_version": "1.0",
+            "security_context": {
+                "version": "1.0",
+                "profile": {
+                    "sector": "E-commerce",
+                    "activity": None,
+                    "size_band": None,
+                    "region": None,
+                    "operating_countries": ["France"],
+                    "languages": ["en"],
+                    "business_model": None,
+                    "service_type": None,
+                },
+                "information_assets": {
+                    "important_assets": [],
+                    "critical_assets": ["Payment system"],
+                    "data_categories": ["commerce_data"],
+                    "third_party_dependencies": [],
+                    "cloud_services": [],
+                },
+                "compliance": {
+                    "jurisdictions": ["France"],
+                    "regulatory_hints": [],
+                    "methodologies": [],
+                },
+                "security_posture": {
+                    "current_controls": [],
+                    "maturity": None,
+                    "known_gaps": [],
+                    "risk_tolerance": None,
+                    "governance_owner": None,
+                },
+                "policy_intent": {
+                    "need": "Protect sales",
+                    "policy_type": None,
+                    "scope": None,
+                    "exclusions": None,
+                    "audience": None,
+                    "language": "en",
+                    "specificity": None,
+                },
+                "analysis": {
+                    "facts": [],
+                    "missing_information": [],
+                    "confidence": "medium",
+                },
+                "retrieval_hints": {
+                    "collection_families": ["legal_norms"],
+                    "jurisdictions": ["France"],
+                    "sectors": ["E-commerce"],
+                    "data_types": ["commerce_data"],
+                    "methodologies": [],
+                },
+            },
+        }
+    ).inserted_id
+
+    response = client.get(f"/context/{context_id}/security_context")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert payload["context_id"] == str(context_id)
+    assert payload["security_context"]["profile"]["sector"] == "E-commerce"
+
+
+def test_security_context_route_builds_payload_for_legacy_context(client):
+    context_id = routes_module.mongo.db.contexts.insert_one(
+        {
+            "country": "France",
+            "sector": "E-commerce",
+            "critical_assets": "Payment system",
+            "need": "Protect sales",
+        }
+    ).inserted_id
+
+    response = client.get(f"/context/{context_id}/security_context")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["security_context"]["profile"]["sector"] == "E-commerce"
+    assert payload["security_context"]["retrieval_hints"]["jurisdictions"] == ["France"]
+
+
+def test_security_context_route_rejects_invalid_context_id(client):
+    response = client.get("/context/not-an-object-id/security_context")
+
+    assert response.status_code == 400
+    assert response.get_json()["error_code"] == "invalid_context_id"
+
+
 def test_context_detail_disables_policy_generation_when_runtime_is_not_ready(client, monkeypatch):
     context_id = ObjectId()
     monkeypatch.setattr(

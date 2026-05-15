@@ -20,12 +20,24 @@ from app import (
     mongo,
 )
 from app.agents.factory import create_agent_from_config
+from app.context_analysis import SECURITY_CONTEXT_VERSION, build_security_context_from_answers
 from app.observability import build_log_event, log_event
 
 logger = logging.getLogger(__name__)
 MAX_PIPELINE_DIAGNOSTIC_HOPS = 25
 SYSTEM_STATUS_TIMEOUT_SECONDS = 2.0
 SYSTEM_RAG_STATUS_TIMEOUT_SECONDS = 10.0
+CONTEXT_ANSWER_FIELDS = {
+    "country",
+    "region",
+    "sector",
+    "important_assets",
+    "critical_assets",
+    "current_security_operations",
+    "methodology",
+    "generic",
+    "need",
+}
 
 
 class PipelineStepError(Exception):
@@ -303,6 +315,39 @@ def generate_context_prompt(data: dict, question_config: str | None = None) -> s
         "This context will be used by other agents to generate policies, security frameworks or specific validations."
     )
     return "\n".join(lines)
+
+
+def build_context_security_context(context_data: dict, *, additional_need: str | None = None) -> dict:
+    """Build the persisted security_context from Context Agent-owned fields."""
+    answers = {
+        field: str(context_data.get(field, "") or "").strip()
+        for field in CONTEXT_ANSWER_FIELDS
+    }
+    if additional_need and additional_need.strip():
+        current_need = answers.get("need", "")
+        answers["need"] = "\n".join(
+            part for part in (current_need, additional_need.strip()) if part
+        )
+    return build_security_context_from_answers(
+        answers,
+        language=str(context_data.get("language", "en") or "en"),
+    )
+
+
+def public_security_context_payload(context_id: str, context: dict) -> dict:
+    """Return a bounded public payload for a context's structured security context."""
+    security_context = context.get("security_context")
+    if not isinstance(security_context, dict):
+        security_context = build_context_security_context(context)
+    return {
+        "success": True,
+        "context_id": context_id,
+        "security_context_version": context.get(
+            "security_context_version",
+            SECURITY_CONTEXT_VERSION,
+        ),
+        "security_context": security_context,
+    }
 
 
 def run_with_agent(prompt: str, context_id: str = None, model_version: str = None) -> str:
