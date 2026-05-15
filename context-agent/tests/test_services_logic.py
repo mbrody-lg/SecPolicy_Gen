@@ -144,6 +144,43 @@ def test_get_health_status_returns_static_liveness_payload():
     }
 
 
+def test_build_context_security_context_uses_context_fields_and_additional_need():
+    security_context = logic.build_context_security_context(
+        {
+            "country": "Spain",
+            "sector": "Professional services",
+            "important_assets": "Client files",
+            "critical_assets": "Contracts",
+            "need": "Protect client confidentiality",
+        },
+        additional_need="Add incident response requirements.",
+    )
+
+    assert security_context["profile"]["operating_countries"] == ["Spain"]
+    assert security_context["profile"]["sector"] == "Professional services"
+    assert security_context["policy_intent"]["need"] == (
+        "Protect client confidentiality\nAdd incident response requirements."
+    )
+
+
+def test_public_security_context_payload_builds_context_for_legacy_records():
+    payload = logic.public_security_context_payload(
+        "context-1",
+        {
+            "country": "France",
+            "sector": "E-commerce",
+            "critical_assets": "Payment system",
+            "need": "Protect online sales",
+        },
+    )
+
+    assert payload["success"] is True
+    assert payload["context_id"] == "context-1"
+    assert payload["security_context_version"] == logic.SECURITY_CONTEXT_VERSION
+    assert payload["security_context"]["profile"]["sector"] == "E-commerce"
+    assert payload["security_context"]["retrieval_hints"]["sectors"] == ["E-commerce"]
+
+
 def test_get_readiness_status_returns_ready_when_config_and_mongo_are_ok(app_context, monkeypatch):
     ping_calls = []
 
