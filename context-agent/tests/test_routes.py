@@ -136,6 +136,8 @@ def test_dashboard_route_renders_system_status_panel(client, monkeypatch):
     assert b"Missing: guia" in response.data
     assert b"RAG refresh timed out." in response.data
     assert b"rag-refresh-started-value" in response.data
+    assert b"rag-refresh-id-value" in response.data
+    assert b"rag-refresh-correlation-value" in response.data
     assert b"data-system-refresh-button" in response.data
     assert b"Update state" in response.data
 
@@ -316,6 +318,50 @@ def test_context_detail_shows_active_pipeline_job(client, monkeypatch):
     assert b"policy_generation" in response.data
     assert b"corr-1" in response.data
     assert b"disabled" in response.data
+
+
+def test_context_detail_shows_failed_pipeline_job_diagnostics_in_development(client, monkeypatch):
+    context_id = ObjectId()
+    client.application.config["ENV"] = "development"
+    monkeypatch.setattr(
+        routes_module.mongo,
+        "db",
+        FakeDB(
+            contexts=[{"_id": context_id, "status": "completed"}],
+            interactions=[],
+            pipeline_jobs=[
+                {
+                    "job_id": "job-failed",
+                    "context_id": str(context_id),
+                    "correlation_id": "corr-failed",
+                    "command": "generate_policy",
+                    "status": "failed",
+                    "current_stage": "policy_generation",
+                    "last_error": {
+                        "error_code": "policy_agent_request_failed",
+                        "failed_stage": "policy_generation",
+                        "safe_message": "Policy generation failed.",
+                    },
+                }
+            ],
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
+
+    response = client.get(f"/context/{context_id}")
+
+    assert response.status_code == 200
+    assert b"Status: <span id=\"pipeline-job-status\">failed</span>" in response.data
+    assert b"Policy generation failed." in response.data
+    assert b"policy_agent_request_failed" in response.data
+    assert b"Failed stage:" in response.data
+    assert b"Development diagnostics" in response.data
+    assert b"/diagnostics/corr-failed" in response.data
 
 
 def test_health_route_returns_lightweight_ok_payload(client):
@@ -694,6 +740,7 @@ def test_trigger_policy_generation_blocks_when_runtime_is_not_ready(client, monk
 
 
 def test_get_pipeline_job_status_returns_public_job(client, monkeypatch):
+    client.application.config["ENV"] = "development"
     monkeypatch.setattr(
         routes_module,
         "get_pipeline_job",
@@ -722,6 +769,7 @@ def test_get_pipeline_job_status_returns_public_job(client, monkeypatch):
         "error_code": "policy_agent_timeout",
         "safe_message": "Policy generation timed out.",
     }
+    assert payload["job"]["diagnostic_url"] == "/diagnostics/corr-1"
 
 
 def test_get_active_pipeline_job_status_returns_404_when_missing(client, monkeypatch):

@@ -2,9 +2,10 @@
 
 from datetime import datetime, timezone
 import logging
+import os
 
 from bson import ObjectId
-from flask import Blueprint, render_template, request, redirect, url_for, abort, flash, jsonify
+from flask import Blueprint, current_app, render_template, request, redirect, url_for, abort, flash, jsonify
 
 from app import mongo
 from app.metrics import metrics_response
@@ -25,6 +26,7 @@ from app.services.logic import (
 from app.services.pipeline_jobs import (
     create_pipeline_job,
     find_active_pipeline_job,
+    find_latest_pipeline_job,
     get_pipeline_job,
 )
 from app.services.pipeline_worker import start_pipeline_job_worker
@@ -195,15 +197,13 @@ def index():
 def _attach_policy_process_summaries(contexts: list[dict]) -> None:
     """Add latest policy pipeline process state to dashboard context rows."""
     for context in contexts:
-        context["policy_process"] = _policy_process_summary_for_context(context["_id"])
+        context["policy_process"] = _policy_process_summary_for_job(
+            find_latest_pipeline_job(str(context["_id"]))
+        )
 
 
-def _policy_process_summary_for_context(context_id: ObjectId | str) -> dict:
-    """Return a bounded dashboard summary for the latest policy pipeline job."""
-    job = mongo.db.pipeline_jobs.find_one(
-        {"context_id": str(context_id), "command": "generate_policy"},
-        sort=[("created_at", -1)],
-    )
+def _policy_process_summary_for_job(job: dict | None) -> dict:
+    """Return a bounded dashboard summary for a policy pipeline job."""
     if not job:
         return {
             "status": "not_started",
@@ -218,12 +218,31 @@ def _policy_process_summary_for_context(context_id: ObjectId | str) -> dict:
         "tone": POLICY_PROCESS_TONES.get(status, "muted"),
         "stage": job.get("current_stage"),
         "correlation_id": job.get("correlation_id"),
+        "diagnostic_url": _diagnostic_url_for_job(job),
     }
     last_error = job.get("last_error")
     if isinstance(last_error, dict):
         summary["error_code"] = last_error.get("error_code")
         summary["message"] = last_error.get("safe_message")
     return summary
+
+
+def _diagnostic_url_for_job(job: dict) -> str | None:
+    """Return a local development diagnostic URL for a pipeline job."""
+    correlation_id = job.get("correlation_id")
+    if not correlation_id or not _developer_diagnostics_enabled():
+        return None
+    return url_for("main.get_diagnostics", correlation_id=correlation_id)
+
+
+def _developer_diagnostics_enabled() -> bool:
+    """Return whether development-only diagnostic links should be displayed."""
+    return bool(
+        current_app.debug
+        or current_app.testing
+        or current_app.config.get("ENV") == "development"
+        or os.getenv("FLASK_ENV") == "development"
+    )
 
 @main.route("/create", methods=["GET", "POST"])
 def create():
@@ -326,7 +345,8 @@ def context_detail(context_id):
         context=context,
         interactions=interactions,
         system_status=get_system_status(),
-        active_pipeline_job=find_active_pipeline_job(str(context_id)),
+        latest_pipeline_job=find_latest_pipeline_job(str(context_id)),
+        developer_diagnostics_enabled=_developer_diagnostics_enabled(),
     )
 
 @main.route("/context/<context_id>/continue", methods=["POST"])
@@ -578,6 +598,9 @@ def _public_pipeline_job(job: dict) -> dict:
             for key in allowed_error_fields
             if key in last_error and last_error[key] is not None
         }
+    diagnostic_url = _diagnostic_url_for_job(public)
+    if diagnostic_url:
+        public["diagnostic_url"] = diagnostic_url
     return public
 
 

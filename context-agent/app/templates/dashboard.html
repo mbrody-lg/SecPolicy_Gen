@@ -57,6 +57,12 @@
             </div>
           {% endif %}
           <div class="mt-2 text-xs text-gray-700">
+            Job id: <span id="rag-refresh-id-value">{{ rag.refresh_job.id if rag.refresh_job and rag.refresh_job.id else '' }}</span>
+          </div>
+          <div class="mt-1 text-xs text-gray-700">
+            Correlation: <span id="rag-refresh-correlation-value">{{ rag.refresh_job.correlation_id if rag.refresh_job and rag.refresh_job.correlation_id else '' }}</span>
+          </div>
+          <div class="mt-2 text-xs text-gray-700">
             Started: <span id="rag-refresh-started-value">{{ rag.refresh_job.started_at if rag.refresh_job and rag.refresh_job.started_at else '' }}</span>
           </div>
           <div class="mt-1 text-xs text-gray-700">

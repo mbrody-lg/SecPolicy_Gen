@@ -169,6 +169,17 @@ def find_active_pipeline_job(context_id: str, *, command: str = "generate_policy
     return None
 
 
+def find_latest_pipeline_job(context_id: str, *, command: str = "generate_policy") -> dict | None:
+    """Return the latest pipeline job for dashboard and detail status views."""
+    job = _pipeline_jobs_collection().find_one(
+        {"context_id": str(context_id), "command": command},
+        sort=[("created_at", -1)],
+    )
+    if job and job.get("status") in PIPELINE_JOB_ACTIVE_STATUSES and _is_pipeline_job_stale(job):
+        return _mark_pipeline_job_stale(job)
+    return _serialize_pipeline_document(job)
+
+
 def get_pipeline_job(job_id: str) -> dict | None:
     """Return a pipeline job by id."""
     job = _pipeline_jobs_collection().find_one({"job_id": job_id})
