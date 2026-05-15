@@ -41,6 +41,11 @@ def test_build_security_context_maps_current_healthcare_answers():
     assert context["compliance"]["methodologies"] == [
         "GDPR and ISO 27799 should be applied."
     ]
+    assert context["compliance"]["regulatory_hints"] == ["gdpr", "iso_27799"]
+    assert context["information_assets"]["data_categories"] == [
+        "personal_data",
+        "health_data",
+    ]
     assert context["security_posture"]["current_controls"] == [
         "Antivirus protection",
         "local copies",
@@ -48,6 +53,13 @@ def test_build_security_context_maps_current_healthcare_answers():
     ]
     assert context["policy_intent"]["need"] == "Comply with GDPR and protect patient data."
     assert context["retrieval_hints"]["sectors"] == ["Private healthcare"]
+    assert context["retrieval_hints"]["collection_families"] == [
+        "legal_norms",
+        "sector_norms",
+        "security_frameworks",
+        "risk_methodologies",
+        "implementation_guides",
+    ]
     assert context["analysis"]["missing_information"] == []
     assert context["analysis"]["confidence"] == "medium"
 
@@ -63,9 +75,48 @@ def test_build_security_context_maps_current_ecommerce_answers():
     assert context["information_assets"]["critical_assets"] == [
         "Sales website and online payment system."
     ]
+    assert context["information_assets"]["data_categories"] == [
+        "personal_data",
+        "commerce_data",
+    ]
+    assert context["information_assets"]["cloud_services"] == ["hosted_web_platform"]
+    assert context["information_assets"]["third_party_dependencies"] == [
+        "external_service_provider",
+        "payment_provider",
+    ]
+    assert context["compliance"]["regulatory_hints"] == ["cis_controls"]
     assert context["policy_intent"]["specificity"] == "Generics adapted to e-commerce."
     assert context["retrieval_hints"]["jurisdictions"] == ["France"]
+    assert context["retrieval_hints"]["data_types"] == [
+        "personal_data",
+        "commerce_data",
+    ]
     assert context["analysis"]["confidence"] == "medium"
+
+
+def test_build_security_context_infers_employee_data_and_iso_27001():
+    context = build_security_context_from_answers(
+        {
+            "country": "Spain",
+            "sector": "HR consulting",
+            "important_assets": "Employee files, payroll platform",
+            "critical_assets": "Payroll and employee personal data",
+            "current_security_operations": "SaaS identity provider",
+            "methodology": "ISO 27001",
+            "need": "Protect employee records and HR operations",
+        },
+        language="en",
+    )
+
+    assert context["information_assets"]["data_categories"] == [
+        "personal_data",
+        "employee_data",
+    ]
+    assert context["compliance"]["regulatory_hints"] == ["iso_27001"]
+    assert context["information_assets"]["cloud_services"] == ["hosted_web_platform"]
+    assert context["information_assets"]["third_party_dependencies"] == [
+        "external_service_provider"
+    ]
 
 
 def test_validate_security_context_rejects_missing_required_section():
