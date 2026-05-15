@@ -40,6 +40,31 @@ def _pipeline_flash_message(result: dict) -> str:
     return f"{stage}: {message}"
 
 
+POLICY_PROCESS_LABELS = {
+    "queued": "Queued",
+    "running": "Running",
+    "policy_generating": "Generating policy",
+    "policy_generated": "Policy generated",
+    "validating": "Validating",
+    "completed": "Validated policy",
+    "failed": "Failed",
+    "cancelled": "Cancelled",
+    "not_started": "Not started",
+}
+
+POLICY_PROCESS_TONES = {
+    "queued": "info",
+    "running": "info",
+    "policy_generating": "info",
+    "policy_generated": "info",
+    "validating": "info",
+    "completed": "success",
+    "failed": "danger",
+    "cancelled": "muted",
+    "not_started": "muted",
+}
+
+
 @main.route("/health")
 def health():
     """Expose a lightweight liveness probe."""
@@ -147,12 +172,13 @@ def index():
 
     collection = mongo.db.contexts
     total_count = collection.count_documents(query)
-    contexts = (
+    contexts = list(
         collection.find(query, fields)
         .sort(sort_param)
         .skip((page - 1) * per_page)
         .limit(per_page)
     )
+    _attach_policy_process_summaries(contexts)
 
     return render_template(
         "dashboard.html",
@@ -164,6 +190,40 @@ def index():
         sort_order=sort_order,
         system_status=get_system_status(),
     )
+
+
+def _attach_policy_process_summaries(contexts: list[dict]) -> None:
+    """Add latest policy pipeline process state to dashboard context rows."""
+    for context in contexts:
+        context["policy_process"] = _policy_process_summary_for_context(context["_id"])
+
+
+def _policy_process_summary_for_context(context_id: ObjectId | str) -> dict:
+    """Return a bounded dashboard summary for the latest policy pipeline job."""
+    job = mongo.db.pipeline_jobs.find_one(
+        {"context_id": str(context_id), "command": "generate_policy"},
+        sort=[("created_at", -1)],
+    )
+    if not job:
+        return {
+            "status": "not_started",
+            "label": POLICY_PROCESS_LABELS["not_started"],
+            "tone": POLICY_PROCESS_TONES["not_started"],
+        }
+
+    status = job.get("status") or "unknown"
+    summary = {
+        "status": status,
+        "label": POLICY_PROCESS_LABELS.get(status, status.replace("_", " ").title()),
+        "tone": POLICY_PROCESS_TONES.get(status, "muted"),
+        "stage": job.get("current_stage"),
+        "correlation_id": job.get("correlation_id"),
+    }
+    last_error = job.get("last_error")
+    if isinstance(last_error, dict):
+        summary["error_code"] = last_error.get("error_code")
+        summary["message"] = last_error.get("safe_message")
+    return summary
 
 @main.route("/create", methods=["GET", "POST"])
 def create():
