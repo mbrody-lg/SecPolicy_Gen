@@ -13,14 +13,25 @@ class FakeCursor:
     def __init__(self, docs=None):
         self.docs = list(docs or [])
 
-    def sort(self, *args, **kwargs):
+    def sort(self, sort_param=None, direction=None, *args, **kwargs):
+        if sort_param:
+            sort_items = (
+                [(sort_param, direction)]
+                if isinstance(sort_param, str)
+                else sort_param
+            )
+            for key, direction in reversed(sort_items):
+                self.docs.sort(
+                    key=lambda doc: doc.get(key),
+                    reverse=direction == -1,
+                )
         return self
 
     def skip(self, *args, **kwargs):
         return self
 
     def limit(self, *args, **kwargs):
-        return []
+        return self
 
     def __iter__(self):
         return iter(self.docs)
@@ -31,12 +42,22 @@ class FakeContextsCollection:
         self.docs = list(docs or [])
 
     def count_documents(self, query):
-        return 0
+        return len(list(self._matching_docs(query)))
 
     def find(self, query, fields):
-        return FakeCursor()
+        return FakeCursor(self._matching_docs(query))
 
-    def find_one(self, query):
+    def find_one(self, query, sort=None):
+        docs = list(self._matching_docs(query))
+        if sort:
+            for key, direction in reversed(sort):
+                docs.sort(
+                    key=lambda doc: doc.get(key),
+                    reverse=direction == -1,
+                )
+        return docs[0] if docs else None
+
+    def _matching_docs(self, query):
         for doc in self.docs:
             matches = True
             for key, value in query.items():
@@ -47,8 +68,7 @@ class FakeContextsCollection:
                 if not matches:
                     break
             if matches:
-                return doc
-        return None
+                yield doc
 
 
 class FakeInteractionsCollection:
@@ -116,8 +136,93 @@ def test_dashboard_route_renders_system_status_panel(client, monkeypatch):
     assert b"Missing: guia" in response.data
     assert b"RAG refresh timed out." in response.data
     assert b"rag-refresh-started-value" in response.data
+    assert b"rag-refresh-id-value" in response.data
+    assert b"rag-refresh-correlation-value" in response.data
     assert b"data-system-refresh-button" in response.data
     assert b"Update state" in response.data
+
+
+def test_dashboard_route_separates_context_status_from_policy_process(client, monkeypatch):
+    context_without_job = ObjectId()
+    context_with_job = ObjectId()
+    context_with_failure = ObjectId()
+    monkeypatch.setattr(
+        routes_module.mongo,
+        "db",
+        FakeDB(
+            contexts=[
+                {
+                    "_id": context_without_job,
+                    "created_at": "2026-05-15T10:00:00+00:00",
+                    "version": 1,
+                    "status": "completed",
+                    "country": "Spain",
+                    "region": "Catalonia",
+                    "sector": "Education",
+                    "need": "Protect student data.",
+                },
+                {
+                    "_id": context_with_job,
+                    "created_at": "2026-05-15T11:00:00+00:00",
+                    "version": 1,
+                    "status": "completed",
+                    "country": "Netherlands",
+                    "region": "Europe",
+                    "sector": "Technology",
+                    "need": "Protect source code.",
+                },
+                {
+                    "_id": context_with_failure,
+                    "created_at": "2026-05-15T12:00:00+00:00",
+                    "version": 1,
+                    "status": "completed",
+                    "country": "Germany",
+                    "region": "Central Europe",
+                    "sector": "Audiovisual",
+                    "need": "Protect content.",
+                },
+            ],
+            pipeline_jobs=[
+                {
+                    "job_id": "job-running",
+                    "context_id": str(context_with_job),
+                    "command": "generate_policy",
+                    "status": "policy_generating",
+                    "current_stage": "policy_generation",
+                    "created_at": "2026-05-15T11:05:00+00:00",
+                },
+                {
+                    "job_id": "job-failed",
+                    "context_id": str(context_with_failure),
+                    "command": "generate_policy",
+                    "status": "failed",
+                    "current_stage": "policy_generation",
+                    "created_at": "2026-05-15T12:05:00+00:00",
+                    "last_error": {
+                        "error_code": "policy_agent_request_failed",
+                        "safe_message": "Policy generation failed.",
+                    },
+                },
+            ],
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert b"Context: <span class=\"font-semibold\">completed</span>" in response.data
+    assert b"Policy process:" in response.data
+    assert b"Not started" in response.data
+    assert b"Generating policy" in response.data
+    assert b"policy_generation" in response.data
+    assert b"Failed" in response.data
+    assert b"policy_agent_request_failed" in response.data
 
 
 def test_create_route_get(client):
@@ -213,6 +318,50 @@ def test_context_detail_shows_active_pipeline_job(client, monkeypatch):
     assert b"policy_generation" in response.data
     assert b"corr-1" in response.data
     assert b"disabled" in response.data
+
+
+def test_context_detail_shows_failed_pipeline_job_diagnostics_in_development(client, monkeypatch):
+    context_id = ObjectId()
+    client.application.config["ENV"] = "development"
+    monkeypatch.setattr(
+        routes_module.mongo,
+        "db",
+        FakeDB(
+            contexts=[{"_id": context_id, "status": "completed"}],
+            interactions=[],
+            pipeline_jobs=[
+                {
+                    "job_id": "job-failed",
+                    "context_id": str(context_id),
+                    "correlation_id": "corr-failed",
+                    "command": "generate_policy",
+                    "status": "failed",
+                    "current_stage": "policy_generation",
+                    "last_error": {
+                        "error_code": "policy_agent_request_failed",
+                        "failed_stage": "policy_generation",
+                        "safe_message": "Policy generation failed.",
+                    },
+                }
+            ],
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
+
+    response = client.get(f"/context/{context_id}")
+
+    assert response.status_code == 200
+    assert b"Status: <span id=\"pipeline-job-status\">failed</span>" in response.data
+    assert b"Policy generation failed." in response.data
+    assert b"policy_agent_request_failed" in response.data
+    assert b"Failed stage:" in response.data
+    assert b"Development diagnostics" in response.data
+    assert b"/diagnostics/corr-failed" in response.data
 
 
 def test_health_route_returns_lightweight_ok_payload(client):
@@ -591,6 +740,7 @@ def test_trigger_policy_generation_blocks_when_runtime_is_not_ready(client, monk
 
 
 def test_get_pipeline_job_status_returns_public_job(client, monkeypatch):
+    client.application.config["ENV"] = "development"
     monkeypatch.setattr(
         routes_module,
         "get_pipeline_job",
@@ -619,6 +769,7 @@ def test_get_pipeline_job_status_returns_public_job(client, monkeypatch):
         "error_code": "policy_agent_timeout",
         "safe_message": "Policy generation timed out.",
     }
+    assert payload["job"]["diagnostic_url"] == "/diagnostics/corr-1"
 
 
 def test_get_active_pipeline_job_status_returns_404_when_missing(client, monkeypatch):

@@ -67,6 +67,8 @@
     var status = job && job.status ? job.status : "idle";
     var running = status === "running";
     setText("rag-refresh-job-value", status);
+    setText("rag-refresh-id-value", job && job.id ? job.id : "");
+    setText("rag-refresh-correlation-value", job && job.correlation_id ? job.correlation_id : "");
     setText("rag-refresh-started-value", job ? formatTimestamp(job.started_at) : "");
     setText("rag-refresh-completed-value", job ? formatTimestamp(job.completed_at) : "");
     setText("rag-refresh-elapsed-value", job ? formatElapsed(job.started_at, job.completed_at) : "");
@@ -103,11 +105,28 @@
     if (errorBox) {
       var error = job.last_error;
       if (error && (error.safe_message || error.error_code)) {
-        errorBox.textContent = error.safe_message || error.error_code;
+        var parts = [error.safe_message || "Policy pipeline failed."];
+        if (error.error_code) {
+          parts.push("Error code: " + error.error_code);
+        }
+        if (error.failed_stage) {
+          parts.push("Failed stage: " + error.failed_stage);
+        }
+        errorBox.textContent = parts.join("\n");
         errorBox.classList.remove("hidden");
       } else {
         errorBox.textContent = "";
         errorBox.classList.add("hidden");
+      }
+    }
+    var diagnostics = byId("pipeline-job-diagnostics");
+    var diagnosticLink = byId("pipeline-job-diagnostic-link");
+    var diagnosticsEnabled = panel && panel.dataset.developerDiagnostics === "1";
+    if (diagnostics) {
+      var showDiagnostics = diagnosticsEnabled && Boolean(job.correlation_id);
+      diagnostics.classList.toggle("hidden", !showDiagnostics);
+      if (diagnosticLink && showDiagnostics) {
+        diagnosticLink.href = job.diagnostic_url || "/diagnostics/" + encodeURIComponent(job.correlation_id);
       }
     }
     setGenerateState(runtimeReady);
