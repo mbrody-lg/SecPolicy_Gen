@@ -97,7 +97,12 @@ def test_dashboard_route_renders_system_status_panel(client, monkeypatch):
             "rag": {
                 "status": "requires_refresh",
                 "missing_collections": ["guia"],
-                "refresh_job": {"status": "failed"},
+                "refresh_job": {
+                    "status": "failed",
+                    "started_at": "2026-05-15T10:00:00+00:00",
+                    "completed_at": "2026-05-15T10:05:00+00:00",
+                    "result": {"message": "RAG refresh timed out."},
+                },
             },
         },
     )
@@ -109,6 +114,9 @@ def test_dashboard_route_renders_system_status_panel(client, monkeypatch):
     assert b"policy-agent RAG" in response.data
     assert b"requires_refresh" in response.data
     assert b"Missing: guia" in response.data
+    assert b"RAG refresh timed out." in response.data
+    assert b"rag-refresh-started-value" in response.data
+    assert b"data-system-refresh-button" in response.data
     assert b"Update state" in response.data
 
 
@@ -144,6 +152,10 @@ def test_context_detail_disables_policy_generation_when_runtime_is_not_ready(cli
             "rag": {
                 "status": "requires_refresh",
                 "missing_collections": [],
+                "refresh_job": {
+                    "status": "running",
+                    "started_at": "2026-05-15T10:00:00+00:00",
+                },
                 "embedding_models": [
                     {
                         "model": "intfloat/multilingual-e5-base",
@@ -160,6 +172,8 @@ def test_context_detail_disables_policy_generation_when_runtime_is_not_ready(cli
     assert response.status_code == 200
     assert b"Application runtime is not ready" in response.data
     assert b"intfloat/multilingual-e5-base (missing)" in response.data
+    assert b"running" in response.data
+    assert b"rag-refresh-elapsed-value" in response.data
     assert b"Update state" in response.data
     assert b"disabled" in response.data
 

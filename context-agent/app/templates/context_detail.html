@@ -70,12 +70,24 @@
         {% endif %}
       </div>
       <form method="post" action="{{ url_for('main.context_system_refresh', context_id=context._id) }}" class="mb-3" data-system-refresh-form>
-        <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+        <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700" data-system-refresh-button>
           Update state
         </button>
       </form>
       <div class="mb-3 text-sm text-gray-700">
         Refresh: <span id="rag-refresh-job-value">{{ system_status.rag.refresh_job.status if system_status and system_status.rag and system_status.rag.refresh_job else 'idle' }}</span>
+        <div class="mt-1">
+          Started: <span id="rag-refresh-started-value">{{ system_status.rag.refresh_job.started_at if system_status and system_status.rag and system_status.rag.refresh_job and system_status.rag.refresh_job.started_at else '' }}</span>
+        </div>
+        <div class="mt-1">
+          Completed: <span id="rag-refresh-completed-value">{{ system_status.rag.refresh_job.completed_at if system_status and system_status.rag and system_status.rag.refresh_job and system_status.rag.refresh_job.completed_at else '' }}</span>
+        </div>
+        <div class="mt-1">
+          Elapsed: <span id="rag-refresh-elapsed-value"></span>
+        </div>
+        <div class="mt-1">
+          Result: <span id="rag-refresh-message-value">{{ system_status.rag.refresh_job.result.message if system_status and system_status.rag and system_status.rag.refresh_job and system_status.rag.refresh_job.result and system_status.rag.refresh_job.result.message else '' }}</span>
+        </div>
       </div>
     {% endif %}
     {% set pipeline_active = active_pipeline_job and active_pipeline_job.status in ['queued', 'running', 'policy_generating', 'policy_generated', 'validating'] %}

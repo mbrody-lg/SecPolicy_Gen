@@ -23,6 +23,59 @@
     });
   }
 
+  function setRefreshButtonsRunning(running) {
+    document.querySelectorAll("[data-system-refresh-button]").forEach(function (button) {
+      button.disabled = running;
+      button.textContent = running ? "Updating..." : "Update state";
+      button.className = running
+        ? "bg-gray-400 cursor-not-allowed text-white px-4 py-2 rounded"
+        : "bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700";
+    });
+  }
+
+  function formatTimestamp(value) {
+    if (!value) {
+      return "";
+    }
+    var date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return value;
+    }
+    return date.toLocaleString();
+  }
+
+  function formatElapsed(startedAt, completedAt) {
+    if (!startedAt) {
+      return "";
+    }
+    var started = new Date(startedAt);
+    if (Number.isNaN(started.getTime())) {
+      return "";
+    }
+    var ended = completedAt ? new Date(completedAt) : new Date();
+    if (Number.isNaN(ended.getTime())) {
+      return "";
+    }
+    var seconds = Math.max(0, Math.round((ended.getTime() - started.getTime()) / 1000));
+    if (seconds < 60) {
+      return seconds + "s";
+    }
+    return Math.floor(seconds / 60) + "m " + (seconds % 60) + "s";
+  }
+
+  function renderRefreshJob(job) {
+    var status = job && job.status ? job.status : "idle";
+    var running = status === "running";
+    setText("rag-refresh-job-value", status);
+    setText("rag-refresh-started-value", job ? formatTimestamp(job.started_at) : "");
+    setText("rag-refresh-completed-value", job ? formatTimestamp(job.completed_at) : "");
+    setText("rag-refresh-elapsed-value", job ? formatElapsed(job.started_at, job.completed_at) : "");
+    var result = job && job.result ? job.result : {};
+    var message = result.message || result.error_code || "";
+    setText("rag-refresh-message-value", message);
+    setRefreshButtonsRunning(running);
+  }
+
   function isTerminalPipelineStatus(status) {
     return status === "completed" || status === "failed" || status === "cancelled";
   }
@@ -137,8 +190,7 @@
     if (payload.rag) {
       setText("rag-status-value", payload.rag.status || "unknown");
       setText("rag-action-value", payload.rag.action || "");
-      var job = payload.rag.refresh_job;
-      setText("rag-refresh-job-value", job && job.status ? job.status : "idle");
+      renderRefreshJob(payload.rag.refresh_job);
     }
     setGenerateState(ready);
   }
@@ -177,14 +229,11 @@
           .then(function (payload) {
             renderStatus(payload.status);
             if (payload.response && payload.response.job) {
-              setText("rag-refresh-job-value", payload.response.job.status);
+              renderRefreshJob(payload.response.job);
             }
           })
           .finally(function () {
-            if (button) {
-              button.disabled = false;
-              button.textContent = "Update state";
-            }
+            loadStatus();
           });
       });
     });
