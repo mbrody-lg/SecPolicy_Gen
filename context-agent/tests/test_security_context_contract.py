@@ -8,6 +8,7 @@ from app.context_analysis import (
     SecurityContextValidationError,
     build_security_context_from_answers,
     merge_provider_enrichment,
+    security_context_to_business_context,
     validate_security_context,
 )
 
@@ -118,6 +119,41 @@ def test_build_security_context_infers_employee_data_and_iso_27001():
     assert context["information_assets"]["third_party_dependencies"] == [
         "external_service_provider"
     ]
+
+
+def test_security_context_to_business_context_flattens_policy_agent_fields():
+    security_context = build_security_context_from_answers(
+        _answers_from_fixture("clinica_dental.yaml"),
+        language="en",
+    )
+
+    business_context = security_context_to_business_context(security_context)
+
+    assert business_context == {
+        "country": "Spain",
+        "region": "Valencian Community",
+        "sector": "Private healthcare",
+        "important_assets": [
+            "Medical records",
+            "digital equipment",
+            "management application.",
+        ],
+        "critical_assets": ["Medical data and backup systems."],
+        "current_security_operations": (
+            "Antivirus protection, local copies, password access."
+        ),
+        "methodology": "GDPR and ISO 27799 should be applied.",
+        "generic": "Specific to the healthcare sector.",
+        "need": "Comply with GDPR and protect patient data.",
+        "data_types": ["personal_data", "health_data"],
+        "retrieval_collection_families": [
+            "legal_norms",
+            "sector_norms",
+            "security_frameworks",
+            "risk_methodologies",
+            "implementation_guides",
+        ],
+    }
 
 
 def test_validate_security_context_rejects_missing_required_section():

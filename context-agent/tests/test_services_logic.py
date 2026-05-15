@@ -74,6 +74,14 @@ class FakeResponse:
 
 def test_get_context_and_prompt_prefers_context_refined_prompt(monkeypatch):
     context_id = ObjectId()
+    security_context = logic.build_context_security_context(
+        {
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient data",
+            "need": "Protect patient data",
+        }
+    )
     fake_db = FakeDB(
         contexts=[
             {
@@ -81,6 +89,7 @@ def test_get_context_and_prompt_prefers_context_refined_prompt(monkeypatch):
                 "refined_prompt": "canonical refined prompt",
                 "language": "es",
                 "version": "1.2.3",
+                "security_context": security_context,
             }
         ],
         interactions=[
@@ -99,6 +108,9 @@ def test_get_context_and_prompt_prefers_context_refined_prompt(monkeypatch):
     assert payload["refined_prompt"] == "canonical refined prompt"
     assert payload["language"] == "es"
     assert payload["model_version"] == "1.2.3"
+    assert payload["business_context"]["country"] == "Spain"
+    assert payload["business_context"]["sector"] == "Healthcare"
+    assert payload["business_context"]["critical_assets"] == ["Patient data"]
 
 
 def test_get_context_and_prompt_falls_back_to_legacy_interaction(monkeypatch):
@@ -121,6 +133,7 @@ def test_get_context_and_prompt_falls_back_to_legacy_interaction(monkeypatch):
     assert payload["refined_prompt"] == "legacy refined prompt"
     assert payload["language"] == "en"
     assert payload["model_version"] == "0.2.0"
+    assert payload["business_context"]["country"] is None
 
 
 def test_get_context_and_prompt_normalizes_numeric_model_version(monkeypatch):
