@@ -86,7 +86,7 @@ For one-command evidence of the critical loop, run:
 make critical-path-validation
 ```
 
-This runs `context-tests`, `policy-tests`, `validator-tests`, then resets into the Docker smoke sequence.
+This runs `context-tests`, `policy-tests`, `validator-tests`, `governance-tests`, then resets into the Docker smoke sequence.
 
 For the smoke step alone:
 

@@ -1,4 +1,4 @@
-"""Static coverage checks for the INIT-02 environment contract."""
+"""Static coverage checks for the repository environment contract."""
 
 import re
 from pathlib import Path
