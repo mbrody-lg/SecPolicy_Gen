@@ -216,6 +216,47 @@ def test_update_pipeline_job_state_records_event_and_sanitizes_error(monkeypatch
     assert captured_metrics[-1]["duration_seconds"] >= 0
 
 
+def test_update_pipeline_job_state_handles_naive_started_at(monkeypatch):
+    created_at = datetime.now(timezone.utc) - timedelta(seconds=10)
+    fake_db = FakeDB(
+        pipeline_jobs_docs=[
+            {
+                "job_id": "job-naive-start",
+                "context_id": "ctx-1",
+                "correlation_id": "corr-1",
+                "command": "generate_policy",
+                "status": "policy_generating",
+                "current_stage": "policy_generation",
+                "created_at": created_at,
+                "updated_at": created_at,
+                "started_at": datetime.utcnow() - timedelta(seconds=5),
+            }
+        ]
+    )
+    captured_metrics = []
+    monkeypatch.setattr(pipeline_jobs.mongo, "db", fake_db, raising=False)
+    monkeypatch.setattr(
+        pipeline_jobs,
+        "record_pipeline_job_transition",
+        lambda **kwargs: captured_metrics.append(kwargs),
+    )
+
+    updated = pipeline_jobs.update_pipeline_job_state(
+        job_id="job-naive-start",
+        status="failed",
+        stage="policy_generation",
+        error={
+            "stage": "policy_generation",
+            "error_code": "policy_agent_timeout",
+            "safe_message": "Policy generation timed out.",
+        },
+    )
+
+    assert updated["status"] == "failed"
+    assert captured_metrics[-1]["status"] == "failed"
+    assert captured_metrics[-1]["duration_seconds"] >= 0
+
+
 def test_update_pipeline_job_state_rejects_unknown_status(monkeypatch):
     fake_db = FakeDB()
     monkeypatch.setattr(pipeline_jobs.mongo, "db", fake_db, raising=False)

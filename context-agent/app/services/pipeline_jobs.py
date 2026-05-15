@@ -236,7 +236,14 @@ def _pipeline_duration_seconds(existing: dict, completed_at: datetime) -> float 
     started_at = existing.get("started_at") or existing.get("created_at")
     if not started_at or not hasattr(started_at, "timestamp"):
         return None
-    return (completed_at - started_at).total_seconds()
+    return (_ensure_utc_datetime(completed_at) - _ensure_utc_datetime(started_at)).total_seconds()
+
+
+def _ensure_utc_datetime(value: datetime) -> datetime:
+    """Return a timezone-aware UTC datetime for Mongo values that may be naive."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _mark_pipeline_job_stale(job: dict) -> dict | None:
@@ -262,8 +269,8 @@ def _is_pipeline_job_stale(job: dict, *, now: datetime | None = None) -> bool:
     if not reference_time or not hasattr(reference_time, "timestamp"):
         return False
     current_time = now or datetime.now(timezone.utc)
-    if reference_time.tzinfo is None:
-        reference_time = reference_time.replace(tzinfo=timezone.utc)
+    reference_time = _ensure_utc_datetime(reference_time)
+    current_time = _ensure_utc_datetime(current_time)
     return (current_time - reference_time).total_seconds() > _pipeline_job_stale_after_seconds()
 
 
