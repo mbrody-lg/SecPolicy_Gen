@@ -7,6 +7,7 @@ from app.context_analysis import (
     SECURITY_CONTEXT_VERSION,
     SecurityContextValidationError,
     build_security_context_from_answers,
+    merge_provider_enrichment,
     validate_security_context,
 )
 
@@ -160,18 +161,84 @@ def test_validate_security_context_rejects_oversized_values():
     assert error.value.field_path == "policy_intent.need"
 
 
-def test_validate_security_context_rejects_invalid_fact_source():
+def test_validate_security_context_rejects_unknown_fact_source():
     payload = build_security_context_from_answers(
         _answers_from_fixture("clinica_dental.yaml"),
         language="en",
     )
-    payload["analysis"]["facts"][0]["source"] = "provider"
+    payload["analysis"]["facts"][0]["source"] = "external_provider"
 
     with pytest.raises(SecurityContextValidationError) as error:
         validate_security_context(payload)
 
     assert error.value.error_code == "security_context_invalid_fact_source"
     assert error.value.field_path == "analysis.facts.0.source"
+
+
+def test_merge_provider_enrichment_accepts_bounded_updates_and_facts():
+    payload = build_security_context_from_answers(
+        _answers_from_fixture("clinica_dental.yaml"),
+        language="en",
+    )
+
+    enriched = merge_provider_enrichment(
+        payload,
+        {
+            "version": SECURITY_CONTEXT_VERSION,
+            "updates": {
+                "profile": {"activity": "Dental clinic"},
+                "security_posture": {"maturity": "basic"},
+                "information_assets": {
+                    "data_categories": ["personal_data", "health_data"]
+                },
+            },
+            "facts": [
+                {
+                    "field": "profile.activity",
+                    "value": "Dental clinic inferred from healthcare context.",
+                }
+            ],
+        },
+    )
+
+    assert enriched["profile"]["activity"] == "Dental clinic"
+    assert enriched["security_posture"]["maturity"] == "basic"
+    assert enriched["analysis"]["facts"][-1] == {
+        "field": "profile.activity",
+        "source": "provider",
+        "value": "Dental clinic inferred from healthcare context.",
+    }
+
+
+def test_merge_provider_enrichment_rejects_unknown_fields():
+    payload = build_security_context_from_answers(
+        _answers_from_fixture("clinica_dental.yaml"),
+        language="en",
+    )
+
+    with pytest.raises(SecurityContextValidationError) as error:
+        merge_provider_enrichment(
+            payload,
+            {
+                "version": SECURITY_CONTEXT_VERSION,
+                "updates": {"profile": {"raw_provider_payload": "not allowed"}},
+            },
+        )
+
+    assert error.value.error_code == "security_context_enrichment_field_not_allowed"
+    assert error.value.field_path == "updates.profile.raw_provider_payload"
+
+
+def test_merge_provider_enrichment_rejects_unsupported_version():
+    payload = build_security_context_from_answers(
+        _answers_from_fixture("clinica_dental.yaml"),
+        language="en",
+    )
+
+    with pytest.raises(SecurityContextValidationError) as error:
+        merge_provider_enrichment(payload, {"version": "2.0", "updates": {}})
+
+    assert error.value.error_code == "security_context_enrichment_version_unsupported"
 
 
 def test_build_security_context_reports_missing_core_information():

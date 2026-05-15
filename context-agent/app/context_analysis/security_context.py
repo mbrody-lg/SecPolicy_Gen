@@ -62,7 +62,7 @@ STRING_FIELDS = {
     ("policy_intent", "specificity"),
 }
 
-FACT_SOURCE_VALUES = {"provided", "derived", "default", "unknown"}
+FACT_SOURCE_VALUES = {"provided", "derived", "provider", "default", "unknown"}
 
 
 @dataclass(frozen=True)
