@@ -21,6 +21,7 @@ from app import (
 )
 from app.agents.factory import create_agent_from_config
 from app.context_analysis import SECURITY_CONTEXT_VERSION, build_security_context_from_answers
+from app.context_analysis import security_context_to_business_context
 from app.observability import build_log_event, log_event
 
 logger = logging.getLogger(__name__)
@@ -350,6 +351,14 @@ def public_security_context_payload(context_id: str, context: dict) -> dict:
     }
 
 
+def business_context_from_context_record(context: dict) -> dict:
+    """Return the downstream shallow business_context for Policy Agent."""
+    security_context = context.get("security_context")
+    if not isinstance(security_context, dict):
+        security_context = build_context_security_context(context)
+    return security_context_to_business_context(security_context)
+
+
 def run_with_agent(prompt: str, context_id: str = None, model_version: str = None) -> str:
     """
     Execute the configured agent using the initial prompt.
@@ -597,6 +606,7 @@ def get_context_and_prompt(context_id: str) -> dict:
         "refined_prompt": refined_prompt,
         "language": context.get("language", "en"),
         "model_version": str(context.get("version", "0.1.0")),
+        "business_context": business_context_from_context_record(context),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "correlation_id": correlation_id,
     }
