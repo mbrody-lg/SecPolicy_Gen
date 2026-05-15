@@ -2,6 +2,7 @@
 testpaths = [
     "context-agent/tests",
     "policy-agent/tests",
+    "tests/governance",
     "validator-agent/tests",
 ]
 markers = [

@@ -5,7 +5,7 @@ DOCKER_COMPOSE_CMD=$(shell scripts/docker_preflight.sh --print-compose 2>/dev/nu
 COMPOSE=$(DOCKER_COMPOSE_CMD) -f $(INFRA_DIR)/docker-compose.yml --env-file $(INFRA_DIR)/.env
 LINT_PYTHON=$(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi)
 
-.PHONY: all docker-preflight up down clean rebuild logs observability-urls shell-context context-tests context-import policy-shell policy-tests policy-vectorize policy-rag-validate policy-rag-backup policy-rag-restore validator-shell validator-tests functional-smoke functional-smoke-real functional-smoke-real-full functional-smoke-real-backup critical-path-validation bootstrap-test-env host-fast-tests lint help
+.PHONY: all docker-preflight up down clean rebuild logs observability-urls shell-context context-tests context-import policy-shell policy-tests policy-vectorize policy-rag-validate policy-rag-backup policy-rag-restore validator-shell validator-tests governance-tests functional-smoke functional-smoke-real functional-smoke-real-full functional-smoke-real-backup critical-path-validation bootstrap-test-env host-fast-tests lint help
 
 ## Verify docker and compose prerequisites
 docker-preflight:
@@ -81,6 +81,11 @@ validator-shell:
 validator-tests:
 	docker exec validator_agent_service pytest
 
+## Run repository-level governance tests in a Docker test runner
+governance-tests: docker-preflight
+	$(COMPOSE) build context-agent
+	docker run --rm -v $(CURDIR):/repo -w /repo infrastructure-context-agent pytest -q tests/governance
+
 ## Run full functional smoke in docker (end-to-end) using example fixtures
 functional-smoke:
 	./scripts/run_docker_functional_smoke.sh
@@ -137,6 +142,7 @@ help:
 	@echo "make policy-rag-restore -> Restore local Chroma data backup"
 	@echo "make validator-shell 	-> Access validator-agent shell"
 	@echo "make validator-tests 	-> Run tests within validator-agent"
+	@echo "make governance-tests -> Run repository-level governance tests"
 	@echo "make functional-smoke 	-> Run full docker functional smoke pipeline"
 	@echo "make functional-smoke-real-full -> Run real smoke and refresh RAG from source documents"
 	@echo "make functional-smoke-real-backup -> Run real smoke from a local Chroma backup"

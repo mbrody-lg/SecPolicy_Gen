@@ -32,11 +32,6 @@ services:
     volumes:
       - ../context-agent:/context-agent
       - ../migration:/migration
-      - ../docs:/docs:ro
-      - ../infrastructure:/infrastructure:ro
-      - ../policy-agent:/policy-agent:ro
-      - ../scripts:/scripts:ro
-      - ../validator-agent:/validator-agent:ro
     working_dir: /context-agent
     environment:
       - FLASK_APP=run.py
