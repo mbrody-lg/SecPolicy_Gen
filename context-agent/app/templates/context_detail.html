@@ -42,7 +42,83 @@
     </form>
   </div>
 
-  <div id="system-readiness-panel" class="bg-white rounded-lg shadow p-4">
+  <div id="security-context-panel" class="bg-white rounded-lg shadow p-4 mt-6"
+    data-security-context-panel
+    data-security-context-state="{% if context.security_context %}{% if context.security_context.analysis.missing_information %}needs-information{% else %}analysis-ready{% endif %}{% else %}not-started{% endif %}">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h2 class="text-xl font-semibold mb-1">Security context</h2>
+        <div class="text-sm text-gray-700">
+          {% if context.security_context %}
+            {% if context.security_context.analysis.missing_information %}
+              Needs more information
+            {% else %}
+              Analysis ready
+            {% endif %}
+          {% else %}
+            Not available yet
+          {% endif %}
+        </div>
+      </div>
+      {% if context.security_context_version %}
+        <div class="text-xs text-gray-500">Version {{ context.security_context_version }}</div>
+      {% endif %}
+    </div>
+
+    {% if context.security_context %}
+      {% set security_context = context.security_context %}
+      <div class="mt-4 grid gap-4 md:grid-cols-2">
+        <div class="rounded border border-gray-200 p-3">
+          <div class="text-sm font-semibold text-gray-900">Company profile</div>
+          <dl class="mt-2 space-y-1 text-sm text-gray-700">
+            <div><dt class="inline font-medium">Sector:</dt> <dd class="inline">{{ security_context.profile.sector or 'Unknown' }}</dd></div>
+            <div><dt class="inline font-medium">Countries:</dt> <dd class="inline">{{ security_context.profile.operating_countries | join(', ') if security_context.profile.operating_countries else 'Unknown' }}</dd></div>
+            <div><dt class="inline font-medium">Region:</dt> <dd class="inline">{{ security_context.profile.region or 'Unknown' }}</dd></div>
+          </dl>
+        </div>
+        <div class="rounded border border-gray-200 p-3">
+          <div class="text-sm font-semibold text-gray-900">Information assets</div>
+          <dl class="mt-2 space-y-1 text-sm text-gray-700">
+            <div><dt class="inline font-medium">Critical:</dt> <dd class="inline">{{ security_context.information_assets.critical_assets | join(', ') if security_context.information_assets.critical_assets else 'Unknown' }}</dd></div>
+            <div><dt class="inline font-medium">Data:</dt> <dd class="inline">{{ security_context.information_assets.data_categories | join(', ') if security_context.information_assets.data_categories else 'Unknown' }}</dd></div>
+            <div><dt class="inline font-medium">Dependencies:</dt> <dd class="inline">{{ security_context.information_assets.third_party_dependencies | join(', ') if security_context.information_assets.third_party_dependencies else 'Unknown' }}</dd></div>
+          </dl>
+        </div>
+        <div class="rounded border border-gray-200 p-3">
+          <div class="text-sm font-semibold text-gray-900">Compliance hints</div>
+          <dl class="mt-2 space-y-1 text-sm text-gray-700">
+            <div><dt class="inline font-medium">Jurisdictions:</dt> <dd class="inline">{{ security_context.compliance.jurisdictions | join(', ') if security_context.compliance.jurisdictions else 'Unknown' }}</dd></div>
+            <div><dt class="inline font-medium">References:</dt> <dd class="inline">{{ security_context.compliance.regulatory_hints | join(', ') if security_context.compliance.regulatory_hints else 'Unknown' }}</dd></div>
+            <div><dt class="inline font-medium">Methods:</dt> <dd class="inline">{{ security_context.compliance.methodologies | join(', ') if security_context.compliance.methodologies else 'Unknown' }}</dd></div>
+          </dl>
+        </div>
+        <div class="rounded border border-gray-200 p-3">
+          <div class="text-sm font-semibold text-gray-900">Retrieval hints</div>
+          <dl class="mt-2 space-y-1 text-sm text-gray-700">
+            <div><dt class="inline font-medium">Collections:</dt> <dd class="inline">{{ security_context.retrieval_hints.collection_families | join(', ') if security_context.retrieval_hints.collection_families else 'Unknown' }}</dd></div>
+            <div><dt class="inline font-medium">Confidence:</dt> <dd class="inline">{{ security_context.analysis.confidence }}</dd></div>
+          </dl>
+        </div>
+      </div>
+
+      {% if security_context.analysis.missing_information %}
+        <div class="mt-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          <div class="font-semibold">Missing information</div>
+          <ul class="mt-2 list-disc pl-5">
+            {% for item in security_context.analysis.missing_information %}
+              <li>{{ item }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endif %}
+    {% else %}
+      <div class="mt-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+        Structured security analysis is not available for this context yet.
+      </div>
+    {% endif %}
+  </div>
+
+  <div id="system-readiness-panel" class="bg-white rounded-lg shadow p-4 mt-6">
     <h2 class="text-xl font-semibold mb-2">Generate policies</h2>
     {% set runtime_ready = system_status and system_status.status == 'ready' %}
     {% if not runtime_ready %}
