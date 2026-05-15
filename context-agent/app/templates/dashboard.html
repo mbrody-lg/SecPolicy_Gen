@@ -15,7 +15,7 @@
           </p>
         </div>
         <form method="post" action="{{ url_for('main.system_refresh') }}" data-system-refresh-form>
-          <button type="submit" class="bg-slate-800 text-white px-3 py-2 rounded hover:bg-slate-700">
+          <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700" data-system-refresh-button>
             Update state
           </button>
         </form>
@@ -56,6 +56,18 @@
               Refresh: <span id="rag-refresh-job-value">idle</span>
             </div>
           {% endif %}
+          <div class="mt-2 text-xs text-gray-700">
+            Started: <span id="rag-refresh-started-value">{{ rag.refresh_job.started_at if rag.refresh_job and rag.refresh_job.started_at else '' }}</span>
+          </div>
+          <div class="mt-1 text-xs text-gray-700">
+            Completed: <span id="rag-refresh-completed-value">{{ rag.refresh_job.completed_at if rag.refresh_job and rag.refresh_job.completed_at else '' }}</span>
+          </div>
+          <div class="mt-1 text-xs text-gray-700">
+            Elapsed: <span id="rag-refresh-elapsed-value"></span>
+          </div>
+          <div class="mt-1 text-xs text-gray-700">
+            Result: <span id="rag-refresh-message-value">{{ rag.refresh_job.result.message if rag.refresh_job and rag.refresh_job.result and rag.refresh_job.result.message else '' }}</span>
+          </div>
         </div>
       </div>
     </section>
