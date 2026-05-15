@@ -51,6 +51,7 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | `OPENAI_API_URL` | `runtime knob` | Safe provider default may be documented | OpenAI client | Compose should pass explicitly when used |
 | `POLICY_AGENT_TIMEOUT_SECONDS` | `runtime knob` | Safe default `30` | Policy handoff HTTP calls | Parse as positive numeric value |
 | `VALIDATOR_AGENT_TIMEOUT_SECONDS` | `runtime knob` | Safe default `30` | Validator handoff HTTP calls | Parse as positive numeric value |
+| `PIPELINE_JOB_STALE_AFTER_SECONDS` | `runtime knob` | Safe default `1800` | Async policy pipeline job recovery | Parse as positive numeric value |
 | `MAX_CONTENT_LENGTH` | `runtime knob` | Safe default `262144` | Flask request limits | Parse as positive integer |
 | `SESSION_COOKIE_SECURE` | `runtime knob` | Local default `false`; non-local should be `true` | Flask session cookie | Parse as explicit truthy flag |
 | `TRUSTED_HOSTS` | `runtime knob` | Optional local list | Flask host validation | Parse comma-separated host list |
@@ -71,7 +72,9 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | `CHROMA_PORT` | `required` | Docker default `8000` | Chroma HTTP client/readiness | Parse as integer port from 1 to 65535 |
 | `CHROMA_READINESS_MODE` | `runtime knob` | `config_only` outside live Docker checks; Compose may set `live` | Policy readiness | Reject unexpected modes |
 | `RAG_SOURCES_PATH` | `required` | Compose passes `/policy-agent/app/config/rag_sources.yaml` | RAG source manifest | Manifest path must exist before indexing/validation |
-| `RAG_VALIDATE_CHROMA` | `runtime knob` | Defaults to off | RAG validate-only script | Parse as explicit boolean flag |
+| `RAG_VALIDATE_CHROMA` | `runtime knob` | Defaults to off | RAG status and validate-only script | Parse as explicit boolean flag; deep Chroma embedding probes must stay opt-in |
+| `POLICY_AGENT_ALLOW_RAG_REFRESH` | `runtime knob` | Defaults to off | Controlled local RAG refresh route | Parse as explicit boolean flag |
+| `POLICY_AGENT_RAG_REFRESH_TIMEOUT_SECONDS` | `runtime knob` | Safe Docker default `2400` | Controlled local RAG refresh command | Parse as positive numeric value; long enough for a full local reindex |
 | `POLICY_AGENT_ALLOW_MODEL_DOWNLOAD` | `runtime knob` | Defaults to off | Embedding model loader/indexing | Must be explicit for one-time model download |
 | `METADATA_SCHEMA_PATH` | `runtime knob` | Optional/local until governed | RAG metadata validation | Document if promoted to active contract |
 | `MAX_CONTENT_LENGTH` | `runtime knob` | Safe default `262144` | Flask request limits | Parse as positive integer |
@@ -123,6 +126,21 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | `RUN_REAL_PROVIDER_TESTS` | `runtime knob` | Defaults to off | Live provider tests | Must be explicit; deterministic tests must not require it |
 | `COMPOSE_FILE` | `safe default` | Defaults to infrastructure Compose file | Docker preflight | Path must exist |
 | `ENV_FILE` | `safe default` | Defaults to `infrastructure/.env` | Docker preflight | Path must exist for stack targets |
+| `GRAFANA_ADMIN_USER` | `runtime knob` | Local default `admin` | Local Grafana service | Local/dev only |
+| `GRAFANA_ADMIN_PASSWORD` | `runtime knob` | Local default `admin` | Local Grafana service | Local/dev only; do not reuse in production |
+| `CHROMA_CONTAINER` | `safe default` | Defaults to local Compose Chroma container | Chroma backup tooling | Local/dev only |
+| `CHROMA_IMAGE` | `safe default` | Defaults to local Chroma image | Chroma backup tooling | Local/dev only |
+| `CHROMA_BACKUP_FILE` | `safe default` | Defaults to local workspace backup path | Chroma backup tooling | Path should stay under local workspace |
+| `MIGRATION_SMOKE_ENV_FILE` | `safe default` | Defaults to `infrastructure/.env` | Functional smoke | Path must exist |
+| `MIGRATION_SMOKE_REQUIRE_REAL_CONFIG` | `runtime knob` | Defaults to off | Functional smoke | Parse as explicit truthy flag |
+| `MIGRATION_SMOKE_REQUIRE_RAG_READY` | `runtime knob` | Defaults to off | Functional smoke | Parse as explicit truthy flag |
+| `MIGRATION_SMOKE_RAG_MODE` | `runtime knob` | Defaults to mock-compatible mode | Functional smoke RAG preparation | Restrict to documented smoke modes |
+| `MIGRATION_SMOKE_RAG_READY_TIMEOUT_SECONDS` | `runtime knob` | Safe bounded timeout | Functional smoke RAG readiness wait | Parse as positive integer |
+| `MIGRATION_SMOKE_RAG_READY_POLL_SECONDS` | `runtime knob` | Safe bounded poll interval | Functional smoke RAG readiness wait | Parse as positive integer |
+| `MIGRATION_SMOKE_PIPELINE_JOB_TIMEOUT_SECONDS` | `runtime knob` | Safe bounded timeout | Functional smoke async pipeline polling | Parse as positive integer |
+| `MIGRATION_SMOKE_PIPELINE_JOB_POLL_SECONDS` | `runtime knob` | Safe bounded poll interval | Functional smoke async pipeline polling | Parse as positive integer |
+| `MIGRATION_SMOKE_CHROMA_BACKUP_FILE` | `safe default` | Defaults to local workspace backup path | Functional smoke backup mode | Path should stay under local workspace |
+| `MIGRATION_SMOKE_CHROMA_BACKUP_AFTER_REFRESH` | `runtime knob` | Defaults to off | Functional smoke refresh mode | Parse as explicit truthy flag |
 
 ## Example Values
 

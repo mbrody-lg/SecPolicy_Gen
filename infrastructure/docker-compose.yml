@@ -47,6 +47,7 @@ services:
       - VALIDATOR_AGENT_URL=${VALIDATOR_AGENT_URL:-http://validator-agent:5000}
       - POLICY_AGENT_TIMEOUT_SECONDS=${POLICY_AGENT_TIMEOUT_SECONDS:-30}
       - VALIDATOR_AGENT_TIMEOUT_SECONDS=${VALIDATOR_AGENT_TIMEOUT_SECONDS:-30}
+      - PIPELINE_JOB_STALE_AFTER_SECONDS=${PIPELINE_JOB_STALE_AFTER_SECONDS:-1800}
       - MAX_CONTENT_LENGTH=${MAX_CONTENT_LENGTH:-262144}
       - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
       - TRUSTED_HOSTS=${TRUSTED_HOSTS:-localhost,127.0.0.1,context-agent,policy-agent,validator-agent}
@@ -87,7 +88,7 @@ services:
       - CHROMA_READINESS_MODE=${CHROMA_READINESS_MODE:-live}
       - RAG_VALIDATE_CHROMA=${RAG_VALIDATE_CHROMA:-false}
       - POLICY_AGENT_ALLOW_RAG_REFRESH=${POLICY_AGENT_ALLOW_RAG_REFRESH:-true}
-      - POLICY_AGENT_RAG_REFRESH_TIMEOUT_SECONDS=${POLICY_AGENT_RAG_REFRESH_TIMEOUT_SECONDS:-900}
+      - POLICY_AGENT_RAG_REFRESH_TIMEOUT_SECONDS=${POLICY_AGENT_RAG_REFRESH_TIMEOUT_SECONDS:-2400}
       - POLICY_AGENT_ALLOW_MODEL_DOWNLOAD=${POLICY_AGENT_ALLOW_MODEL_DOWNLOAD:-0}
       - MAX_CONTENT_LENGTH=${MAX_CONTENT_LENGTH:-262144}
       - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
@@ -144,9 +145,94 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+  prometheus:
+    image: prom/prometheus:v2.53.2
+    container_name: secpolicy_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    depends_on:
+      context-agent:
+        condition: service_started
+      policy-agent:
+        condition: service_started
+      validator-agent:
+        condition: service_started
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:9090/-/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+  loki:
+    image: grafana/loki:3.2.1
+    container_name: secpolicy_loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./observability/loki/loki-config.yml:/etc/loki/local-config.yml:ro
+      - loki_data:/loki
+    command: ["-config.file=/etc/loki/local-config.yml"]
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3100/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+  promtail:
+    image: grafana/promtail:3.2.1
+    container_name: secpolicy_promtail
+    volumes:
+      - ./observability/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: ["-config.file=/etc/promtail/config.yml"]
+    depends_on:
+      loki:
+        condition: service_started
+    networks:
+      - internal
+  grafana:
+    image: grafana/grafana:11.2.2
+    container_name: secpolicy_grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      prometheus:
+        condition: service_started
+      loki:
+        condition: service_started
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 volumes:
   mongo_data:
   chroma_data:
   policy_model_cache:
+  prometheus_data:
+  loki_data:
+  grafana_data:
 networks:
   internal:

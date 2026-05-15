@@ -10,3 +10,4 @@ pytest
 coverage
 markdown
 mongomock
+prometheus-client

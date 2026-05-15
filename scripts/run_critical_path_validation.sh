@@ -92,6 +92,7 @@ echo "[critical-path] running service suites"
 make context-tests
 make policy-tests
 make validator-tests
+make governance-tests
 
 echo "[critical-path] resetting stack before smoke validation"
 "${DOCKER_COMPOSE_CMD[@]}" -f infrastructure/docker-compose.yml --env-file infrastructure/.env down >/dev/null

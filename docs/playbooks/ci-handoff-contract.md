@@ -23,6 +23,7 @@ decisions.
 | Policy service tests | `make policy-tests` | Docker-backed service suite |
 | Policy RAG runtime validation | `make policy-rag-validate` | Lightweight manifest/source/Chroma heartbeat gate without indexing |
 | Validator service tests | `make validator-tests` | Docker-backed service suite |
+| Repository governance tests | `make governance-tests` | Docker-backed repo-level contract suite |
 | End-to-end smoke | `make functional-smoke` | Docker-backed critical-loop smoke |
 | Full critical path | `make critical-path-validation` | Canonical single-command evidence path |
 | Stop stack | `make down` | Always run during cleanup |
@@ -94,7 +95,8 @@ alone is not enough evidence for service-to-service execution.
 3. Run `make host-fast-tests`.
 4. Run `make up`.
 5. Verify readiness on `5003`, `5002`, and `5001`.
-6. Run `make context-tests`, `make policy-tests`, and `make validator-tests`.
+6. Run `make context-tests`, `make policy-tests`, `make validator-tests`, and
+   `make governance-tests`.
 7. Run `make policy-rag-validate` when the PR touches policy-agent RAG
    manifest, collection naming, Chroma wiring, or source paths.
 8. Run `make functional-smoke`.
@@ -170,6 +172,7 @@ CI-facing candidates are non-interactive:
 - `make policy-tests`
 - `make policy-rag-validate`
 - `make validator-tests`
+- `make governance-tests`
 - `make functional-smoke`
 - `make critical-path-validation`
 - `make down`

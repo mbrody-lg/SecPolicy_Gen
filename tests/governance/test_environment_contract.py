@@ -1,4 +1,4 @@
-"""Static coverage checks for the INIT-02 environment contract."""
+"""Static coverage checks for the repository environment contract."""
 
 import re
 from pathlib import Path
@@ -61,6 +61,7 @@ REQUIRED_ENV_EXAMPLE_VARIABLES = {
     "POLICY_AGENT_ALLOW_MODEL_DOWNLOAD",
     "POLICY_AGENT_TIMEOUT_SECONDS",
     "POLICY_AGENT_URL",
+    "PIPELINE_JOB_STALE_AFTER_SECONDS",
     "RAG_VALIDATE_CHROMA",
     "SESSION_COOKIE_SECURE",
     "TESTING",

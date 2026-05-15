@@ -51,6 +51,9 @@ This starts:
 - **Context Agent** - Web/API service at http://localhost:5003
 - **Policy Agent** - API at http://localhost:5002
 - **Validator Agent** - API at http://localhost:5001
+- **Grafana** - Local observability UI at http://localhost:3000
+- **Prometheus** - Metrics store at http://localhost:9090
+- **Loki/Promtail** - Local Docker log aggregation at http://localhost:3100
 
 ### 4. Stop Services
 
@@ -95,6 +98,7 @@ All agents run on separate ports and use internal Docker DNS:
 | `make clean` | Stop and remove all data |
 | `make rebuild` | Force rebuild all containers |
 | `make logs` | View live logs from all services |
+| `make observability-urls` | Show Grafana, Prometheus, and Loki URLs |
 | `make host-fast-tests` | Run fast host-side checks across services |
 | `make shell-context` | Access Context Agent shell |
 | `make context-tests` | Run Context Agent tests |
@@ -122,7 +126,7 @@ Notes:
 - `make functional-smoke` now resolves each service's effective `CONFIG_PATH` before swapping mock configs, so the smoke run exercises the same config entrypoints used by the containers themselves.
 - `make functional-smoke` also checks `/health` and `/ready` on `context-agent`, `policy-agent`, and `validator-agent`, and records minimal loop observability evidence through `X-Correlation-ID` plus a `/diagnostics/<correlation_id>` lookup.
 - For host-only logic changes, run `make host-fast-tests` before or instead of the Docker sequence when container parity is not needed.
-- For one-command evidence of the critical Context -> Policy -> Validator path, use `make critical-path-validation`; it runs `context-tests`, `policy-tests`, `validator-tests`, and then the smoke sequence.
+- For one-command evidence of the critical Context -> Policy -> Validator path, use `make critical-path-validation`; it runs `context-tests`, `policy-tests`, `validator-tests`, `governance-tests`, and then the smoke sequence.
 
 ## Docker Compose Structure
 
@@ -132,8 +136,48 @@ docker-compose.yml services:
 ├── chroma             # Vector database for RAG
 ├── context-agent      # Context gathering service
 ├── policy-agent       # Policy generation service
-└── validator-agent    # Policy validation service
+├── validator-agent    # Policy validation service
+├── prometheus         # Metrics scraping and storage
+├── loki               # Log storage
+├── promtail           # Docker log collector
+└── grafana            # Local observability UI
 ```
+
+## Local Observability
+
+The local Compose stack includes a lightweight observability layer:
+
+| Service | URL | Purpose |
+|---------|-----|---------|
+| Grafana | http://localhost:3000 | Operational dashboards and log exploration |
+| Prometheus | http://localhost:9090 | Metrics scraping and query UI |
+| Loki | http://localhost:3100 | Log storage queried through Grafana |
+
+Default local Grafana credentials come from `infrastructure/.env`:
+
+```env
+GRAFANA_ADMIN_USER=admin
+GRAFANA_ADMIN_PASSWORD=admin
+```
+
+The three Flask services expose `/metrics` for Prometheus. The first dashboard,
+`SecPolicyGen Overview`, is provisioned automatically and shows:
+- request rate by service
+- p95 request latency by service
+- recent 5xx errors
+- recent failure logs from `context-agent`, `policy-agent`, and `validator-agent`
+- pipeline job transitions for `Generate and Validate`
+- terminal pipeline outcomes by stage and bounded error code
+- p95 pipeline duration by terminal status
+
+Active policy pipeline jobs are considered stale after
+`PIPELINE_JOB_STALE_AFTER_SECONDS` seconds, default `1800`. When this happens,
+the job is moved to `failed` with bounded error code `pipeline_job_stale` so the
+operator UI is not permanently blocked after a worker or process interruption.
+
+This observability stack is for local/development operation. It exposes ports on
+localhost and mounts the Docker socket read-only for Promtail container log
+discovery; do not promote this Compose configuration to production as-is.
 
 ## Compose Readiness Map
 

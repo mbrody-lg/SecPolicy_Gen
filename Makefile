@@ -5,7 +5,7 @@ DOCKER_COMPOSE_CMD=$(shell scripts/docker_preflight.sh --print-compose 2>/dev/nu
 COMPOSE=$(DOCKER_COMPOSE_CMD) -f $(INFRA_DIR)/docker-compose.yml --env-file $(INFRA_DIR)/.env
 LINT_PYTHON=$(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi)
 
-.PHONY: all docker-preflight up down clean rebuild logs shell-context context-tests context-import policy-shell policy-tests policy-vectorize policy-rag-validate policy-rag-backup policy-rag-restore validator-shell validator-tests functional-smoke functional-smoke-real functional-smoke-real-full functional-smoke-real-backup critical-path-validation bootstrap-test-env host-fast-tests lint help
+.PHONY: all docker-preflight up down clean rebuild logs observability-urls shell-context context-tests context-import policy-shell policy-tests policy-vectorize policy-rag-validate policy-rag-backup policy-rag-restore validator-shell validator-tests governance-tests functional-smoke functional-smoke-real functional-smoke-real-full functional-smoke-real-backup critical-path-validation bootstrap-test-env host-fast-tests lint help
 
 ## Verify docker and compose prerequisites
 docker-preflight:
@@ -30,6 +30,12 @@ rebuild: docker-preflight
 ## Show logs for all services
 logs: docker-preflight
 	$(COMPOSE) logs -f
+
+## Show local observability service URLs
+observability-urls:
+	@echo "Grafana:    http://localhost:3000"
+	@echo "Prometheus: http://localhost:9090"
+	@echo "Loki:       http://localhost:3100"
 
 ## Enter the container agent-context
 shell-context: 
@@ -75,6 +81,11 @@ validator-shell:
 validator-tests:
 	docker exec validator_agent_service pytest
 
+## Run repository-level governance tests in a Docker test runner
+governance-tests: docker-preflight
+	$(COMPOSE) build context-agent
+	docker run --rm -v $(CURDIR):/repo -w /repo infrastructure-context-agent pytest -q tests/governance
+
 ## Run full functional smoke in docker (end-to-end) using example fixtures
 functional-smoke:
 	./scripts/run_docker_functional_smoke.sh
@@ -84,11 +95,11 @@ functional-smoke-real: functional-smoke-real-full
 
 ## Run full real-config smoke and refresh RAG from source documents
 functional-smoke-real-full:
-	MIGRATION_SMOKE_MOCK=0 MIGRATION_SMOKE_REQUIRE_REAL_CONFIG=1 MIGRATION_SMOKE_REQUIRE_RAG_READY=1 MIGRATION_SMOKE_RAG_MODE=refresh MIGRATION_SMOKE_RAG_READY_TIMEOUT_SECONDS=2400 MIGRATION_SMOKE_CHROMA_BACKUP_AFTER_REFRESH=1 ./scripts/run_docker_functional_smoke.sh
+	POLICY_AGENT_TIMEOUT_SECONDS=$${POLICY_AGENT_TIMEOUT_SECONDS:-180} VALIDATOR_AGENT_TIMEOUT_SECONDS=$${VALIDATOR_AGENT_TIMEOUT_SECONDS:-180} MIGRATION_SMOKE_MOCK=0 MIGRATION_SMOKE_REQUIRE_REAL_CONFIG=1 MIGRATION_SMOKE_REQUIRE_RAG_READY=1 MIGRATION_SMOKE_RAG_MODE=refresh MIGRATION_SMOKE_RAG_READY_TIMEOUT_SECONDS=2400 MIGRATION_SMOKE_CHROMA_BACKUP_AFTER_REFRESH=1 ./scripts/run_docker_functional_smoke.sh
 
 ## Run real-config smoke by restoring a compatible local Chroma backup
 functional-smoke-real-backup:
-	MIGRATION_SMOKE_MOCK=0 MIGRATION_SMOKE_REQUIRE_REAL_CONFIG=1 MIGRATION_SMOKE_REQUIRE_RAG_READY=1 MIGRATION_SMOKE_RAG_MODE=backup ./scripts/run_docker_functional_smoke.sh
+	POLICY_AGENT_TIMEOUT_SECONDS=$${POLICY_AGENT_TIMEOUT_SECONDS:-180} VALIDATOR_AGENT_TIMEOUT_SECONDS=$${VALIDATOR_AGENT_TIMEOUT_SECONDS:-180} MIGRATION_SMOKE_MOCK=0 MIGRATION_SMOKE_REQUIRE_REAL_CONFIG=1 MIGRATION_SMOKE_REQUIRE_RAG_READY=1 MIGRATION_SMOKE_RAG_MODE=backup ./scripts/run_docker_functional_smoke.sh
 
 validate-smoke-artifact:
 	python3 scripts/validate_smoke_artifact.py migration/functional-smoke-result.json
@@ -119,6 +130,7 @@ help:
 	@echo "make clean 		-> Stop + remove volumes"
 	@echo "make rebuild 		-> Rebuild services"
 	@echo "make logs 		-> Show live logs"
+	@echo "make observability-urls -> Show Grafana/Prometheus/Loki URLs"
 	@echo "make context-shell 	-> Access context-agent shell"
 	@echo "make context-tests 	-> Run tests inside context-agent"
 	@echo "make context-import 	-> Run sample content import"
@@ -130,6 +142,7 @@ help:
 	@echo "make policy-rag-restore -> Restore local Chroma data backup"
 	@echo "make validator-shell 	-> Access validator-agent shell"
 	@echo "make validator-tests 	-> Run tests within validator-agent"
+	@echo "make governance-tests -> Run repository-level governance tests"
 	@echo "make functional-smoke 	-> Run full docker functional smoke pipeline"
 	@echo "make functional-smoke-real-full -> Run real smoke and refresh RAG from source documents"
 	@echo "make functional-smoke-real-backup -> Run real smoke from a local Chroma backup"

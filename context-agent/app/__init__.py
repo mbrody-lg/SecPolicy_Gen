@@ -9,6 +9,8 @@ from flask import Flask, g, has_request_context, request
 from flask_pymongo import PyMongo
 from dotenv import load_dotenv
 
+from app.metrics import record_request_metrics, start_request_timer
+
 mongo = PyMongo()
 
 TEST_ONLY_SECRET_KEY = "test-only-secret-key"
@@ -17,6 +19,7 @@ CORRELATION_ID_MAX_LENGTH = 128
 CORRELATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]+$")
 DEFAULT_CONFIG_PATH = "app/config/context_agent.yaml"
 DEFAULT_QUESTIONS_CONFIG_PATH = "app/config/context_questions.yaml"
+DEFAULT_PIPELINE_JOB_STALE_AFTER_SECONDS = 1800
 
 
 def _get_env_bool(name: str, default: bool = False) -> bool:
@@ -159,6 +162,10 @@ def create_app():
     app.config["QUESTIONS_CONFIG_PATH"] = os.getenv("QUESTIONS_CONFIG_PATH", DEFAULT_QUESTIONS_CONFIG_PATH)
     app.config["POLICY_AGENT_TIMEOUT_SECONDS"] = _get_env_float("POLICY_AGENT_TIMEOUT_SECONDS", 30.0)
     app.config["VALIDATOR_AGENT_TIMEOUT_SECONDS"] = _get_env_float("VALIDATOR_AGENT_TIMEOUT_SECONDS", 30.0)
+    app.config["PIPELINE_JOB_STALE_AFTER_SECONDS"] = _get_env_float(
+        "PIPELINE_JOB_STALE_AFTER_SECONDS",
+        DEFAULT_PIPELINE_JOB_STALE_AFTER_SECONDS,
+    )
     app.config["MAX_CONTENT_LENGTH"] = _get_env_int("MAX_CONTENT_LENGTH", 256 * 1024)
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
@@ -181,9 +188,11 @@ def create_app():
     @app.before_request
     def bind_correlation_id():
         g.correlation_id = _ensure_correlation_id()
+        start_request_timer()
 
     @app.after_request
     def apply_security_headers(response):
+        record_request_metrics(response)
         correlation_id = get_request_correlation_id()
         if correlation_id:
             response.headers[CORRELATION_ID_HEADER] = correlation_id

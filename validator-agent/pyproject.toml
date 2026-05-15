@@ -1,9 +1,6 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
+  "live: live provider tests that require explicit credentials",
   "route: route-level request/response tests",
 ]
-
-[tool.coverage.run]
-branch = true
-source = ["app"]

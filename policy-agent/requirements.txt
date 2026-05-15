@@ -13,3 +13,4 @@ pypdf
 sentence-transformers>=2.2.2
 tqdm
 huggingface-hub>=0.15.1
+prometheus-client
