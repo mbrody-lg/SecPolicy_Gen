@@ -446,7 +446,20 @@ def _infer_data_categories(text: str) -> list[str]:
         categories.append("personal_data")
     if _contains_any(normalized, ("health", "healthcare", "medical", "patient", "salud", "paciente")):
         categories.append("health_data")
-    if _contains_any(normalized, ("employee", "hr", "payroll", "rrhh", "nomina", "nómina")):
+    if _contains_any(
+        normalized,
+        (
+            "employee data",
+            "employee records",
+            "employee files",
+            "hr data",
+            "hr operations",
+            "payroll",
+            "rrhh",
+            "nomina",
+            "nómina",
+        ),
+    ):
         categories.append("employee_data")
     if _contains_any(normalized, ("payment", "online payment", "card", "pago", "e-commerce", "ecommerce")):
         categories.append("commerce_data")
