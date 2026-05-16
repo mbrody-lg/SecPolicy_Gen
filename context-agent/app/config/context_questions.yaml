@@ -1,19 +1,79 @@
 questions:
 - id: country
   question: What country does the company belong to?
+  required: true
 - id: region
   question: In which region(s) does the company operate?
+  required: true
 - id: sector
   question: To which business sector does it belong?
+  required: true
+- id: company_activity
+  question: What does the company do and which products or services does it provide?
+  required: true
+- id: company_size
+  question: What is the approximate company size or operational scale?
+  required: false
+- id: business_model
+  question: What business model does the company use?
+  required: false
+- id: service_type
+  question: Is the company mainly digital, physical, hybrid, SaaS, consultancy, manufacturing, healthcare, retail, or another model?
+  required: false
 - id: important_assets
   question: Which assets do you consider important for the company's operations?
+  required: true
 - id: critical_assets
   question: Of these assets, which are critical for business continuity?
+  required: true
+- id: data_categories
+  question: What categories of information does the company process?
+  required: true
+- id: third_party_dependencies
+  question: Which relevant providers, suppliers, platforms, integrations, or outsourced services does the company depend on?
+  required: false
+- id: cloud_services
+  question: Which cloud, hosting, SaaS, or managed services are used?
+  required: false
 - id: current_security_operations
   question: Describe which security operations are currently being applied?
+  required: true
+- id: known_gaps
+  question: Which security weaknesses, missing controls, incidents, or concerns are already known?
+  required: false
 - id: methodology
   question: Is any security methodology being applied? Describe which one or if one should be proposed.
+  required: false
+- id: regulatory_hints
+  question: Which regulations, standards, client requirements, or sector obligations are known or suspected?
+  required: false
+- id: security_maturity
+  question: What is the current security maturity level?
+  required: false
+- id: risk_tolerance
+  question: What risk tolerance should the policy assume?
+  required: false
+- id: governance_owner
+  question: Who owns security, privacy, compliance, or IT decisions in the company?
+  required: false
 - id: generic
   question: Should the policies be generic or specific?
+  required: true
+- id: policy_type
+  question: What type of policy or security domain should be generated first?
+  required: false
+- id: policy_scope
+  question: What should be included in the scope of the policy?
+  required: false
+- id: policy_exclusions
+  question: What should be explicitly excluded from the policy?
+  required: false
+- id: policy_audience
+  question: Who is the intended audience of the policy?
+  required: false
 - id: need
   question: Describe what need is being covered.
+  required: true
+- id: language
+  question: What language should be used for the generated policy?
+  required: false

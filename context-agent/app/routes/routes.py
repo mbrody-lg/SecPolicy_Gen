@@ -14,6 +14,7 @@ from app.services.logic import (
     PipelineStepError,
     SECURITY_CONTEXT_VERSION,
     build_context_security_context,
+    context_answer_fields,
     get_health_status,
     get_system_status,
     get_pipeline_diagnostic,
@@ -251,17 +252,7 @@ def _developer_diagnostics_enabled() -> bool:
 def create():
     """Create a new context and trigger the initial agent response."""
     if request.method == "POST":
-        allowed_fields = {
-            "country",
-            "region",
-            "sector",
-            "important_assets",
-            "critical_assets",
-            "current_security_operations",
-            "methodology",
-            "generic",
-            "need",
-        }
+        allowed_fields = context_answer_fields()
         data = {k: v.strip() for k, v in request.form.items() if k in allowed_fields}
         security_context = build_context_security_context(data)
 
