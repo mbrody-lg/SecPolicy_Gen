@@ -244,11 +244,15 @@ def test_create_route_persists_security_context(client, monkeypatch):
             "country": "Init05Land",
             "region": "Catalonia",
             "sector": "Healthcare",
+            "company_activity": "Private outpatient clinic",
             "important_assets": "Medical records",
             "critical_assets": "Patient data",
+            "data_categories": "health_data",
+            "third_party_dependencies": "external laboratory",
             "current_security_operations": "Backups",
             "methodology": "ISO 27001",
             "generic": "Specific",
+            "policy_type": "Access control policy",
             "need": "Protect patient data",
         },
     )
@@ -257,6 +261,9 @@ def test_create_route_persists_security_context(client, monkeypatch):
     context = routes_module.mongo.db.contexts.find_one({"country": "Init05Land"})
     assert context["security_context_version"] == routes_module.SECURITY_CONTEXT_VERSION
     assert context["security_context"]["profile"]["sector"] == "Healthcare"
+    assert context["security_context"]["profile"]["activity"] == "Private outpatient clinic"
+    assert context["security_context"]["policy_intent"]["policy_type"] == "Access control policy"
+    assert "external laboratory" in context["security_context"]["information_assets"]["third_party_dependencies"]
     assert context["security_context"]["information_assets"]["data_categories"] == [
         "health_data"
     ]
