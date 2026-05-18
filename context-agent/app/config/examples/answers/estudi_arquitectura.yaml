@@ -1,19 +1,53 @@
-answers: 
-  - id: country 
-    answer: Italy 
-  - id: region 
-    answer: Northern Italy 
-  - id: sector 
-    answer: Architecture and engineering 
-  - id: important_assets 
-    answer: Digital plans, CAD software, NAS servers. 
-  - id: critical_assets 
-    answer: Current projects and contractual documents. 
-  - id: current_security_operations 
-    answer: Protected internal network, remote encrypted access. 
-  - id: methodology 
-    answer: Not applied; ISO 27001 could be implemented. 
-  - id: generic 
-    answer: Specific adapted to collaborative projects. 
-  - id: need 
-    answer: Protect plans and communications with clients.
+answers:
+  - id: country
+    answer: Italy
+  - id: region
+    answer: Northern Italy
+  - id: sector
+    answer: Architecture and engineering
+  - id: company_activity
+    answer: Architecture studio that designs residential and commercial projects, coordinates BIM models, exchanges plans with clients and contractors, and manages permits and contractual documentation.
+  - id: company_size
+    answer: 36 employees, 22 architects and engineers, two offices, and project collaboration with external structural and installation specialists.
+  - id: business_model
+    answer: Professional project-based services with design fees, construction supervision, BIM collaboration, and long-term client relationships.
+  - id: service_type
+    answer: Hybrid professional service with local workstations, NAS storage, CAD and BIM software, cloud collaboration, and remote work.
+  - id: important_assets
+    answer: Digital plans, BIM models, CAD software, NAS servers, project documents, client contracts, permit documentation, email archive, and design intellectual property.
+  - id: critical_assets
+    answer: Current project files, BIM models, NAS storage, contractual documents, client deliverables, licensed CAD software, and backup repository.
+  - id: data_categories
+    answer: personal_data, client_confidential_data, intellectual_property, project_data, contract_data, supplier_data.
+  - id: third_party_dependencies
+    answer: Autodesk cloud services, Microsoft 365, NAS maintenance provider, external engineering collaborators, cloud backup provider, and e-signature provider.
+  - id: cloud_services
+    answer: Microsoft 365, Autodesk cloud collaboration, cloud backup, e-signature platform, and contractor file exchange portals.
+  - id: current_security_operations
+    answer: Protected internal network, encrypted remote access, NAS permissions by project, endpoint protection, daily backups, MFA for Microsoft 365, and separate guest access for collaborators.
+  - id: known_gaps
+    answer: Large file exchange sometimes uses unmanaged links, project access is not always removed at closure, and backup restore tests are not formally evidenced.
+  - id: methodology
+    answer: ISO 27001 and ISO 27002 should be implemented gradually, focusing first on access, backups, supplier collaboration, and intellectual property.
+  - id: regulatory_hints
+    answer: GDPR, client confidentiality clauses, intellectual property protection, construction project confidentiality, and professional liability expectations.
+  - id: security_maturity
+    answer: Intermediate operational security with basic governance gaps in project closure and third-party access.
+  - id: risk_tolerance
+    answer: Low for project confidentiality, BIM model integrity, ransomware impact, and unauthorized collaborator access.
+  - id: governance_owner
+    answer: Systems Manager owns IT; Operations Director owns project delivery risk; studio partners approve exceptions.
+  - id: generic
+    answer: Specific policies adapted to collaborative architecture projects, BIM data, client confidentiality, and remote work.
+  - id: policy_type
+    answer: Project data access, collaboration, and backup policy.
+  - id: policy_scope
+    answer: CAD and BIM files, NAS permissions, Microsoft 365, Autodesk collaboration, contractor access, file sharing, backups, and project closure.
+  - id: policy_exclusions
+    answer: Architectural design review process, construction safety, and commercial proposal pricing.
+  - id: policy_audience
+    answer: Architects, engineers, project managers, administrative staff, external collaborators, and IT provider.
+  - id: need
+    answer: Protect plans and intellectual property, control collaborator access, and ensure project continuity if local storage or cloud services fail.
+  - id: language
+    answer: English
