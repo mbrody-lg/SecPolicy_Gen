@@ -1,7 +1,7 @@
 from test_base import *
 from app import create_app, mongo
 import pytest
-import time
+import app.routes.routes as routes_module
 
 @pytest.fixture
 def client():
@@ -11,10 +11,17 @@ def client():
         with app.app_context():
             yield client
 
-def test_create_context(client):
+def test_create_context(client, monkeypatch):
+    monkeypatch.setattr(
+        routes_module,
+        "run_with_agent",
+        lambda prompt, context_id, model_version=None: "Refined context from test",
+    )
+
     # Test data
+    country = "SpainCreateContextTest"
     form_data = {
-        "country": "Spain",
+        "country": country,
         "sector": "Healthcare",
         "important_assets": "Medical records",
         "critical_assets": "Patient data",
@@ -29,22 +36,18 @@ def test_create_context(client):
     html = response.data.decode("utf-8")
     assert "Context" in html or "context" in html
 
-    # Wait for Mongo to update document
-    context = None
-    for _ in range(20):
-        context = mongo.db.contexts.find_one({"country": "Spain"}, sort=[("created_at", -1)])
-        if context and context.get("status") == "completed":
-            break
-        time.sleep(0.5)
-
+    context = mongo.db.contexts.find_one({"country": country})
     assert context is not None, "Context not found"
     assert context["status"] == "completed"
-    assert context["country"] == "Spain"
-    assert "refined_prompt" in context
+    assert context["country"] == country
+    assert context["security_context"]["profile"]["sector"] == "Healthcare"
 
     # Verify interactions were saved
     interactions = list(mongo.db.interactions.find({"context_id": context["_id"]}))
     assert len(interactions) >= 1, "No interactions saved."
+    assert any(
+        item.get("answer") == "Refined context from test"
+        for item in interactions
+    )
 
-    print("Prompt:", context["refined_prompt"][:80])
     print("Interactions count:", len(interactions))

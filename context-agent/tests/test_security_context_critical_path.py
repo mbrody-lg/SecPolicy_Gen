@@ -1,6 +1,7 @@
 from app import mongo
 from app.services import logic
 import app.routes.routes as routes_module
+from bson import ObjectId
 
 
 def test_security_context_create_to_policy_payload_contract(client, monkeypatch):
@@ -30,7 +31,8 @@ def test_security_context_create_to_policy_payload_contract(client, monkeypatch)
     )
 
     assert response.status_code == 302
-    context = mongo.db.contexts.find_one({"sector": "Healthcare"})
+    context_id = response.location.rsplit("/", 1)[-1]
+    context = mongo.db.contexts.find_one({"_id": ObjectId(context_id)})
     assert context["security_context"]["analysis"]["confidence"] == "medium"
     assert context["security_context"]["profile"]["activity"] == "Private outpatient clinic"
 
