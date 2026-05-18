@@ -23,6 +23,7 @@ def test_recreate_context_from_answers_creates_reviewable_plan(monkeypatch):
     context = importer.mongo.db.contexts.find_one({"country": "Spain"})
     assert context["status"] == "awaiting_task_validation"
     assert context["security_context"]["profile"]["sector"] == "Healthcare"
+    assert context["context_building"]["status"] == "sufficient"
     assert context["context_intelligence_plan"]["status"] == "draft"
     assert context["context_intelligence_plan"]["tasks"][0]["id"] == "company_profile"
     assert "refined_prompt" not in context
@@ -57,6 +58,8 @@ def test_recreate_context_from_answers_can_auto_approve_plan(monkeypatch):
     context = importer.mongo.db.contexts.find_one({"country": "France"})
     plan = context["context_intelligence_plan"]
     assert context["status"] == "context_plan_approved"
+    assert context["context_building"]["status"] == "approved"
+    assert context["context_building"]["bypassed"] is True
     assert plan["status"] == "approved"
     assert plan["review"]["required"] is False
     assert plan["review"]["user_feedback"] == (

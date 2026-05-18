@@ -31,6 +31,55 @@
     </div>
   </div>
 
+  {% if context.context_building %}
+    {% set context_building = context.context_building %}
+    <div id="context-building-panel" class="bg-white rounded-lg shadow p-4 mb-6"
+      data-context-building
+      data-context-building-status="{{ context_building.status }}">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 class="text-xl font-semibold mb-1">Context building</h2>
+          <div class="text-sm text-gray-700">
+            {% if context_building.status == 'needs_information' %}
+              Needs more information
+            {% elif context_building.status == 'approved' %}
+              Approved or bypassed
+            {% else %}
+              Sufficient for planning
+            {% endif %}
+          </div>
+        </div>
+        <div class="text-xs text-gray-500">Version {{ context_building.version }}</div>
+      </div>
+
+      {% set pending_questions = context_building.questions | selectattr('status', 'equalto', 'pending') | list %}
+      {% if pending_questions %}
+        <div class="mt-4 space-y-3">
+          {% for question in pending_questions %}
+            <form method="post"
+              action="{{ url_for('main.answer_context_building_questions', context_id=context._id) }}"
+              class="rounded border border-amber-200 bg-amber-50 p-3">
+              <input type="hidden" name="question_id" value="{{ question.id }}">
+              <label for="context-building-answer-{{ question.id }}" class="block text-sm font-semibold text-amber-950">
+                {{ question.question }}
+              </label>
+              <div class="mt-1 text-xs text-amber-900">{{ question.rationale }}</div>
+              <textarea id="context-building-answer-{{ question.id }}" name="answer" rows="2"
+                class="mt-2 w-full border rounded p-2 text-sm focus:outline-none focus:ring focus:border-blue-300"></textarea>
+              <button type="submit" class="mt-2 bg-blue-600 text-white px-3 py-2 rounded hover:bg-blue-700">
+                Update context
+              </button>
+            </form>
+          {% endfor %}
+        </div>
+      {% elif context_building.questions %}
+        <div class="mt-4 rounded border border-green-200 bg-green-50 p-3 text-sm text-green-950">
+          Context building questions are answered.
+        </div>
+      {% endif %}
+    </div>
+  {% endif %}
+
   {% if context.context_intelligence_plan %}
     {% set context_plan = context.context_intelligence_plan %}
     <div id="context-intelligence-plan-panel" class="bg-white rounded-lg shadow p-4 mb-6"
@@ -65,7 +114,11 @@
         {% endfor %}
       </ol>
 
-      {% if context_plan.status != 'approved' %}
+      {% if context.context_building and context.context_building.status == 'needs_information' %}
+        <div class="mt-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          Answer the context-building questions before approving the plan.
+        </div>
+      {% elif context_plan.status != 'approved' %}
         <form method="post" action="{{ url_for('main.approve_context_plan', context_id=context._id) }}" class="mt-4">
           <label for="context-plan-feedback" class="block text-sm font-medium text-gray-900">
             Add corrections before approving
@@ -229,6 +282,10 @@
     {% endif %}
     {% set pipeline_job = latest_pipeline_job %}
     {% set pipeline_active = pipeline_job and pipeline_job.status in ['queued', 'running', 'policy_generating', 'policy_generated', 'validating'] %}
+    {% set context_building_ready = not context.context_building or context.context_building.status != 'needs_information' %}
+    {% set context_plan_ready = context.context_intelligence_plan and context.context_intelligence_plan.status == 'approved' %}
+    {% set security_context_ready = context.security_context and not context.security_context.analysis.missing_information %}
+    {% set can_generate_policy = runtime_ready and not pipeline_active and context_building_ready and context_plan_ready and security_context_ready %}
     <div id="pipeline-job-panel"
       class="mb-4 rounded border border-blue-300 bg-blue-50 p-3 text-sm text-blue-950"
       data-context-id="{{ context._id }}"
@@ -267,11 +324,26 @@
         </a>
       </div>
     </div>
+    {% if not can_generate_policy %}
+      <div class="mb-3 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+        {% if not context_building_ready %}
+          Complete context-building questions before generating a policy.
+        {% elif not context_plan_ready %}
+          Approve the context intelligence plan before generating a policy.
+        {% elif not security_context_ready %}
+          Complete the security context before generating a policy.
+        {% elif pipeline_active %}
+          Policy generation is already running.
+        {% elif not runtime_ready %}
+          Application runtime must be ready before generating a policy.
+        {% endif %}
+      </div>
+    {% endif %}
     <form method="post" action="{{ url_for('main.trigger_policy_generation', context_id=context._id) }}" data-generate-policy-form>
       <button type="submit"
-        class="{% if runtime_ready and not pipeline_active %}bg-green-600 hover:bg-green-700{% else %}bg-gray-400 cursor-not-allowed{% endif %} text-white px-4 py-2 rounded"
+        class="{% if can_generate_policy %}bg-green-600 hover:bg-green-700{% else %}bg-gray-400 cursor-not-allowed{% endif %} text-white px-4 py-2 rounded"
         data-generate-policy-button
-        {% if not runtime_ready or pipeline_active %}disabled{% endif %}>
+        {% if not can_generate_policy %}disabled{% endif %}>
         Generate and validate
       </button>
     </form>

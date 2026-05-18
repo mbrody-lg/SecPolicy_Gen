@@ -57,6 +57,29 @@ CONTEXT_ANSWER_FIELDS = {
     "language",
 }
 CONTEXT_INTELLIGENCE_PLAN_VERSION = "1.0"
+CONTEXT_BUILDING_VERSION = "1.0"
+CONTEXT_BUILDING_QUESTION_MAP = {
+    "profile.sector": {
+        "answer_field": "sector",
+        "question": "Which business sector should the security context use?",
+        "rationale": "Sector determines relevant threats, regulatory expectations, and RAG collection priorities.",
+    },
+    "profile.operating_countries": {
+        "answer_field": "country",
+        "question": "In which country should legal and regulatory analysis be anchored?",
+        "rationale": "Jurisdiction is required before mapping legal obligations and sector norms.",
+    },
+    "information_assets.critical_assets": {
+        "answer_field": "critical_assets",
+        "question": "Which information assets are critical for business continuity or risk exposure?",
+        "rationale": "Critical assets define the protection scope and the policy controls that matter most.",
+    },
+    "policy_intent.need": {
+        "answer_field": "need",
+        "question": "What concrete security need should this context and later policy generation cover?",
+        "rationale": "Policy generation must be tied to an explicit business and security objective.",
+    },
+}
 CONTEXT_INTELLIGENCE_TASKS = (
     {
         "id": "company_profile",
@@ -449,6 +472,122 @@ def build_context_intelligence_plan(context_data: dict) -> dict:
             "retrieval_collection_families": security_context["retrieval_hints"]["collection_families"],
         },
     }
+
+
+def build_context_building_state(
+    context_data: dict,
+    *,
+    security_context: dict | None = None,
+    existing: dict | None = None,
+    bypassed: bool = False,
+) -> dict:
+    """Build the embedded CONTEXT BUILDING artifact for a context record."""
+    security_context = security_context or build_context_security_context(context_data)
+    existing_questions = {}
+    if isinstance(existing, dict):
+        existing_questions = {
+            question.get("field_path"): dict(question)
+            for question in existing.get("questions", [])
+            if isinstance(question, dict) and question.get("field_path")
+        }
+
+    missing_information = list(security_context["analysis"]["missing_information"])
+    questions = []
+    for field_path in missing_information:
+        question = _context_building_question(field_path, existing_questions.get(field_path))
+        if question:
+            questions.append(question)
+
+    for field_path, question in existing_questions.items():
+        if field_path not in missing_information and question.get("status") == "answered":
+            questions.append(question)
+
+    status = "approved" if bypassed else "sufficient"
+    if not bypassed and any(question["status"] in {"pending", "deferred"} for question in questions):
+        status = "needs_information"
+
+    return {
+        "version": CONTEXT_BUILDING_VERSION,
+        "status": status,
+        "bypassed": bypassed,
+        "missing_information": missing_information,
+        "questions": questions,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def apply_context_building_answers(context: dict, submitted_answers: dict[str, str]) -> dict:
+    """Apply user answers to CONTEXT BUILDING questions and rebuild artifacts."""
+    context_building = context.get("context_building") or build_context_building_state(context)
+    questions = context_building.get("questions", [])
+    if not isinstance(questions, list):
+        questions = []
+
+    answer_updates = {}
+    answered_questions = []
+    for question in questions:
+        question_id = str(question.get("id", ""))
+        answer = str(submitted_answers.get(question_id, "") or "").strip()
+        if not answer:
+            answered_questions.append(question)
+            continue
+        answer_field = question.get("answer_field")
+        if answer_field in CONTEXT_ANSWER_FIELDS:
+            answer_updates[answer_field] = answer
+            answered = dict(question)
+            answered["status"] = "answered"
+            answered["answer"] = answer
+            answered["answered_at"] = datetime.now(timezone.utc).isoformat()
+            answered_questions.append(answered)
+        else:
+            answered_questions.append(question)
+
+    updated_context = {**context, **answer_updates}
+    security_context = build_context_security_context(updated_context)
+    updated_building = build_context_building_state(
+        updated_context,
+        security_context=security_context,
+        existing={**context_building, "questions": answered_questions},
+    )
+    context_plan = build_context_intelligence_plan(updated_context)
+    status = (
+        "context_building_needs_input"
+        if updated_building["status"] == "needs_information"
+        else "awaiting_task_validation"
+    )
+    return {
+        "answer_updates": answer_updates,
+        "security_context": security_context,
+        "context_building": updated_building,
+        "context_intelligence_plan": context_plan,
+        "status": status,
+    }
+
+
+def _context_building_question(field_path: str, existing: dict | None = None) -> dict | None:
+    definition = CONTEXT_BUILDING_QUESTION_MAP.get(field_path)
+    if not definition:
+        return None
+    question_id = f"context_building_{field_path.replace('.', '_')}"
+    question = {
+        "id": question_id,
+        "field_path": field_path,
+        "answer_field": definition["answer_field"],
+        "question": definition["question"],
+        "rationale": definition["rationale"],
+        "status": "pending",
+        "answer": None,
+        "source": "security_context.analysis.missing_information",
+    }
+    if existing:
+        question.update({
+            key: existing[key]
+            for key in ("status", "answer", "answered_at")
+            if key in existing
+        })
+    if question.get("answer") and question.get("status") == "pending":
+        question["status"] = "answered"
+    return question
 
 
 def generate_context_plan_prompt(data: dict, question_config: str | None = None) -> str:

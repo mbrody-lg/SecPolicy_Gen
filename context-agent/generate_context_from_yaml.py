@@ -13,6 +13,7 @@ from app import create_app, mongo
 from app.services.logic import (
     SECURITY_CONTEXT_VERSION,
     approve_context_intelligence_plan,
+    build_context_building_state,
     build_context_security_context,
     build_context_intelligence_plan,
     context_answer_fields,
@@ -69,6 +70,11 @@ def recreate_context_from_answers(data, *, auto_approve_plan=False):
     created_at = datetime.now(timezone.utc)
     initial_prompt = generate_context_plan_prompt(data)
     security_context = build_context_security_context(data)
+    context_building = build_context_building_state(
+        data,
+        security_context=security_context,
+        bypassed=auto_approve_plan,
+    )
     context_plan = build_context_intelligence_plan(data)
 
     context_result = mongo.db.contexts.insert_one({
@@ -76,8 +82,13 @@ def recreate_context_from_answers(data, *, auto_approve_plan=False):
         "version": 1,
         "security_context_version": SECURITY_CONTEXT_VERSION,
         "security_context": security_context,
+        "context_building": context_building,
         "context_intelligence_plan": context_plan,
-        "status": "planning",
+        "status": (
+            "context_building_needs_input"
+            if context_building["status"] == "needs_information"
+            else "planning"
+        ),
         "created_at": created_at
     })
     context_id = context_result.inserted_id
@@ -111,7 +122,11 @@ def recreate_context_from_answers(data, *, auto_approve_plan=False):
         "origin": "agent"
     })
 
-    status = "awaiting_task_validation"
+    status = (
+        "context_building_needs_input"
+        if context_building["status"] == "needs_information"
+        else "awaiting_task_validation"
+    )
     update_payload = {"status": status}
     if auto_approve_plan:
         context_record = {
@@ -122,6 +137,12 @@ def recreate_context_from_answers(data, *, auto_approve_plan=False):
         }
         update_payload = {
             "status": "context_plan_approved",
+            "context_building": build_context_building_state(
+                data,
+                security_context=security_context,
+                existing=context_building,
+                bypassed=True,
+            ),
             "context_intelligence_plan": approve_context_intelligence_plan(
                 context_record,
                 "Automatically approved during fixture import.",

@@ -13,7 +13,9 @@ from app.observability import log_event
 from app.services.logic import (
     PipelineStepError,
     SECURITY_CONTEXT_VERSION,
+    apply_context_building_answers,
     approve_context_intelligence_plan,
+    build_context_building_state,
     build_context_security_context,
     build_context_intelligence_plan,
     context_answer_fields,
@@ -250,6 +252,41 @@ def _developer_diagnostics_enabled() -> bool:
         or os.getenv("FLASK_ENV") == "development"
     )
 
+
+def _policy_generation_blocker(context: dict | None) -> dict | None:
+    """Return the first domain reason that blocks policy generation."""
+    if not context:
+        return {
+            "error_code": "context_not_found",
+            "message": "Context not found.",
+            "status_code": 404,
+        }
+    context_building = context.get("context_building")
+    if isinstance(context_building, dict) and context_building.get("status") == "needs_information":
+        return {
+            "error_code": "context_building_needs_information",
+            "message": "Answer the context-building questions before generating a policy.",
+            "status_code": 409,
+        }
+    plan = context.get("context_intelligence_plan")
+    if isinstance(plan, dict) and plan.get("status") != "approved":
+        return {
+            "error_code": "context_plan_not_approved",
+            "message": "Approve the context intelligence plan before generating a policy.",
+            "status_code": 409,
+        }
+    security_context = context.get("security_context")
+    missing_information = []
+    if isinstance(security_context, dict):
+        missing_information = security_context.get("analysis", {}).get("missing_information", [])
+    if not isinstance(security_context, dict) or missing_information:
+        return {
+            "error_code": "security_context_not_sufficient",
+            "message": "Complete the security context before generating a policy.",
+            "status_code": 409,
+        }
+    return None
+
 @main.route("/create", methods=["GET", "POST"])
 def create():
     """Create a new context and trigger the initial agent response."""
@@ -257,6 +294,7 @@ def create():
         allowed_fields = context_answer_fields()
         data = {k: v.strip() for k, v in request.form.items() if k in allowed_fields}
         security_context = build_context_security_context(data)
+        context_building = build_context_building_state(data, security_context=security_context)
         context_plan = build_context_intelligence_plan(data)
 
         initial_prompt = generate_context_plan_prompt(data)
@@ -268,8 +306,13 @@ def create():
             "version": 1,
             "security_context_version": SECURITY_CONTEXT_VERSION,
             "security_context": security_context,
+            "context_building": context_building,
             "context_intelligence_plan": context_plan,
-            "status": "planning",
+            "status": (
+                "context_building_needs_input"
+                if context_building["status"] == "needs_information"
+                else "planning"
+            ),
             "created_at": created_at
         })
 
@@ -317,7 +360,15 @@ def create():
 
         mongo.db.contexts.update_one(
             {"_id": context_id},
-            {"$set": {"status": "awaiting_task_validation"}}
+            {
+                "$set": {
+                    "status": (
+                        "context_building_needs_input"
+                        if context_building["status"] == "needs_information"
+                        else "awaiting_task_validation"
+                    )
+                }
+            }
         )
 
         return redirect(url_for("main.context_detail", context_id=context_id))
@@ -388,6 +439,66 @@ def get_security_context(context_id):
 
     return jsonify(public_security_context_payload(context_id, context)), 200
 
+
+@main.route("/context/<context_id>/context-building/answers", methods=["POST"])
+def answer_context_building_questions(context_id):
+    """Persist CONTEXT BUILDING answers and rebuild security-context artifacts."""
+    context_obj_id = ObjectId(context_id)
+    context = mongo.db.contexts.find_one({"_id": context_obj_id})
+    if not context:
+        return abort(404, "Context not found.")
+
+    submitted_answers = _context_building_answers_from_request()
+    if not submitted_answers:
+        flash("Add at least one answer before updating the context.", "warning")
+        return redirect(url_for("main.context_detail", context_id=context_id))
+
+    result = apply_context_building_answers(context, submitted_answers)
+    update_payload = {
+        **result["answer_updates"],
+        "status": result["status"],
+        "security_context_version": SECURITY_CONTEXT_VERSION,
+        "security_context": result["security_context"],
+        "context_building": result["context_building"],
+        "context_intelligence_plan": result["context_intelligence_plan"],
+    }
+    mongo.db.contexts.update_one({"_id": context_obj_id}, {"$set": update_payload})
+
+    for question_id, answer in submitted_answers.items():
+        if answer.strip():
+            mongo.db.interactions.insert_one({
+                "context_id": context_obj_id,
+                "question_id": question_id,
+                "question_text": "Context building answer",
+                "answer": answer.strip(),
+                "timestamp": datetime.now(timezone.utc),
+                "origin": "user",
+            })
+
+    flash("Context building answers saved and security context updated.", "success")
+    return redirect(url_for("main.context_detail", context_id=context_id))
+
+
+def _context_building_answers_from_request() -> dict[str, str]:
+    """Extract submitted CONTEXT BUILDING answers from form or JSON requests."""
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+        answers = payload.get("answers", payload)
+        if isinstance(answers, dict):
+            return {str(key): str(value) for key, value in answers.items()}
+        return {}
+
+    question_id = request.form.get("question_id")
+    answer = request.form.get("answer")
+    if question_id and answer is not None:
+        return {question_id: answer}
+
+    answers = {}
+    for key, value in request.form.items():
+        if key.startswith("answers[") and key.endswith("]"):
+            answers[key.removeprefix("answers[").removesuffix("]")] = value
+    return answers
+
 @main.route("/context/<context_id>/continue", methods=["POST"])
 def continue_context(context_id):
     """Append user input to an existing context and request next agent response."""
@@ -441,16 +552,35 @@ def continue_context(context_id):
         "origin": "agent"
     })
 
+    security_context = build_context_security_context(
+        context,
+        additional_need=new_prompt,
+    )
+    updated_context_data = {
+        **context,
+        "need": security_context["policy_intent"]["need"] or context.get("need", ""),
+    }
+    context_building = build_context_building_state(
+        updated_context_data,
+        security_context=security_context,
+        existing=context.get("context_building"),
+    )
+    context_plan = build_context_intelligence_plan(updated_context_data)
+
     mongo.db.contexts.update_one(
         {"_id": ObjectId(context_id)},
         {
             "$set": {
-                "status": "completed",
-                "security_context_version": SECURITY_CONTEXT_VERSION,
-                "security_context": build_context_security_context(
-                    context,
-                    additional_need=new_prompt,
+                "need": updated_context_data["need"],
+                "status": (
+                    "context_building_needs_input"
+                    if context_building["status"] == "needs_information"
+                    else "awaiting_task_validation"
                 ),
+                "security_context_version": SECURITY_CONTEXT_VERSION,
+                "security_context": security_context,
+                "context_building": context_building,
+                "context_intelligence_plan": context_plan,
             }
         }
     )
@@ -465,6 +595,10 @@ def approve_context_plan(context_id):
     context = mongo.db.contexts.find_one({"_id": context_obj_id})
     if not context:
         return abort(404, "Context not found.")
+    context_building = context.get("context_building")
+    if isinstance(context_building, dict) and context_building.get("status") == "needs_information":
+        flash("Answer the context-building questions before approving the plan.", "warning")
+        return redirect(url_for("main.context_detail", context_id=context_id))
 
     feedback = request.form.get("feedback", "")
     approved_plan = approve_context_intelligence_plan(context, feedback)
@@ -537,6 +671,21 @@ def send_policy_to_context(context_id):
 @main.route("/context/<context_id>/generate_policy", methods=["POST"])
 def trigger_policy_generation(context_id):
     """Start end-to-end policy generation and validation for a context."""
+    context = mongo.db.contexts.find_one({"_id": ObjectId(context_id)})
+    blocker = _policy_generation_blocker(context)
+    if blocker:
+        payload = {
+            "success": False,
+            "error_type": "workflow_error",
+            "error_code": blocker["error_code"],
+            "message": blocker["message"],
+            "details": {"context_id": context_id},
+        }
+        if _wants_json_response():
+            return jsonify(payload), blocker["status_code"]
+        flash(payload["message"], "warning")
+        return redirect(url_for("main.context_detail", context_id=context_id))
+
     system_status = get_system_status()
     if system_status.get("status") != "ready":
         payload = {

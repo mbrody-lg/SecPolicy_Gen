@@ -196,6 +196,74 @@ def test_build_context_intelligence_plan_creates_reviewable_tasks():
     assert "client_confidential_data" in plan["context_snapshot"]["data_categories"]
 
 
+def test_build_context_building_state_creates_questions_for_missing_required_context():
+    security_context = logic.build_context_security_context({
+        "country": "Spain",
+        "need": "Build a security plan",
+    })
+
+    context_building = logic.build_context_building_state(
+        {"country": "Spain", "need": "Build a security plan"},
+        security_context=security_context,
+    )
+
+    assert context_building["status"] == "needs_information"
+    assert context_building["version"] == logic.CONTEXT_BUILDING_VERSION
+    assert context_building["missing_information"] == [
+        "profile.sector",
+        "information_assets.critical_assets",
+    ]
+    assert [question["field_path"] for question in context_building["questions"]] == [
+        "profile.sector",
+        "information_assets.critical_assets",
+    ]
+    assert context_building["questions"][0]["answer_field"] == "sector"
+
+
+def test_apply_context_building_answers_rebuilds_security_context_and_plan():
+    context = {
+        "country": "Spain",
+        "need": "Build a security plan",
+    }
+    security_context = logic.build_context_security_context(context)
+    context["security_context"] = security_context
+    context["context_building"] = logic.build_context_building_state(
+        context,
+        security_context=security_context,
+    )
+
+    result = logic.apply_context_building_answers(
+        context,
+        {
+            "context_building_profile_sector": "Healthcare",
+            "context_building_information_assets_critical_assets": "Patient records",
+        },
+    )
+
+    assert result["status"] == "awaiting_task_validation"
+    assert result["answer_updates"] == {
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+    }
+    assert result["context_building"]["status"] == "sufficient"
+    assert {
+        question["status"]
+        for question in result["context_building"]["questions"]
+    } == {"answered"}
+    assert result["security_context"]["profile"]["sector"] == "Healthcare"
+    assert result["context_intelligence_plan"]["context_snapshot"]["sector"] == "Healthcare"
+
+
+def test_context_building_state_can_be_bypassed_for_fixture_imports():
+    context_building = logic.build_context_building_state(
+        {},
+        bypassed=True,
+    )
+
+    assert context_building["status"] == "approved"
+    assert context_building["bypassed"] is True
+
+
 def test_approve_context_intelligence_plan_marks_tasks_and_feedback():
     context = {
         "country": "Spain",

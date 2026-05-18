@@ -276,11 +276,122 @@ def test_create_route_persists_security_context(client, monkeypatch):
         "risk_methodologies",
         "implementation_guides",
     ]
+    assert context["context_building"]["status"] == "sufficient"
+    assert context["context_building"]["questions"] == []
     assert context["context_intelligence_plan"]["status"] == "draft"
     assert context["context_intelligence_plan"]["tasks"][0]["id"] == "company_profile"
     assert context["context_intelligence_plan"]["tasks"][-1]["id"] == "final_synthesis"
     assert "Produce a reviewable analysis plan" in captured_prompts[0]
     assert "Company profile and operating model" in captured_prompts[0]
+
+
+def test_create_route_persists_context_building_questions_when_context_is_incomplete(client, monkeypatch):
+    monkeypatch.setattr(
+        routes_module,
+        "run_with_agent",
+        lambda prompt, context_id, model_version=None: "Reviewable context plan",
+    )
+
+    response = client.post(
+        "/create",
+        data={
+            "country": "Init05IncompleteLand",
+            "need": "Build a security plan",
+        },
+    )
+
+    assert response.status_code == 302
+    context = routes_module.mongo.db.contexts.find_one({"country": "Init05IncompleteLand"})
+    assert context["status"] == "context_building_needs_input"
+    assert context["context_building"]["status"] == "needs_information"
+    assert [question["field_path"] for question in context["context_building"]["questions"]] == [
+        "profile.sector",
+        "information_assets.critical_assets",
+    ]
+
+
+def test_context_building_answers_update_context_and_rebuild_plan(client, monkeypatch):
+    context_id = ObjectId()
+    security_context = routes_module.build_context_security_context({
+        "country": "Spain",
+        "need": "Build a security plan",
+    })
+    context_building = routes_module.build_context_building_state(
+        {"country": "Spain", "need": "Build a security plan"},
+        security_context=security_context,
+    )
+    routes_module.mongo.db.contexts.insert_one({
+        "_id": context_id,
+        "country": "Spain",
+        "need": "Build a security plan",
+        "status": "context_building_needs_input",
+        "security_context": security_context,
+        "context_building": context_building,
+        "context_intelligence_plan": routes_module.build_context_intelligence_plan({
+            "country": "Spain",
+            "need": "Build a security plan",
+        }),
+    })
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
+
+    response = client.post(
+        f"/context/{context_id}/context-building/answers",
+        data={
+            "question_id": "context_building_profile_sector",
+            "answer": "Healthcare",
+        },
+    )
+
+    assert response.status_code == 302
+    context = routes_module.mongo.db.contexts.find_one({"_id": context_id})
+    assert context["sector"] == "Healthcare"
+    assert context["status"] == "context_building_needs_input"
+    assert context["security_context"]["profile"]["sector"] == "Healthcare"
+    assert "profile.sector" not in context["context_building"]["missing_information"]
+    assert "information_assets.critical_assets" in context["context_building"]["missing_information"]
+    interaction = routes_module.mongo.db.interactions.find_one({
+        "context_id": context_id,
+        "question_id": "context_building_profile_sector",
+    })
+    assert interaction["answer"] == "Healthcare"
+
+
+def test_context_building_answers_can_complete_context(client):
+    context_id = ObjectId()
+    security_context = routes_module.build_context_security_context({
+        "country": "Spain",
+        "need": "Build a security plan",
+    })
+    context_building = routes_module.build_context_building_state(
+        {"country": "Spain", "need": "Build a security plan"},
+        security_context=security_context,
+    )
+    routes_module.mongo.db.contexts.insert_one({
+        "_id": context_id,
+        "country": "Spain",
+        "need": "Build a security plan",
+        "status": "context_building_needs_input",
+        "security_context": security_context,
+        "context_building": context_building,
+    })
+
+    response = client.post(
+        f"/context/{context_id}/context-building/answers",
+        data={
+            "answers[context_building_profile_sector]": "Healthcare",
+            "answers[context_building_information_assets_critical_assets]": "Patient records",
+        },
+    )
+
+    assert response.status_code == 302
+    context = routes_module.mongo.db.contexts.find_one({"_id": context_id})
+    assert context["status"] == "awaiting_task_validation"
+    assert context["context_building"]["status"] == "sufficient"
+    assert context["context_intelligence_plan"]["context_snapshot"]["sector"] == "Healthcare"
 
 
 def test_context_detail_renders_context_intelligence_plan(client, monkeypatch):
@@ -369,6 +480,44 @@ def test_approve_context_plan_updates_status_and_stores_feedback(client, monkeyp
         "question_id": "context_plan_approved",
     })
     assert interaction["answer"] == "Also cover supplier access."
+
+
+def test_approve_context_plan_blocks_when_context_building_needs_information(client, monkeypatch):
+    context_id = ObjectId()
+    routes_module.mongo.db.contexts.insert_one({
+        "_id": context_id,
+        "country": "Spain",
+        "need": "Build a security plan",
+        "context_building": {
+            "version": "1.0",
+            "status": "needs_information",
+            "questions": [
+                {
+                    "id": "context_building_profile_sector",
+                    "status": "pending",
+                    "field_path": "profile.sector",
+                }
+            ],
+        },
+        "context_intelligence_plan": routes_module.build_context_intelligence_plan({
+            "country": "Spain",
+            "need": "Build a security plan",
+        }),
+    })
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
+
+    response = client.post(
+        f"/context/{context_id}/context-plan/approve",
+        data={"feedback": "Looks good."},
+    )
+
+    assert response.status_code == 302
+    context = routes_module.mongo.db.contexts.find_one({"_id": context_id})
+    assert context["context_intelligence_plan"]["status"] == "draft"
 
 
 def test_security_context_route_returns_persisted_context(client):
@@ -975,8 +1124,39 @@ def test_send_policy_to_context_redirects_after_storage(client, monkeypatch):
     assert captured == {"context_id": context_id, "payload": payload}
 
 
+def _insert_policy_ready_context(context_id):
+    security_context = routes_module.build_context_security_context({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "need": "Build a security plan",
+    })
+    routes_module.mongo.db.contexts.insert_one({
+        "_id": ObjectId(context_id),
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "need": "Build a security plan",
+        "status": "context_plan_approved",
+        "security_context": security_context,
+        "context_building": {
+            "version": "1.0",
+            "status": "sufficient",
+            "questions": [],
+            "missing_information": [],
+        },
+        "context_intelligence_plan": routes_module.approve_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "need": "Build a security plan",
+        }),
+    })
+
+
 def test_trigger_policy_generation_redirects_after_starting_job(client, monkeypatch):
     context_id = str(ObjectId())
+    _insert_policy_ready_context(context_id)
     captured = {}
     monkeypatch.setattr(
         routes_module,
@@ -1020,6 +1200,7 @@ def test_trigger_policy_generation_redirects_after_starting_job(client, monkeypa
 
 def test_trigger_policy_generation_reuses_active_job(client, monkeypatch):
     context_id = str(ObjectId())
+    _insert_policy_ready_context(context_id)
     monkeypatch.setattr(
         routes_module,
         "get_system_status",
@@ -1057,6 +1238,7 @@ def test_trigger_policy_generation_reuses_active_job(client, monkeypatch):
 
 def test_trigger_policy_generation_returns_json_accepted_job(client, monkeypatch):
     context_id = str(ObjectId())
+    _insert_policy_ready_context(context_id)
     monkeypatch.setattr(
         routes_module,
         "get_system_status",
@@ -1101,6 +1283,7 @@ def test_trigger_policy_generation_returns_json_accepted_job(client, monkeypatch
 
 def test_trigger_policy_generation_blocks_when_runtime_is_not_ready(client, monkeypatch):
     context_id = str(ObjectId())
+    _insert_policy_ready_context(context_id)
     monkeypatch.setattr(
         routes_module,
         "get_system_status",
@@ -1119,6 +1302,66 @@ def test_trigger_policy_generation_blocks_when_runtime_is_not_ready(client, monk
     with client.session_transaction() as session:
         flashes = session.get("_flashes", [])
     assert ("danger", "Application runtime is not ready. Update state before generating a policy.") in flashes
+
+
+def test_trigger_policy_generation_blocks_unapproved_context_plan_json(client, monkeypatch):
+    context_id = str(ObjectId())
+    security_context = routes_module.build_context_security_context({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "need": "Build a security plan",
+    })
+    routes_module.mongo.db.contexts.insert_one({
+        "_id": ObjectId(context_id),
+        "security_context": security_context,
+        "context_building": {"status": "sufficient"},
+        "context_intelligence_plan": routes_module.build_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "need": "Build a security plan",
+        }),
+    })
+    monkeypatch.setattr(
+        routes_module,
+        "create_pipeline_job",
+        lambda **kwargs: pytest.fail("job must not be created before plan approval"),
+    )
+
+    response = client.post(
+        f"/context/{context_id}/generate_policy",
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["error_code"] == "context_plan_not_approved"
+
+
+def test_trigger_policy_generation_blocks_context_building_questions_json(client, monkeypatch):
+    context_id = str(ObjectId())
+    routes_module.mongo.db.contexts.insert_one({
+        "_id": ObjectId(context_id),
+        "context_building": {"status": "needs_information"},
+        "context_intelligence_plan": {"status": "approved"},
+        "security_context": routes_module.build_context_security_context({
+            "country": "Spain",
+            "need": "Build a security plan",
+        }),
+    })
+    monkeypatch.setattr(
+        routes_module,
+        "create_pipeline_job",
+        lambda **kwargs: pytest.fail("job must not be created before context building completes"),
+    )
+
+    response = client.post(
+        f"/context/{context_id}/generate_policy",
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["error_code"] == "context_building_needs_information"
 
 
 def test_get_pipeline_job_status_returns_public_job(client, monkeypatch):
