@@ -194,6 +194,38 @@ def test_build_context_intelligence_plan_creates_reviewable_tasks():
     assert plan["tasks"][-1]["id"] == "final_synthesis"
     assert plan["context_snapshot"]["sector"] == "Professional services"
     assert "client_confidential_data" in plan["context_snapshot"]["data_categories"]
+    assert plan["approved_revision_id"] is None
+    assert plan["revisions"] == []
+
+
+def test_build_context_intelligence_plan_preserves_existing_revisions():
+    existing_plan = logic.approve_context_intelligence_plan({
+        "country": "Spain",
+        "sector": "Professional services",
+        "critical_assets": "Client contracts",
+        "need": "Build a security plan",
+        "context_intelligence_plan": logic.build_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Professional services",
+            "critical_assets": "Client contracts",
+            "need": "Build a security plan",
+        }),
+    })
+
+    rebuilt = logic.build_context_intelligence_plan(
+        {
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "need": "Build a security plan",
+        },
+        existing_plan=existing_plan,
+    )
+
+    assert rebuilt["status"] == "draft"
+    assert rebuilt["approved_revision_id"] is None
+    assert rebuilt["revisions"] == existing_plan["revisions"]
+    assert rebuilt["context_snapshot"]["sector"] == "Healthcare"
 
 
 def test_build_context_building_state_creates_questions_for_missing_required_context():
@@ -286,8 +318,71 @@ def test_approve_context_intelligence_plan_marks_tasks_and_feedback():
     assert approved["status"] == "approved"
     assert approved["review"]["required"] is False
     assert approved["review"]["user_feedback"] == "Add supplier review to the execution scope."
+    assert approved["review"]["approval_notes"] == "Add supplier review to the execution scope."
     assert approved["review"]["approved_at"]
+    assert approved["review"]["approved_by"] == "user"
+    assert approved["review"]["approval_source"] == "ui"
+    assert approved["review"]["context_snapshot_hash"]
+    assert approved["approved_revision_id"] == "plan-rev-1"
+    assert len(approved["revisions"]) == 1
+    assert approved["revisions"][0]["revision_id"] == "plan-rev-1"
+    assert approved["revisions"][0]["approval_notes"] == "Add supplier review to the execution scope."
+    assert approved["revisions"][0]["context_snapshot_hash"] == approved["review"]["context_snapshot_hash"]
     assert {task["status"] for task in approved["tasks"]} == {"approved"}
+
+
+def test_approve_context_intelligence_plan_preserves_previous_revision():
+    context = {
+        "country": "Spain",
+        "sector": "Professional services",
+        "critical_assets": "Client contracts",
+        "need": "Build a security plan",
+        "context_intelligence_plan": logic.approve_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Professional services",
+            "critical_assets": "Client contracts",
+            "need": "Build a security plan",
+            "context_intelligence_plan": logic.build_context_intelligence_plan({
+                "country": "Spain",
+                "sector": "Professional services",
+                "critical_assets": "Client contracts",
+                "need": "Build a security plan",
+            }),
+        }),
+    }
+    first_revision = dict(context["context_intelligence_plan"]["revisions"][0])
+
+    approved = logic.approve_context_intelligence_plan(
+        context,
+        "Second approval after re-planning.",
+        approved_by="fixture-import",
+        approval_source="generate_from_yaml",
+    )
+
+    assert approved["approved_revision_id"] == "plan-rev-2"
+    assert len(approved["revisions"]) == 2
+    assert approved["revisions"][0] == first_revision
+    assert approved["revisions"][1]["approval_source"] == "generate_from_yaml"
+
+
+def test_context_plan_revision_returns_active_revision():
+    plan = logic.approve_context_intelligence_plan({
+        "country": "Spain",
+        "sector": "Professional services",
+        "critical_assets": "Client contracts",
+        "need": "Build a security plan",
+        "context_intelligence_plan": logic.build_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Professional services",
+            "critical_assets": "Client contracts",
+            "need": "Build a security plan",
+        }),
+    })
+
+    revision = logic.context_plan_revision(plan)
+
+    assert revision["revision_id"] == plan["approved_revision_id"]
+    assert revision["context_snapshot_hash"] == plan["review"]["context_snapshot_hash"]
 
 
 def test_public_security_context_payload_builds_context_for_legacy_records():

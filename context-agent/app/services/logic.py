@@ -1,6 +1,8 @@
 """Service helpers for context prompting and policy pipeline orchestration."""
 
 from datetime import datetime, timezone
+import hashlib
+import json
 import logging
 import os
 from time import perf_counter
@@ -440,9 +442,16 @@ def generate_context_prompt(data: dict, question_config: str | None = None) -> s
     return "\n".join(lines)
 
 
-def build_context_intelligence_plan(context_data: dict) -> dict:
+def build_context_intelligence_plan(context_data: dict, existing_plan: dict | None = None) -> dict:
     """Build the reviewable multi-task plan for context intelligence work."""
     security_context = build_context_security_context(context_data)
+    existing_revisions = []
+    if isinstance(existing_plan, dict):
+        existing_revisions = [
+            dict(revision)
+            for revision in existing_plan.get("revisions", [])
+            if isinstance(revision, dict)
+        ]
     tasks = []
     for index, task in enumerate(CONTEXT_INTELLIGENCE_TASKS, start=1):
         tasks.append({
@@ -462,7 +471,13 @@ def build_context_intelligence_plan(context_data: dict) -> dict:
             "required": True,
             "user_feedback": None,
             "approved_at": None,
+            "approved_by": None,
+            "approval_source": None,
+            "approval_notes": None,
+            "context_snapshot_hash": None,
         },
+        "approved_revision_id": None,
+        "revisions": existing_revisions,
         "context_snapshot": {
             "sector": security_context["profile"]["sector"],
             "activity": security_context["profile"]["activity"],
@@ -549,7 +564,10 @@ def apply_context_building_answers(context: dict, submitted_answers: dict[str, s
         security_context=security_context,
         existing={**context_building, "questions": answered_questions},
     )
-    context_plan = build_context_intelligence_plan(updated_context)
+    context_plan = build_context_intelligence_plan(
+        updated_context,
+        existing_plan=context.get("context_intelligence_plan"),
+    )
     status = (
         "context_building_needs_input"
         if updated_building["status"] == "needs_information"
@@ -636,23 +654,77 @@ def generate_context_plan_prompt(data: dict, question_config: str | None = None)
     return "\n".join(lines)
 
 
-def approve_context_intelligence_plan(context: dict, feedback: str | None = None) -> dict:
+def approve_context_intelligence_plan(
+    context: dict,
+    feedback: str | None = None,
+    *,
+    approved_by: str = "user",
+    approval_source: str = "ui",
+) -> dict:
     """Return an approved copy of the persisted context-intelligence plan."""
     plan = context.get("context_intelligence_plan")
     if not isinstance(plan, dict):
         plan = build_context_intelligence_plan(context)
 
     approved = dict(plan)
+    revisions = [
+        dict(revision)
+        for revision in approved.get("revisions", [])
+        if isinstance(revision, dict)
+    ]
+    revision_id = f"plan-rev-{len(revisions) + 1}"
+    approved_at = datetime.now(timezone.utc).isoformat()
+    context_snapshot_hash = _context_snapshot_hash(approved.get("context_snapshot", {}))
     approved["status"] = "approved"
+    approved["approved_revision_id"] = revision_id
+    approved["revisions"] = revisions + [
+        {
+            "revision_id": revision_id,
+            "status": "approved",
+            "approved_at": approved_at,
+            "approved_by": approved_by,
+            "approval_source": approval_source,
+            "approval_notes": (feedback or "").strip() or None,
+            "context_snapshot_hash": context_snapshot_hash,
+            "context_snapshot": dict(approved.get("context_snapshot") or {}),
+            "tasks": [dict(task) for task in approved.get("tasks", [])],
+        }
+    ]
     approved["review"] = dict(approved.get("review") or {})
     approved["review"]["required"] = False
     approved["review"]["user_feedback"] = (feedback or "").strip() or None
-    approved["review"]["approved_at"] = datetime.now(timezone.utc).isoformat()
+    approved["review"]["approval_notes"] = (feedback or "").strip() or None
+    approved["review"]["approved_at"] = approved_at
+    approved["review"]["approved_by"] = approved_by
+    approved["review"]["approval_source"] = approval_source
+    approved["review"]["context_snapshot_hash"] = context_snapshot_hash
     approved["tasks"] = [
         {**task, "status": "approved" if task.get("status") == "planned" else task.get("status", "approved")}
         for task in approved.get("tasks", [])
     ]
     return approved
+
+
+def context_plan_revision(plan: dict) -> dict | None:
+    """Return the active immutable plan revision, when one exists."""
+    if not isinstance(plan, dict):
+        return None
+    approved_revision_id = plan.get("approved_revision_id")
+    for revision in plan.get("revisions", []):
+        if isinstance(revision, dict) and revision.get("revision_id") == approved_revision_id:
+            return revision
+    return None
+
+
+def _context_snapshot_hash(context_snapshot: dict) -> str:
+    """Return a deterministic hash for approval-time context snapshots."""
+    serialized = json.dumps(
+        context_snapshot or {},
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def _format_list(values: list[str]) -> str:

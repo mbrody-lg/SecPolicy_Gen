@@ -472,6 +472,12 @@ def test_approve_context_plan_updates_status_and_stores_feedback(client, monkeyp
     assert context["context_intelligence_plan"]["review"]["user_feedback"] == (
         "Also cover supplier access."
     )
+    assert context["context_intelligence_plan"]["review"]["approval_notes"] == (
+        "Also cover supplier access."
+    )
+    assert context["context_intelligence_plan"]["approved_revision_id"] == "plan-rev-1"
+    assert context["context_intelligence_plan"]["revisions"][0]["revision_id"] == "plan-rev-1"
+    assert context["context_intelligence_plan"]["revisions"][0]["context_snapshot_hash"]
     assert {task["status"] for task in context["context_intelligence_plan"]["tasks"]} == {
         "approved"
     }
@@ -518,6 +524,76 @@ def test_approve_context_plan_blocks_when_context_building_needs_information(cli
     assert response.status_code == 302
     context = routes_module.mongo.db.contexts.find_one({"_id": context_id})
     assert context["context_intelligence_plan"]["status"] == "draft"
+
+
+def test_context_plan_route_returns_plan_and_active_revision(client):
+    context_id = ObjectId()
+    plan = routes_module.approve_context_intelligence_plan({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "need": "Build a security plan",
+        "context_intelligence_plan": routes_module.build_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "need": "Build a security plan",
+        }),
+    })
+    routes_module.mongo.db.contexts.insert_one({
+        "_id": context_id,
+        "context_intelligence_plan": plan,
+    })
+
+    response = client.get(f"/context/{context_id}/context-plan")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert payload["context_intelligence_plan"]["approved_revision_id"] == "plan-rev-1"
+    assert payload["active_revision"]["revision_id"] == "plan-rev-1"
+
+
+def test_context_detail_renders_approved_plan_revision_metadata(client, monkeypatch):
+    context_id = ObjectId()
+    plan = routes_module.approve_context_intelligence_plan({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "need": "Build a security plan",
+        "context_intelligence_plan": routes_module.build_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "need": "Build a security plan",
+        }),
+    })
+    monkeypatch.setattr(
+        routes_module.mongo,
+        "db",
+        FakeDB(
+            contexts=[
+                {
+                    "_id": context_id,
+                    "status": "context_plan_approved",
+                    "context_intelligence_plan": plan,
+                }
+            ],
+            interactions=[],
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
+
+    response = client.get(f"/context/{context_id}")
+
+    assert response.status_code == 200
+    assert b"Approved revision plan-rev-1" in response.data
+    assert b"Snapshot:" in response.data
 
 
 def test_security_context_route_returns_persisted_context(client):
@@ -1362,6 +1438,38 @@ def test_trigger_policy_generation_blocks_context_building_questions_json(client
 
     assert response.status_code == 409
     assert response.get_json()["error_code"] == "context_building_needs_information"
+
+
+def test_trigger_policy_generation_blocks_missing_plan_json(client, monkeypatch):
+    context_id = str(ObjectId())
+    routes_module.mongo.db.contexts.insert_one({
+        "_id": ObjectId(context_id),
+        "context_building": {"status": "sufficient"},
+        "security_context": routes_module.build_context_security_context({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "need": "Build a security plan",
+        }),
+    })
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: pytest.fail("domain gating must run before runtime readiness"),
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "create_pipeline_job",
+        lambda **kwargs: pytest.fail("job must not be created without a plan"),
+    )
+
+    response = client.post(
+        f"/context/{context_id}/generate_policy",
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["error_code"] == "context_plan_not_available"
 
 
 def test_get_pipeline_job_status_returns_public_job(client, monkeypatch):

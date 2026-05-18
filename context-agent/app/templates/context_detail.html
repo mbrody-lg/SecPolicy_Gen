@@ -98,6 +98,18 @@
         </div>
         <div class="text-xs text-gray-500">Version {{ context_plan.version }}</div>
       </div>
+      {% if context_plan.approved_revision_id %}
+        <div class="mt-3 rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950">
+          <div class="font-semibold">Approved revision {{ context_plan.approved_revision_id }}</div>
+          {% if context_plan.review %}
+            <div class="mt-1">Approved at: {{ context_plan.review.approved_at }}</div>
+            <div class="mt-1">Source: {{ context_plan.review.approval_source or 'unknown' }}</div>
+            {% if context_plan.review.context_snapshot_hash %}
+              <div class="mt-1 break-all text-xs">Snapshot: {{ context_plan.review.context_snapshot_hash }}</div>
+            {% endif %}
+          {% endif %}
+        </div>
+      {% endif %}
 
       <ol class="mt-4 space-y-3">
         {% for task in context_plan.tasks %}

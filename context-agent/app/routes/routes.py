@@ -18,6 +18,7 @@ from app.services.logic import (
     build_context_building_state,
     build_context_security_context,
     build_context_intelligence_plan,
+    context_plan_revision,
     context_answer_fields,
     get_health_status,
     get_system_status,
@@ -269,7 +270,13 @@ def _policy_generation_blocker(context: dict | None) -> dict | None:
             "status_code": 409,
         }
     plan = context.get("context_intelligence_plan")
-    if isinstance(plan, dict) and plan.get("status") != "approved":
+    if not isinstance(plan, dict):
+        return {
+            "error_code": "context_plan_not_available",
+            "message": "Create and approve the context intelligence plan before generating a policy.",
+            "status_code": 409,
+        }
+    if plan.get("status") != "approved":
         return {
             "error_code": "context_plan_not_approved",
             "message": "Approve the context intelligence plan before generating a policy.",
@@ -440,6 +447,42 @@ def get_security_context(context_id):
     return jsonify(public_security_context_payload(context_id, context)), 200
 
 
+@main.route("/context/<context_id>/context-plan", methods=["GET"])
+def get_context_plan(context_id):
+    """Return the public context-intelligence plan artifact."""
+    from bson.errors import InvalidId
+    try:
+        object_id = ObjectId(context_id)
+    except (InvalidId, TypeError):
+        return jsonify({
+            "success": False,
+            "error_type": "contract_error",
+            "error_code": "invalid_context_id",
+            "message": "Invalid context_id format.",
+            "details": {"context_id": context_id},
+        }), 400
+
+    context = mongo.db.contexts.find_one({"_id": object_id})
+    if not context:
+        return jsonify({
+            "success": False,
+            "error_type": "validation_error",
+            "error_code": "context_not_found",
+            "message": "Context not found.",
+            "details": {"context_id": context_id},
+        }), 404
+
+    plan = context.get("context_intelligence_plan")
+    if not isinstance(plan, dict):
+        plan = build_context_intelligence_plan(context)
+    return jsonify({
+        "success": True,
+        "context_id": context_id,
+        "context_intelligence_plan": plan,
+        "active_revision": context_plan_revision(plan),
+    }), 200
+
+
 @main.route("/context/<context_id>/context-building/answers", methods=["POST"])
 def answer_context_building_questions(context_id):
     """Persist CONTEXT BUILDING answers and rebuild security-context artifacts."""
@@ -565,7 +608,10 @@ def continue_context(context_id):
         security_context=security_context,
         existing=context.get("context_building"),
     )
-    context_plan = build_context_intelligence_plan(updated_context_data)
+    context_plan = build_context_intelligence_plan(
+        updated_context_data,
+        existing_plan=context.get("context_intelligence_plan"),
+    )
 
     mongo.db.contexts.update_one(
         {"_id": ObjectId(context_id)},
