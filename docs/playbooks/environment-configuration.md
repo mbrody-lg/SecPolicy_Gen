@@ -56,6 +56,7 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | `SESSION_COOKIE_SECURE` | `runtime knob` | Local default `false`; non-local should be `true` | Flask session cookie | Parse as explicit truthy flag |
 | `TRUSTED_HOSTS` | `runtime knob` | Optional local list | Flask host validation | Parse comma-separated host list |
 | `CONTEXT_IMPORT_PATH` | `safe default` | Defaults to example answers path in container tooling | YAML fixture import | Host/tool-only unless imported in runtime |
+| `CONTEXT_IMPORT_AUTO_APPROVE_PLAN` | `runtime knob` | Defaults to `false` | YAML fixture import | Parse as explicit truthy flag; must not execute task synthesis |
 
 ## Policy Agent
 

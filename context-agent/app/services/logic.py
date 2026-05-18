@@ -56,6 +56,49 @@ CONTEXT_ANSWER_FIELDS = {
     "need",
     "language",
 }
+CONTEXT_INTELLIGENCE_PLAN_VERSION = "1.0"
+CONTEXT_INTELLIGENCE_TASKS = (
+    {
+        "id": "company_profile",
+        "title": "Company profile and operating model",
+        "objective": "Clarify the business activity, locations, service model, scale, ownership, and operational constraints that shape the security plan.",
+    },
+    {
+        "id": "information_assets",
+        "title": "Information assets and data exposure",
+        "objective": "Identify critical systems, data categories, confidentiality needs, integrity requirements, and business continuity dependencies.",
+    },
+    {
+        "id": "identity_access",
+        "title": "Identity, access, and device posture",
+        "objective": "Review account lifecycle, privileged access, MFA, remote access, endpoints, shared devices, and administrative responsibilities.",
+    },
+    {
+        "id": "third_parties_cloud",
+        "title": "Third-party, SaaS, and cloud dependencies",
+        "objective": "Map providers, SaaS platforms, outsourced operations, supplier risks, data processor exposure, and dependency criticality.",
+    },
+    {
+        "id": "regulatory_methodology",
+        "title": "Regulatory, sector, and methodology fit",
+        "objective": "Determine applicable legal obligations, sector expectations, contractual requirements, and practical control frameworks.",
+    },
+    {
+        "id": "resilience_incidents",
+        "title": "Resilience, backups, incidents, and known gaps",
+        "objective": "Assess existing controls, backup and recovery evidence, incident readiness, known weaknesses, and risk tolerance.",
+    },
+    {
+        "id": "policy_intent_rag",
+        "title": "Policy objective and RAG retrieval strategy",
+        "objective": "Define policy type, scope, audience, exclusions, required evidence families, and downstream Policy Agent context needs.",
+    },
+    {
+        "id": "final_synthesis",
+        "title": "Final security context synthesis",
+        "objective": "Combine validated task outputs into a complete final context with assumptions, missing information, and retrieval hints.",
+    },
+)
 
 
 class PipelineStepError(Exception):
@@ -372,6 +415,105 @@ def generate_context_prompt(data: dict, question_config: str | None = None) -> s
         "Output requirements: write a concise but complete business and information-security context; identify the security domains, relevant assets, data categories, regulatory exposure, assumptions, missing information, and the concrete policy objective."
     )
     return "\n".join(lines)
+
+
+def build_context_intelligence_plan(context_data: dict) -> dict:
+    """Build the reviewable multi-task plan for context intelligence work."""
+    security_context = build_context_security_context(context_data)
+    tasks = []
+    for index, task in enumerate(CONTEXT_INTELLIGENCE_TASKS, start=1):
+        tasks.append({
+            "id": task["id"],
+            "order": index,
+            "title": task["title"],
+            "objective": task["objective"],
+            "status": "planned",
+            "result": None,
+        })
+
+    return {
+        "version": CONTEXT_INTELLIGENCE_PLAN_VERSION,
+        "status": "draft",
+        "tasks": tasks,
+        "review": {
+            "required": True,
+            "user_feedback": None,
+            "approved_at": None,
+        },
+        "context_snapshot": {
+            "sector": security_context["profile"]["sector"],
+            "activity": security_context["profile"]["activity"],
+            "critical_assets": security_context["information_assets"]["critical_assets"],
+            "data_categories": security_context["information_assets"]["data_categories"],
+            "missing_information": security_context["analysis"]["missing_information"],
+            "retrieval_collection_families": security_context["retrieval_hints"]["collection_families"],
+        },
+    }
+
+
+def generate_context_plan_prompt(data: dict, question_config: str | None = None) -> str:
+    """Build the initial prompt that asks the agent to review the task plan."""
+    security_context = build_context_security_context(data)
+    plan = build_context_intelligence_plan(data)
+    questions = load_questions(question_config)
+
+    lines = [
+        "You are Context Agent for an information-security policy workflow.",
+        "The user has provided an initial company context. Your first task is not to write the final context.",
+        "Produce a reviewable analysis plan that lists the tasks needed to reach a complete security context.",
+        "Ask the user to confirm whether this plan is appropriate or whether relevant business, IT, risk, or compliance aspects are missing.",
+        "",
+        "Initial security context:",
+        f"- Sector: {security_context['profile']['sector'] or 'unknown'}",
+        f"- Activity: {security_context['profile']['activity'] or 'unknown'}",
+        f"- Countries: {_format_list(security_context['profile']['operating_countries'])}",
+        f"- Critical assets: {_format_list(security_context['information_assets']['critical_assets'])}",
+        f"- Data categories: {_format_list(security_context['information_assets']['data_categories'])}",
+        f"- Dependencies: {_format_list(security_context['information_assets']['third_party_dependencies'])}",
+        f"- Cloud/SaaS services: {_format_list(security_context['information_assets']['cloud_services'])}",
+        f"- Known gaps: {_format_list(security_context['security_posture']['known_gaps'])}",
+        f"- Regulatory hints: {_format_list(security_context['compliance']['regulatory_hints'])}",
+        f"- Policy objective: {security_context['policy_intent']['need'] or 'unknown'}",
+        f"- Missing information: {_format_list(security_context['analysis']['missing_information'])}",
+        "",
+        "Proposed context-intelligence tasks:",
+    ]
+    for task in plan["tasks"]:
+        lines.append(f"{task['order']}. {task['title']}: {task['objective']}")
+
+    lines.extend([
+        "",
+        "User-provided answers:",
+    ])
+    for q in questions:
+        key = q["id"]
+        answer = str(data.get(key, "") or "").strip()
+        if answer:
+            lines.append(f"- {q['question']} {answer}")
+
+    lines.append(
+        "Output requirements: explain the proposed tasks, identify any missing task, and end by asking the user to approve the plan or add more context before execution."
+    )
+    return "\n".join(lines)
+
+
+def approve_context_intelligence_plan(context: dict, feedback: str | None = None) -> dict:
+    """Return an approved copy of the persisted context-intelligence plan."""
+    plan = context.get("context_intelligence_plan")
+    if not isinstance(plan, dict):
+        plan = build_context_intelligence_plan(context)
+
+    approved = dict(plan)
+    approved["status"] = "approved"
+    approved["review"] = dict(approved.get("review") or {})
+    approved["review"]["required"] = False
+    approved["review"]["user_feedback"] = (feedback or "").strip() or None
+    approved["review"]["approved_at"] = datetime.now(timezone.utc).isoformat()
+    approved["tasks"] = [
+        {**task, "status": "approved" if task.get("status") == "planned" else task.get("status", "approved")}
+        for task in approved.get("tasks", [])
+    ]
+    return approved
 
 
 def _format_list(values: list[str]) -> str:

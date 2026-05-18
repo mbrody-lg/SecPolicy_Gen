@@ -1,7 +1,7 @@
 from test_base import *
 
 from app.services import logic
-from app.services.logic import generate_context_prompt, load_questions
+from app.services.logic import generate_context_plan_prompt, generate_context_prompt, load_questions
 
 def test_question_loader():
     questions = load_questions()
@@ -40,6 +40,23 @@ def test_prompt_generation():
     assert "Scope: Clinical and administrative systems" in prompt
     assert "Audience: Clinic staff" in prompt
     assert "Do not draft the final policy" in prompt
+
+
+def test_context_plan_prompt_lists_analysis_tasks():
+    prompt = generate_context_plan_prompt({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "company_activity": "Private clinic",
+        "critical_assets": "Patient records",
+        "data_categories": "health_data",
+        "need": "Create a security plan",
+    })
+
+    assert "Produce a reviewable analysis plan" in prompt
+    assert "Company profile and operating model" in prompt
+    assert "Third-party, SaaS, and cloud dependencies" in prompt
+    assert "Final security context synthesis" in prompt
+    assert "approve the plan or add more context before execution" in prompt
 
 
 def test_load_questions_uses_questions_config_path_env(monkeypatch, tmp_path):

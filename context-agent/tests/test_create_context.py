@@ -38,9 +38,10 @@ def test_create_context(client, monkeypatch):
 
     context = mongo.db.contexts.find_one({"country": country})
     assert context is not None, "Context not found"
-    assert context["status"] == "completed"
+    assert context["status"] == "awaiting_task_validation"
     assert context["country"] == country
     assert context["security_context"]["profile"]["sector"] == "Healthcare"
+    assert context["context_intelligence_plan"]["status"] == "draft"
 
     # Verify interactions were saved
     interactions = list(mongo.db.interactions.find({"context_id": context["_id"]}))

@@ -176,6 +176,52 @@ def test_build_context_security_context_uses_context_fields_and_additional_need(
     )
 
 
+def test_build_context_intelligence_plan_creates_reviewable_tasks():
+    plan = logic.build_context_intelligence_plan({
+        "country": "Spain",
+        "sector": "Professional services",
+        "company_activity": "IT consulting",
+        "critical_assets": "Client contracts",
+        "data_categories": "client_confidential_data",
+        "need": "Build a security plan",
+    })
+
+    assert plan["version"] == logic.CONTEXT_INTELLIGENCE_PLAN_VERSION
+    assert plan["status"] == "draft"
+    assert plan["review"]["required"] is True
+    assert [task["order"] for task in plan["tasks"]] == list(range(1, len(plan["tasks"]) + 1))
+    assert plan["tasks"][0]["id"] == "company_profile"
+    assert plan["tasks"][-1]["id"] == "final_synthesis"
+    assert plan["context_snapshot"]["sector"] == "Professional services"
+    assert "client_confidential_data" in plan["context_snapshot"]["data_categories"]
+
+
+def test_approve_context_intelligence_plan_marks_tasks_and_feedback():
+    context = {
+        "country": "Spain",
+        "sector": "Professional services",
+        "critical_assets": "Client contracts",
+        "need": "Build a security plan",
+        "context_intelligence_plan": logic.build_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Professional services",
+            "critical_assets": "Client contracts",
+            "need": "Build a security plan",
+        }),
+    }
+
+    approved = logic.approve_context_intelligence_plan(
+        context,
+        "Add supplier review to the execution scope.",
+    )
+
+    assert approved["status"] == "approved"
+    assert approved["review"]["required"] is False
+    assert approved["review"]["user_feedback"] == "Add supplier review to the execution scope."
+    assert approved["review"]["approved_at"]
+    assert {task["status"] for task in approved["tasks"]} == {"approved"}
+
+
 def test_public_security_context_payload_builds_context_for_legacy_records():
     payload = logic.public_security_context_payload(
         "context-1",

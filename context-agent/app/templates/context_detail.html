@@ -31,6 +31,61 @@
     </div>
   </div>
 
+  {% if context.context_intelligence_plan %}
+    {% set context_plan = context.context_intelligence_plan %}
+    <div id="context-intelligence-plan-panel" class="bg-white rounded-lg shadow p-4 mb-6"
+      data-context-intelligence-plan
+      data-context-intelligence-plan-status="{{ context_plan.status }}">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 class="text-xl font-semibold mb-1">Context intelligence plan</h2>
+          <div class="text-sm text-gray-700">
+            {% if context_plan.status == 'approved' %}
+              Approved
+            {% else %}
+              Awaiting validation
+            {% endif %}
+          </div>
+        </div>
+        <div class="text-xs text-gray-500">Version {{ context_plan.version }}</div>
+      </div>
+
+      <ol class="mt-4 space-y-3">
+        {% for task in context_plan.tasks %}
+          <li class="rounded border border-gray-200 p-3">
+            <div class="flex items-start gap-3">
+              <div class="text-sm font-semibold text-gray-500">{{ task.order }}</div>
+              <div>
+                <div class="text-sm font-semibold text-gray-900">{{ task.title }}</div>
+                <div class="mt-1 text-sm text-gray-700">{{ task.objective }}</div>
+                <div class="mt-1 text-xs text-gray-500">Status: {{ task.status }}</div>
+              </div>
+            </div>
+          </li>
+        {% endfor %}
+      </ol>
+
+      {% if context_plan.status != 'approved' %}
+        <form method="post" action="{{ url_for('main.approve_context_plan', context_id=context._id) }}" class="mt-4">
+          <label for="context-plan-feedback" class="block text-sm font-medium text-gray-900">
+            Add corrections before approving
+          </label>
+          <textarea id="context-plan-feedback" name="feedback" rows="3"
+            placeholder="Add missing business areas, IT constraints, systems, risks, or compliance concerns before execution."
+            class="mt-2 w-full border rounded p-2 text-sm focus:outline-none focus:ring focus:border-blue-300"></textarea>
+          <button type="submit" class="mt-3 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+            Approve plan
+          </button>
+        </form>
+      {% elif context_plan.review and context_plan.review.user_feedback %}
+        <div class="mt-4 rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950">
+          <div class="font-semibold">Approval notes</div>
+          <div class="mt-1">{{ context_plan.review.user_feedback }}</div>
+        </div>
+      {% endif %}
+    </div>
+  {% endif %}
+
   <div class="bg-white rounded-lg shadow p-4">
     <h2 class="text-xl font-semibold mb-2">Add more context</h2>
     <form method="post" action="{{ url_for('main.continue_context', context_id=context._id) }}">
