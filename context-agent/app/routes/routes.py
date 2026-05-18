@@ -13,7 +13,9 @@ from app.observability import log_event
 from app.services.logic import (
     PipelineStepError,
     SECURITY_CONTEXT_VERSION,
+    approve_context_intelligence_plan,
     build_context_security_context,
+    build_context_intelligence_plan,
     context_answer_fields,
     get_health_status,
     get_system_status,
@@ -21,7 +23,7 @@ from app.services.logic import (
     get_readiness_status,
     public_security_context_payload,
     refresh_system_state,
-    generate_context_prompt,
+    generate_context_plan_prompt,
     run_with_agent,
     load_questions,
     render_markdown,
@@ -255,8 +257,9 @@ def create():
         allowed_fields = context_answer_fields()
         data = {k: v.strip() for k, v in request.form.items() if k in allowed_fields}
         security_context = build_context_security_context(data)
+        context_plan = build_context_intelligence_plan(data)
 
-        initial_prompt = generate_context_prompt(data)
+        initial_prompt = generate_context_plan_prompt(data)
 
         created_at = datetime.now(timezone.utc)
 
@@ -265,7 +268,8 @@ def create():
             "version": 1,
             "security_context_version": SECURITY_CONTEXT_VERSION,
             "security_context": security_context,
-            "status": "pending",
+            "context_intelligence_plan": context_plan,
+            "status": "planning",
             "created_at": created_at
         })
 
@@ -313,7 +317,7 @@ def create():
 
         mongo.db.contexts.update_one(
             {"_id": context_id},
-            {"$set": {"status": "completed"}}
+            {"$set": {"status": "awaiting_task_validation"}}
         )
 
         return redirect(url_for("main.context_detail", context_id=context_id))
@@ -451,6 +455,39 @@ def continue_context(context_id):
         }
     )
 
+    return redirect(url_for("main.context_detail", context_id=context_id))
+
+
+@main.route("/context/<context_id>/context-plan/approve", methods=["POST"])
+def approve_context_plan(context_id):
+    """Approve the context-intelligence plan before task execution."""
+    context_obj_id = ObjectId(context_id)
+    context = mongo.db.contexts.find_one({"_id": context_obj_id})
+    if not context:
+        return abort(404, "Context not found.")
+
+    feedback = request.form.get("feedback", "")
+    approved_plan = approve_context_intelligence_plan(context, feedback)
+    mongo.db.contexts.update_one(
+        {"_id": context_obj_id},
+        {
+            "$set": {
+                "status": "context_plan_approved",
+                "context_intelligence_plan": approved_plan,
+            }
+        },
+    )
+
+    mongo.db.interactions.insert_one({
+        "context_id": context_obj_id,
+        "question_id": "context_plan_approved",
+        "question_text": "Context intelligence plan approval",
+        "answer": feedback.strip() or "Context intelligence plan approved.",
+        "timestamp": datetime.now(timezone.utc),
+        "origin": "user",
+    })
+
+    flash("Context intelligence plan approved. Task execution can start next.", "success")
     return redirect(url_for("main.context_detail", context_id=context_id))
 
 @main.route("/context/<context_id>/delete", methods=["POST"])

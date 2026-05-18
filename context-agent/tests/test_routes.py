@@ -232,10 +232,11 @@ def test_create_route_get(client):
 
 
 def test_create_route_persists_security_context(client, monkeypatch):
+    captured_prompts = []
     monkeypatch.setattr(
         routes_module,
         "run_with_agent",
-        lambda prompt, context_id, model_version=None: "Refined context",
+        lambda prompt, context_id, model_version=None: captured_prompts.append(prompt) or "Reviewable context plan",
     )
 
     response = client.post(
@@ -259,6 +260,7 @@ def test_create_route_persists_security_context(client, monkeypatch):
 
     assert response.status_code == 302
     context = routes_module.mongo.db.contexts.find_one({"country": "Init05Land"})
+    assert context["status"] == "awaiting_task_validation"
     assert context["security_context_version"] == routes_module.SECURITY_CONTEXT_VERSION
     assert context["security_context"]["profile"]["sector"] == "Healthcare"
     assert context["security_context"]["profile"]["activity"] == "Private outpatient clinic"
@@ -274,6 +276,99 @@ def test_create_route_persists_security_context(client, monkeypatch):
         "risk_methodologies",
         "implementation_guides",
     ]
+    assert context["context_intelligence_plan"]["status"] == "draft"
+    assert context["context_intelligence_plan"]["tasks"][0]["id"] == "company_profile"
+    assert context["context_intelligence_plan"]["tasks"][-1]["id"] == "final_synthesis"
+    assert "Produce a reviewable analysis plan" in captured_prompts[0]
+    assert "Company profile and operating model" in captured_prompts[0]
+
+
+def test_context_detail_renders_context_intelligence_plan(client, monkeypatch):
+    context_id = ObjectId()
+    monkeypatch.setattr(
+        routes_module.mongo,
+        "db",
+        FakeDB(
+            contexts=[
+                {
+                    "_id": context_id,
+                    "status": "awaiting_task_validation",
+                    "context_intelligence_plan": {
+                        "version": "1.0",
+                        "status": "draft",
+                        "review": {"required": True},
+                        "tasks": [
+                            {
+                                "id": "company_profile",
+                                "order": 1,
+                                "title": "Company profile and operating model",
+                                "objective": "Clarify company operations.",
+                                "status": "planned",
+                            }
+                        ],
+                    },
+                }
+            ],
+            interactions=[],
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
+
+    response = client.get(f"/context/{context_id}")
+
+    assert response.status_code == 200
+    assert b"Context intelligence plan" in response.data
+    assert b"Awaiting validation" in response.data
+    assert b"Company profile and operating model" in response.data
+    assert b"Approve plan" in response.data
+
+
+def test_approve_context_plan_updates_status_and_stores_feedback(client, monkeypatch):
+    context_id = ObjectId()
+    routes_module.mongo.db.contexts.insert_one({
+        "_id": context_id,
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "need": "Build a security plan",
+        "context_intelligence_plan": routes_module.build_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "need": "Build a security plan",
+        }),
+    })
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
+
+    response = client.post(
+        f"/context/{context_id}/context-plan/approve",
+        data={"feedback": "Also cover supplier access."},
+    )
+
+    assert response.status_code == 302
+    context = routes_module.mongo.db.contexts.find_one({"_id": context_id})
+    assert context["status"] == "context_plan_approved"
+    assert context["context_intelligence_plan"]["status"] == "approved"
+    assert context["context_intelligence_plan"]["review"]["user_feedback"] == (
+        "Also cover supplier access."
+    )
+    assert {task["status"] for task in context["context_intelligence_plan"]["tasks"]} == {
+        "approved"
+    }
+    interaction = routes_module.mongo.db.interactions.find_one({
+        "context_id": context_id,
+        "question_id": "context_plan_approved",
+    })
+    assert interaction["answer"] == "Also cover supplier access."
 
 
 def test_security_context_route_returns_persisted_context(client):
