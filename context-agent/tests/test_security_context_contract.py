@@ -8,6 +8,7 @@ from app.context_analysis import (
     SecurityContextValidationError,
     build_security_context_from_answers,
     merge_provider_enrichment,
+    security_context_to_business_context,
     validate_security_context,
 )
 
@@ -118,6 +119,95 @@ def test_build_security_context_infers_employee_data_and_iso_27001():
     assert context["information_assets"]["third_party_dependencies"] == [
         "external_service_provider"
     ]
+
+
+def test_build_security_context_maps_expanded_questionnaire_fields():
+    context = build_security_context_from_answers(
+        {
+            "country": "Spain",
+            "region": "Catalonia",
+            "sector": "Healthcare",
+            "company_activity": "Private outpatient clinic",
+            "company_size": "25 employees",
+            "business_model": "Private healthcare services",
+            "service_type": "Hybrid physical and digital care",
+            "important_assets": "Medical records",
+            "critical_assets": "Patient data",
+            "data_categories": "health_data, appointment_data",
+            "third_party_dependencies": "external laboratory",
+            "cloud_services": "managed hosting",
+            "current_security_operations": "Backups",
+            "known_gaps": "No formal access review",
+            "regulatory_hints": "GDPR",
+            "security_maturity": "basic",
+            "risk_tolerance": "low",
+            "governance_owner": "Clinic manager",
+            "policy_type": "Access control policy",
+            "policy_scope": "Clinical systems",
+            "policy_exclusions": "Public website",
+            "policy_audience": "Clinic staff",
+            "language": "English",
+            "generic": "Specific",
+            "need": "Protect patient data",
+        },
+        language="en",
+    )
+
+    assert context["profile"]["activity"] == "Private outpatient clinic"
+    assert context["profile"]["size_band"] == "25 employees"
+    assert context["profile"]["business_model"] == "Private healthcare services"
+    assert context["profile"]["service_type"] == "Hybrid physical and digital care"
+    assert context["information_assets"]["data_categories"] == [
+        "health_data",
+        "appointment_data",
+        "personal_data",
+    ]
+    assert "external laboratory" in context["information_assets"]["third_party_dependencies"]
+    assert "managed hosting" in context["information_assets"]["cloud_services"]
+    assert context["security_posture"]["known_gaps"] == ["No formal access review"]
+    assert context["security_posture"]["maturity"] == "basic"
+    assert context["security_posture"]["risk_tolerance"] == "low"
+    assert context["security_posture"]["governance_owner"] == "Clinic manager"
+    assert context["policy_intent"]["policy_type"] == "Access control policy"
+    assert context["policy_intent"]["scope"] == "Clinical systems"
+    assert context["policy_intent"]["exclusions"] == "Public website"
+    assert context["policy_intent"]["audience"] == "Clinic staff"
+    assert context["policy_intent"]["language"] == "English"
+
+
+def test_security_context_to_business_context_flattens_policy_agent_fields():
+    security_context = build_security_context_from_answers(
+        _answers_from_fixture("clinica_dental.yaml"),
+        language="en",
+    )
+
+    business_context = security_context_to_business_context(security_context)
+
+    assert business_context == {
+        "country": "Spain",
+        "region": "Valencian Community",
+        "sector": "Private healthcare",
+        "important_assets": [
+            "Medical records",
+            "digital equipment",
+            "management application.",
+        ],
+        "critical_assets": ["Medical data and backup systems."],
+        "current_security_operations": (
+            "Antivirus protection, local copies, password access."
+        ),
+        "methodology": "GDPR and ISO 27799 should be applied.",
+        "generic": "Specific to the healthcare sector.",
+        "need": "Comply with GDPR and protect patient data.",
+        "data_types": ["personal_data", "health_data"],
+        "retrieval_collection_families": [
+            "legal_norms",
+            "sector_norms",
+            "security_frameworks",
+            "risk_methodologies",
+            "implementation_guides",
+        ],
+    }
 
 
 def test_validate_security_context_rejects_missing_required_section():
