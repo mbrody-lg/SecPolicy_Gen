@@ -62,7 +62,7 @@ STRING_FIELDS = {
     ("policy_intent", "specificity"),
 }
 
-FACT_SOURCE_VALUES = {"provided", "derived", "default", "unknown"}
+FACT_SOURCE_VALUES = {"provided", "derived", "provider", "default", "unknown"}
 
 
 @dataclass(frozen=True)
@@ -100,6 +100,19 @@ def build_security_context_from_answers(
     methodologies = _split_terms(normalized_answers.get("methodology"))
     need = normalized_answers.get("need")
     specificity = normalized_answers.get("generic")
+    explicit_data_categories = _split_terms(normalized_answers.get("data_categories"))
+    explicit_regulatory_hints = _split_terms(normalized_answers.get("regulatory_hints"))
+    analysis_text = " ".join(answer for answer in normalized_answers.values() if answer)
+    data_categories = _dedupe(explicit_data_categories + _infer_data_categories(analysis_text))
+    regulatory_hints = _dedupe(explicit_regulatory_hints + _infer_regulatory_hints(analysis_text))
+    cloud_services = _dedupe(
+        _split_terms(normalized_answers.get("cloud_services"))
+        + _infer_cloud_services(analysis_text)
+    )
+    third_party_dependencies = _dedupe(
+        _split_terms(normalized_answers.get("third_party_dependencies"))
+        + _infer_third_party_dependencies(analysis_text)
+    )
 
     context = _empty_security_context()
     context["profile"].update(
@@ -107,26 +120,46 @@ def build_security_context_from_answers(
             "operating_countries": [country] if country else [],
             "region": region,
             "sector": sector,
+            "activity": normalized_answers.get("company_activity"),
+            "size_band": normalized_answers.get("company_size"),
             "languages": [language] if language else [],
+            "business_model": normalized_answers.get("business_model"),
+            "service_type": normalized_answers.get("service_type"),
         }
     )
     context["information_assets"].update(
         {
             "important_assets": important_assets,
             "critical_assets": critical_assets,
+            "data_categories": data_categories,
+            "third_party_dependencies": third_party_dependencies,
+            "cloud_services": cloud_services,
         }
     )
     context["compliance"].update(
         {
             "jurisdictions": [country] if country else [],
+            "regulatory_hints": regulatory_hints,
             "methodologies": methodologies,
         }
     )
-    context["security_posture"]["current_controls"] = current_controls
+    context["security_posture"].update(
+        {
+            "current_controls": current_controls,
+            "maturity": normalized_answers.get("security_maturity"),
+            "known_gaps": _split_terms(normalized_answers.get("known_gaps")),
+            "risk_tolerance": normalized_answers.get("risk_tolerance"),
+            "governance_owner": normalized_answers.get("governance_owner"),
+        }
+    )
     context["policy_intent"].update(
         {
             "need": need,
-            "language": language,
+            "policy_type": normalized_answers.get("policy_type"),
+            "scope": normalized_answers.get("policy_scope"),
+            "exclusions": normalized_answers.get("policy_exclusions"),
+            "audience": normalized_answers.get("policy_audience"),
+            "language": normalized_answers.get("language") or language,
             "specificity": specificity,
         }
     )
@@ -134,9 +167,11 @@ def build_security_context_from_answers(
         {
             "jurisdictions": [country] if country else [],
             "sectors": [sector] if sector else [],
+            "data_types": data_categories,
             "methodologies": methodologies,
         }
     )
+    context["retrieval_hints"]["collection_families"] = _infer_collection_families(context)
     context["analysis"]["facts"] = _provided_facts(normalized_answers)
     context["analysis"]["missing_information"] = _missing_information(context)
     context["analysis"]["confidence"] = _confidence(context)
@@ -391,3 +426,90 @@ def _split_terms(value: str | None) -> list[str]:
     for separator in separators:
         terms = [part for term in terms for part in term.split(separator)]
     return [term.strip() for term in terms if term.strip()]
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    result = []
+    seen = set()
+    for value in values:
+        key = value.lower()
+        if key not in seen:
+            seen.add(key)
+            result.append(value)
+    return result
+
+
+def _infer_data_categories(text: str) -> list[str]:
+    normalized = text.lower()
+    categories = []
+    if _contains_any(normalized, ("personal data", "datos personales", "gdpr", "rgpd", "customer database")):
+        categories.append("personal_data")
+    if _contains_any(normalized, ("health", "healthcare", "medical", "patient", "salud", "paciente")):
+        categories.append("health_data")
+    if _contains_any(
+        normalized,
+        (
+            "employee data",
+            "employee records",
+            "employee files",
+            "hr data",
+            "hr operations",
+            "payroll",
+            "rrhh",
+            "nomina",
+            "nómina",
+        ),
+    ):
+        categories.append("employee_data")
+    if _contains_any(normalized, ("payment", "online payment", "card", "pago", "e-commerce", "ecommerce")):
+        categories.append("commerce_data")
+    return categories
+
+
+def _infer_regulatory_hints(text: str) -> list[str]:
+    normalized = text.lower()
+    hints = []
+    if _contains_any(normalized, ("gdpr", "rgpd")):
+        hints.append("gdpr")
+    if "iso 27001" in normalized:
+        hints.append("iso_27001")
+    if "iso 27799" in normalized:
+        hints.append("iso_27799")
+    if "cis controls" in normalized or "cis control" in normalized:
+        hints.append("cis_controls")
+    return hints
+
+
+def _infer_cloud_services(text: str) -> list[str]:
+    normalized = text.lower()
+    services = []
+    if _contains_any(normalized, ("hosting", "cloud", "saas", "web platform", "web application")):
+        services.append("hosted_web_platform")
+    return services
+
+
+def _infer_third_party_dependencies(text: str) -> list[str]:
+    normalized = text.lower()
+    dependencies = []
+    if _contains_any(normalized, ("hosting", "provider", "saas", "plugin", "plugins")):
+        dependencies.append("external_service_provider")
+    if _contains_any(normalized, ("payment", "online payment", "pago")):
+        dependencies.append("payment_provider")
+    return dependencies
+
+
+def _infer_collection_families(context: dict[str, Any]) -> list[str]:
+    families = ["legal_norms"]
+    if context["profile"]["sector"]:
+        families.append("sector_norms")
+    if context["compliance"]["methodologies"] or context["compliance"]["regulatory_hints"]:
+        families.append("security_frameworks")
+    if context["information_assets"]["critical_assets"]:
+        families.append("risk_methodologies")
+    if context["security_posture"]["current_controls"]:
+        families.append("implementation_guides")
+    return families
+
+
+def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
+    return any(term in text for term in terms)

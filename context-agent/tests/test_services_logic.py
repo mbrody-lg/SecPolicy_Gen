@@ -74,6 +74,14 @@ class FakeResponse:
 
 def test_get_context_and_prompt_prefers_context_refined_prompt(monkeypatch):
     context_id = ObjectId()
+    security_context = logic.build_context_security_context(
+        {
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient data",
+            "need": "Protect patient data",
+        }
+    )
     fake_db = FakeDB(
         contexts=[
             {
@@ -81,6 +89,7 @@ def test_get_context_and_prompt_prefers_context_refined_prompt(monkeypatch):
                 "refined_prompt": "canonical refined prompt",
                 "language": "es",
                 "version": "1.2.3",
+                "security_context": security_context,
             }
         ],
         interactions=[
@@ -99,6 +108,9 @@ def test_get_context_and_prompt_prefers_context_refined_prompt(monkeypatch):
     assert payload["refined_prompt"] == "canonical refined prompt"
     assert payload["language"] == "es"
     assert payload["model_version"] == "1.2.3"
+    assert payload["business_context"]["country"] == "Spain"
+    assert payload["business_context"]["sector"] == "Healthcare"
+    assert payload["business_context"]["critical_assets"] == ["Patient data"]
 
 
 def test_get_context_and_prompt_falls_back_to_legacy_interaction(monkeypatch):
@@ -121,6 +133,7 @@ def test_get_context_and_prompt_falls_back_to_legacy_interaction(monkeypatch):
     assert payload["refined_prompt"] == "legacy refined prompt"
     assert payload["language"] == "en"
     assert payload["model_version"] == "0.2.0"
+    assert payload["business_context"]["country"] is None
 
 
 def test_get_context_and_prompt_normalizes_numeric_model_version(monkeypatch):
@@ -142,6 +155,43 @@ def test_get_health_status_returns_static_liveness_payload():
         "status": "ok",
         "service": "context-agent",
     }
+
+
+def test_build_context_security_context_uses_context_fields_and_additional_need():
+    security_context = logic.build_context_security_context(
+        {
+            "country": "Spain",
+            "sector": "Professional services",
+            "important_assets": "Client files",
+            "critical_assets": "Contracts",
+            "need": "Protect client confidentiality",
+        },
+        additional_need="Add incident response requirements.",
+    )
+
+    assert security_context["profile"]["operating_countries"] == ["Spain"]
+    assert security_context["profile"]["sector"] == "Professional services"
+    assert security_context["policy_intent"]["need"] == (
+        "Protect client confidentiality\nAdd incident response requirements."
+    )
+
+
+def test_public_security_context_payload_builds_context_for_legacy_records():
+    payload = logic.public_security_context_payload(
+        "context-1",
+        {
+            "country": "France",
+            "sector": "E-commerce",
+            "critical_assets": "Payment system",
+            "need": "Protect online sales",
+        },
+    )
+
+    assert payload["success"] is True
+    assert payload["context_id"] == "context-1"
+    assert payload["security_context_version"] == logic.SECURITY_CONTEXT_VERSION
+    assert payload["security_context"]["profile"]["sector"] == "E-commerce"
+    assert payload["security_context"]["retrieval_hints"]["sectors"] == ["E-commerce"]
 
 
 def test_get_readiness_status_returns_ready_when_config_and_mongo_are_ok(app_context, monkeypatch):
