@@ -9,7 +9,14 @@ import json
 import yaml
 
 from app import create_app, mongo
-from app.services.logic import generate_context_prompt, run_with_agent, load_questions
+from app.services.logic import (
+    SECURITY_CONTEXT_VERSION,
+    build_context_security_context,
+    context_answer_fields,
+    generate_context_prompt,
+    run_with_agent,
+    load_questions,
+)
 
 # Initialize Flask app
 app = create_app()
@@ -36,10 +43,8 @@ def parse_json_answers(file_path):
             if isinstance(item, dict) and "id" in item
         }
     if isinstance(content, dict):
-        return {key: str(value).strip() for key, value in content.items() if key in (
-            "country", "region", "sector", "important_assets", "critical_assets",
-            "current_security_operations", "methodology", "generic", "need",
-        )}
+        allowed_fields = context_answer_fields()
+        return {key: str(value).strip() for key, value in content.items() if key in allowed_fields}
     return {}
 
 
@@ -53,10 +58,13 @@ def recreate_context_from_answers(data):
     """Create context and interaction records, then run initial agent generation."""
     created_at = datetime.now(timezone.utc)
     initial_prompt = generate_context_prompt(data)
+    security_context = build_context_security_context(data)
 
     context_result = mongo.db.contexts.insert_one({
         **data,
         "version": 1,
+        "security_context_version": SECURITY_CONTEXT_VERSION,
+        "security_context": security_context,
         "status": "pending",
         "created_at": created_at
     })
@@ -93,7 +101,7 @@ def recreate_context_from_answers(data):
 
     mongo.db.contexts.update_one(
         {"_id": context_id},
-        {"$set": {"status": "completed"}}
+        {"$set": {"status": "completed", "refined_prompt": full_prompt.strip()}}
     )
 
     print(f"Context created by: {data.get('country', 'unknown')} - {data.get('sector', 'unknown')}")

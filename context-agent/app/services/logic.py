@@ -32,12 +32,29 @@ CONTEXT_ANSWER_FIELDS = {
     "country",
     "region",
     "sector",
+    "company_activity",
+    "company_size",
+    "business_model",
+    "service_type",
     "important_assets",
     "critical_assets",
+    "data_categories",
+    "third_party_dependencies",
+    "cloud_services",
     "current_security_operations",
+    "known_gaps",
     "methodology",
+    "regulatory_hints",
+    "security_maturity",
+    "risk_tolerance",
+    "governance_owner",
     "generic",
+    "policy_type",
+    "policy_scope",
+    "policy_exclusions",
+    "policy_audience",
     "need",
+    "language",
 }
 
 
@@ -299,23 +316,66 @@ def load_questions(config_path: str | None = None):
         return yaml.safe_load(f)["questions"]
 
 
+def context_answer_fields(question_config: str | None = None) -> set[str]:
+    """Return supported context answer ids from configured questions plus legacy fields."""
+    try:
+        configured = {str(question["id"]) for question in load_questions(question_config)}
+    except Exception:
+        configured = set()
+    return CONTEXT_ANSWER_FIELDS.union(configured)
+
+
 def generate_context_prompt(data: dict, question_config: str | None = None) -> str:
     """
     Build a text prompt from form answers.
     This prompt is used to drive context generation.
     """
     questions = load_questions(question_config)
+    security_context = build_context_security_context(data)
 
-    lines = ["This is the context obtained from the questions asked:"]
+    lines = [
+        "You are Context Agent for an information-security policy workflow.",
+        "Your task is to transform the user's company answers into a detailed, concrete, security-focused company context.",
+        "Do not draft the final policy. Produce a refined context that downstream Policy Agent and RAG retrieval can use.",
+        "",
+        "Security context analysis:",
+        f"- Version: {security_context['version']}",
+        f"- Sector: {security_context['profile']['sector'] or 'unknown'}",
+        f"- Activity: {security_context['profile']['activity'] or 'unknown'}",
+        f"- Countries: {_format_list(security_context['profile']['operating_countries'])}",
+        f"- Region: {security_context['profile']['region'] or 'unknown'}",
+        f"- Important assets: {_format_list(security_context['information_assets']['important_assets'])}",
+        f"- Critical assets: {_format_list(security_context['information_assets']['critical_assets'])}",
+        f"- Data categories: {_format_list(security_context['information_assets']['data_categories'])}",
+        f"- Third-party dependencies: {_format_list(security_context['information_assets']['third_party_dependencies'])}",
+        f"- Cloud/SaaS services: {_format_list(security_context['information_assets']['cloud_services'])}",
+        f"- Current controls: {_format_list(security_context['security_posture']['current_controls'])}",
+        f"- Known gaps: {_format_list(security_context['security_posture']['known_gaps'])}",
+        f"- Regulatory hints: {_format_list(security_context['compliance']['regulatory_hints'])}",
+        f"- Methodologies: {_format_list(security_context['compliance']['methodologies'])}",
+        f"- Policy need: {security_context['policy_intent']['need'] or 'unknown'}",
+        f"- Policy type: {security_context['policy_intent']['policy_type'] or 'unknown'}",
+        f"- Scope: {security_context['policy_intent']['scope'] or 'unknown'}",
+        f"- Audience: {security_context['policy_intent']['audience'] or 'unknown'}",
+        f"- Specificity: {security_context['policy_intent']['specificity'] or 'unknown'}",
+        f"- Missing information: {_format_list(security_context['analysis']['missing_information'])}",
+        f"- Retrieval collection hints: {_format_list(security_context['retrieval_hints']['collection_families'])}",
+        "",
+        "User-provided answers:",
+    ]
     for q in questions:
         key = q["id"]
         answer = data.get(key, "").strip()
         if answer:
             lines.append(f"- {q['question']} {answer}")
     lines.append(
-        "This context will be used by other agents to generate policies, security frameworks or specific validations."
+        "Output requirements: write a concise but complete business and information-security context; identify the security domains, relevant assets, data categories, regulatory exposure, assumptions, missing information, and the concrete policy objective."
     )
     return "\n".join(lines)
+
+
+def _format_list(values: list[str]) -> str:
+    return ", ".join(values) if values else "unknown"
 
 
 def build_context_security_context(context_data: dict, *, additional_need: str | None = None) -> dict:
