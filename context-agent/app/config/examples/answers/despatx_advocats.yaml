@@ -1,19 +1,53 @@
-answers: 
-  - id: country 
-    answer: Spain 
-  - id: region 
-    answer: Basque Country 
-  - id: sector 
-    answer: Legal services 
-  - id: important_assets 
-    answer: Court files, mails, legal documents. 
-  - id: critical_assets 
-    answer: Customer data and ongoing cases. 
-  - id: current_security_operations 
-    answer: File encryption, two-step authentication. 
-  - id: methodology 
-    answer: Partial application of ISO 27001 controls. 
-  - id: generic 
-    answer: Specific for legal confidentiality. 
-  - id: need 
-    answer: Avoid leaks and loss of sensitive data.
+answers:
+  - id: country
+    answer: Spain
+  - id: region
+    answer: Basque Country
+  - id: sector
+    answer: Legal services
+  - id: company_activity
+    answer: Law firm that manages litigation, corporate advisory, labor cases, client communications, digital evidence, deadlines, and confidential document exchange.
+  - id: company_size
+    answer: 24 employees, 15 lawyers, 5 administrative staff, one office, and remote work for partners.
+  - id: business_model
+    answer: Professional services with hourly billing, retainers, legal projects, and confidential client representation.
+  - id: service_type
+    answer: Consultancy and legal advisory service with cloud document management, court portals, email-heavy operations, and remote access.
+  - id: important_assets
+    answer: Court files, legal documents, client correspondence, digital evidence, document management system, email archives, billing records, and deadline calendar.
+  - id: critical_assets
+    answer: Client case files, ongoing litigation documents, email archive, deadline calendar, document repository, court portal credentials, and partner accounts.
+  - id: data_categories
+    answer: personal_data, legal_data, client_confidential_data, employee_data, billing_data, special_category_data.
+  - id: third_party_dependencies
+    answer: Microsoft 365, legal case management SaaS, electronic signature provider, court and public administration portals, external IT provider, and secure file exchange platform.
+  - id: cloud_services
+    answer: Microsoft 365, legal case management SaaS, encrypted cloud backup, e-signature platform, and secure file sharing service.
+  - id: current_security_operations
+    answer: File encryption for sensitive matters, MFA for partners, restricted client folders, endpoint antivirus, encrypted backups, role-based case access, and secure file links for external exchange.
+  - id: known_gaps
+    answer: MFA is not enforced for all legacy accounts, classification labels are inconsistent, retention rules depend on each partner, and supplier review is not documented.
+  - id: methodology
+    answer: ISO 27001 and ISO 27002 controls should be applied with emphasis on confidentiality, privileged access, and secure document exchange.
+  - id: regulatory_hints
+    answer: GDPR, professional secrecy, bar association confidentiality expectations, client contractual clauses, and legal retention obligations.
+  - id: security_maturity
+    answer: Intermediate for confidentiality controls, basic for formal governance, retention, and supplier assurance.
+  - id: risk_tolerance
+    answer: Very low for client confidentiality, court deadlines, unauthorized disclosure, and compromised partner accounts.
+  - id: governance_owner
+    answer: Managing Partner owns risk decisions; Systems Manager owns technical controls; Data Protection Officer advises on privacy issues.
+  - id: generic
+    answer: Specific for legal confidentiality, client files, professional secrecy, and secure communications.
+  - id: policy_type
+    answer: Confidential information handling and secure access policy.
+  - id: policy_scope
+    answer: Legal case files, email, cloud document repository, court portals, e-signature, external file sharing, backups, and remote work.
+  - id: policy_exclusions
+    answer: Legal strategy, client acceptance criteria, and professional fee policies.
+  - id: policy_audience
+    answer: Lawyers, partners, paralegals, administrative staff, external IT provider, and temporary collaborators.
+  - id: need
+    answer: Avoid leaks, preserve client confidentiality, protect court deadlines, and formalize secure handling of legal documents and communications.
+  - id: language
+    answer: English

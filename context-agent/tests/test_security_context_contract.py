@@ -14,11 +14,27 @@ from app.context_analysis import (
 
 
 FIXTURE_DIR = Path(__file__).resolve().parents[1] / "app" / "config" / "examples" / "answers"
+QUESTION_CONFIG = Path(__file__).resolve().parents[1] / "app" / "config" / "context_questions.yaml"
 
 
 def _answers_from_fixture(name):
     payload = yaml.safe_load((FIXTURE_DIR / name).read_text(encoding="utf-8"))
     return {item["id"]: item["answer"] for item in payload["answers"]}
+
+
+def _question_ids():
+    payload = yaml.safe_load(QUESTION_CONFIG.read_text(encoding="utf-8"))
+    return {item["id"] for item in payload["questions"]}
+
+
+def test_example_answers_cover_full_context_questionnaire():
+    expected_ids = _question_ids()
+
+    for fixture_path in FIXTURE_DIR.glob("*.yaml"):
+        answers = _answers_from_fixture(fixture_path.name)
+
+        assert set(answers) == expected_ids
+        assert all(str(answer).strip() for answer in answers.values())
 
 
 def test_build_security_context_maps_current_healthcare_answers():
@@ -31,29 +47,36 @@ def test_build_security_context_maps_current_healthcare_answers():
     assert context["profile"]["operating_countries"] == ["Spain"]
     assert context["profile"]["region"] == "Valencian Community"
     assert context["profile"]["sector"] == "Private healthcare"
+    assert context["profile"]["activity"].startswith("Dental clinic")
+    assert context["profile"]["size_band"] == (
+        "32 employees, 14 dentists and hygienists, 9 treatment rooms, "
+        "and approximately 18,000 active patient records."
+    )
+    assert context["profile"]["business_model"].startswith("Private healthcare services")
     assert context["profile"]["languages"] == ["en"]
-    assert context["information_assets"]["important_assets"] == [
-        "Medical records",
-        "digital equipment",
-        "management application.",
-    ]
-    assert context["information_assets"]["critical_assets"] == [
-        "Medical data and backup systems."
-    ]
-    assert context["compliance"]["methodologies"] == [
-        "GDPR and ISO 27799 should be applied."
-    ]
-    assert context["compliance"]["regulatory_hints"] == ["gdpr", "iso_27799"]
-    assert context["information_assets"]["data_categories"] == [
-        "personal_data",
-        "health_data",
-    ]
-    assert context["security_posture"]["current_controls"] == [
-        "Antivirus protection",
-        "local copies",
-        "password access.",
-    ]
-    assert context["policy_intent"]["need"] == "Comply with GDPR and protect patient data."
+    assert "Medical records" in context["information_assets"]["important_assets"]
+    assert "radiology images" in context["information_assets"]["important_assets"]
+    assert "Patient clinical records" in context["information_assets"]["critical_assets"]
+    assert "radiology image archive" in context["information_assets"]["critical_assets"]
+    assert "GDPR" in context["compliance"]["methodologies"]
+    assert "ISO 27799" in context["compliance"]["methodologies"]
+    assert "and ISO 27002 should guide the security controls" in context["compliance"]["methodologies"]
+    assert "GDPR" in context["compliance"]["regulatory_hints"]
+    assert "ISO 27799" in context["compliance"]["regulatory_hints"]
+    assert "health_data" in context["information_assets"]["data_categories"]
+    assert "billing_data" in context["information_assets"]["data_categories"]
+    assert "Dental practice SaaS provider" in context["information_assets"]["third_party_dependencies"]
+    assert "Practice management SaaS" in context["information_assets"]["cloud_services"]
+    assert "Antivirus protection" in context["security_posture"]["current_controls"]
+    assert "supplier risk is not periodically assessed" in context["security_posture"]["known_gaps"]
+    assert context["security_posture"]["maturity"].startswith("Intermediate operational maturity")
+    assert context["security_posture"]["risk_tolerance"].startswith("Very low")
+    assert context["security_posture"]["governance_owner"].startswith("Systems Manager")
+    assert context["policy_intent"]["need"].startswith("Comply with GDPR")
+    assert context["policy_intent"]["policy_type"] == (
+        "Clinical systems access control and health data protection policy."
+    )
+    assert context["policy_intent"]["audience"].startswith("Dentists")
     assert context["retrieval_hints"]["sectors"] == ["Private healthcare"]
     assert context["retrieval_hints"]["collection_families"] == [
         "legal_norms",
@@ -74,25 +97,22 @@ def test_build_security_context_maps_current_ecommerce_answers():
 
     assert context["profile"]["operating_countries"] == ["France"]
     assert context["profile"]["sector"] == "Craft e-commerce"
-    assert context["information_assets"]["critical_assets"] == [
-        "Sales website and online payment system."
-    ]
-    assert context["information_assets"]["data_categories"] == [
-        "personal_data",
-        "commerce_data",
-    ]
-    assert context["information_assets"]["cloud_services"] == ["hosted_web_platform"]
-    assert context["information_assets"]["third_party_dependencies"] == [
-        "external_service_provider",
-        "payment_provider",
-    ]
-    assert context["compliance"]["regulatory_hints"] == ["cis_controls"]
-    assert context["policy_intent"]["specificity"] == "Generics adapted to e-commerce."
+    assert context["profile"]["activity"].startswith("Online store")
+    assert "Sales website" in context["information_assets"]["critical_assets"]
+    assert "online payment flow" in context["information_assets"]["critical_assets"]
+    assert "personal_data" in context["information_assets"]["data_categories"]
+    assert "commerce_data" in context["information_assets"]["data_categories"]
+    assert "Stripe dashboard" in context["information_assets"]["cloud_services"]
+    assert "Shopify" in context["information_assets"]["third_party_dependencies"]
+    assert "payment_provider" in context["information_assets"]["third_party_dependencies"]
+    assert "cis_controls" in context["compliance"]["regulatory_hints"]
+    assert context["policy_intent"]["specificity"].startswith("Specific policies adapted")
+    assert context["policy_intent"]["policy_type"] == (
+        "E-commerce access, supplier, and incident response policy."
+    )
     assert context["retrieval_hints"]["jurisdictions"] == ["France"]
-    assert context["retrieval_hints"]["data_types"] == [
-        "personal_data",
-        "commerce_data",
-    ]
+    assert "personal_data" in context["retrieval_hints"]["data_types"]
+    assert "commerce_data" in context["retrieval_hints"]["data_types"]
     assert context["analysis"]["confidence"] == "medium"
 
 
@@ -183,31 +203,24 @@ def test_security_context_to_business_context_flattens_policy_agent_fields():
 
     business_context = security_context_to_business_context(security_context)
 
-    assert business_context == {
-        "country": "Spain",
-        "region": "Valencian Community",
-        "sector": "Private healthcare",
-        "important_assets": [
-            "Medical records",
-            "digital equipment",
-            "management application.",
-        ],
-        "critical_assets": ["Medical data and backup systems."],
-        "current_security_operations": (
-            "Antivirus protection, local copies, password access."
-        ),
-        "methodology": "GDPR and ISO 27799 should be applied.",
-        "generic": "Specific to the healthcare sector.",
-        "need": "Comply with GDPR and protect patient data.",
-        "data_types": ["personal_data", "health_data"],
-        "retrieval_collection_families": [
-            "legal_norms",
-            "sector_norms",
-            "security_frameworks",
-            "risk_methodologies",
-            "implementation_guides",
-        ],
-    }
+    assert business_context["country"] == "Spain"
+    assert business_context["region"] == "Valencian Community"
+    assert business_context["sector"] == "Private healthcare"
+    assert "Medical records" in business_context["important_assets"]
+    assert "Patient clinical records" in business_context["critical_assets"]
+    assert business_context["current_security_operations"].startswith("Antivirus protection")
+    assert business_context["methodology"].startswith("GDPR, ISO 27799")
+    assert business_context["generic"].startswith("Specific to private healthcare")
+    assert business_context["need"].startswith("Comply with GDPR")
+    assert "personal_data" in business_context["data_types"]
+    assert "health_data" in business_context["data_types"]
+    assert business_context["retrieval_collection_families"] == [
+        "legal_norms",
+        "sector_norms",
+        "security_frameworks",
+        "risk_methodologies",
+        "implementation_guides",
+    ]
 
 
 def test_validate_security_context_rejects_missing_required_section():

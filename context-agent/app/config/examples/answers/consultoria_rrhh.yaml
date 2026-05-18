@@ -1,19 +1,53 @@
-answers: 
-  - id: country 
-    answer: Spain 
-  - id: region 
-    answer: Madrid and Barcelona 
-  - id: sector 
-    answer: Professional services (HR) 
-  - id: important_assets 
-    answer: CVs, customer information, management software. 
-  - id: critical_assets 
-    answer: Candidate database and access to external portals. 
-  - id: current_security_operations 
-    answer: Secure sewers, antivirus  , restricted access. 
-  - id: methodology 
-    answer: ISO 27701 should be applie  d for privacy. 
-  - id: generic 
-    answer: Specific for the processin  g of personal data. 
-  - id: need 
-    answer: Protect sensitive candidat  e and client dat          a.
+answers:
+  - id: country
+    answer: Spain
+  - id: region
+    answer: Madrid and Barcelona
+  - id: sector
+    answer: Professional services and HR consulting
+  - id: company_activity
+    answer: HR consultancy that manages recruitment processes, candidate databases, psychometric assessments, payroll advisory projects, and outsourced HR documentation for clients.
+  - id: company_size
+    answer: 42 employees, 12 recruiters, 8 consultants, two offices, and approximately 120 active client accounts.
+  - id: business_model
+    answer: B2B consulting projects, recurring HR outsourcing services, recruitment success fees, and assessment platform subscriptions.
+  - id: service_type
+    answer: Consultancy with cloud collaboration tools, candidate SaaS platforms, external job portals, and remote work.
+  - id: important_assets
+    answer: CVs, candidate profiles, interview notes, assessment results, client contracts, HR reports, payroll advisory files, CRM, and management software.
+  - id: critical_assets
+    answer: Candidate database, client HR documentation, assessment platform, external job portal accounts, shared document repository, and privileged SaaS accounts.
+  - id: data_categories
+    answer: personal_data, employee_data, candidate_data, payroll_data, assessment_data, client_confidential_data.
+  - id: third_party_dependencies
+    answer: Microsoft 365, ATS provider, LinkedIn Recruiter, InfoJobs, DocuSign, payroll platform, external legal advisor, and managed IT provider.
+  - id: cloud_services
+    answer: Microsoft 365, ATS SaaS, CRM SaaS, DocuSign, payroll SaaS, endpoint protection console, and cloud backup service.
+  - id: current_security_operations
+    answer: MFA for Microsoft 365, endpoint antivirus, role-based access to ATS, restricted client folders, VPN for administrative access, monthly backup checks, and offboarding checklist for recruiters.
+  - id: known_gaps
+    answer: Data retention rules differ by client, candidate exports are not always tracked, supplier reviews are informal, and there is no approved classification policy for HR documents.
+  - id: methodology
+    answer: ISO 27701 and ISO 27002 should be applied with a privacy-first approach for recruitment and HR outsourcing.
+  - id: regulatory_hints
+    answer: GDPR, Spanish data protection law, employment confidentiality, client contractual security clauses, and data processor obligations.
+  - id: security_maturity
+    answer: Intermediate for SaaS access controls, basic for documentation, retention, and supplier governance.
+  - id: risk_tolerance
+    answer: Low for candidate data, payroll data, client HR files, and accidental disclosure to wrong client contacts.
+  - id: governance_owner
+    answer: Systems Manager owns SaaS security; Operations Director owns process compliance; DPO owns privacy interpretation.
+  - id: generic
+    answer: Specific for HR consulting, candidate personal data, client confidentiality, and processor obligations.
+  - id: policy_type
+    answer: Data classification, retention, and access control policy for HR information.
+  - id: policy_scope
+    answer: Candidate database, ATS, client folders, assessment results, payroll advisory files, SaaS accounts, exports, retention rules, and offboarding.
+  - id: policy_exclusions
+    answer: Commercial pricing, recruiter performance management, and non-security HR methodology.
+  - id: policy_audience
+    answer: Recruiters, consultants, operations team, management, DPO, and external IT provider.
+  - id: need
+    answer: Protect sensitive candidate and client data, define retention and access rules, and reduce exposure from SaaS exports and external job portals.
+  - id: language
+    answer: English

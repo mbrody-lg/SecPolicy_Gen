@@ -1,19 +1,53 @@
-answers: 
-- id: country 
-  answer: France 
-- id: region 
-  answer: Western Europe 
-- id: sector 
-  answer: Craft e-commerce 
-- id: important_assets 
-  answer: Web platform, customer database, product images. 
-- id: critical_assets 
-  answer: Sales website and online payment system. 
-- id: current_security_operations 
-  answer: Hosting with HTTPS, user authentication, security plugins. 
-- id: methodology 
-  answer: Not defined; CIS Controls could be applied. 
-- id: generic 
-  answer: Generics adapted to e-commerce. 
-- id: need 
-  answer: Ensure business continuity in the event of a cyber incident.
+answers:
+  - id: country
+    answer: France
+  - id: region
+    answer: Western Europe
+  - id: sector
+    answer: Craft e-commerce
+  - id: company_activity
+    answer: Online store that sells handmade products, manages seasonal campaigns, ships orders across the EU, and coordinates a small marketplace of local artisans.
+  - id: company_size
+    answer: 18 employees, 75 active artisan suppliers, 35,000 registered customers, and around 2,500 orders per month.
+  - id: business_model
+    answer: Direct e-commerce sales, marketplace commissions, newsletter campaigns, and occasional B2B gift orders.
+  - id: service_type
+    answer: Digital retail business with SaaS commerce, external logistics, and cloud-hosted customer operations.
+  - id: important_assets
+    answer: Web platform, customer database, order history, product images, stock records, payment configuration, marketing lists, supplier portal, and analytics data.
+  - id: critical_assets
+    answer: Sales website, online payment flow, order management system, customer database, stock synchronization, and administrator accounts.
+  - id: data_categories
+    answer: personal_data, commerce_data, payment_metadata, supplier_data, marketing_preferences.
+  - id: third_party_dependencies
+    answer: Shopify, Stripe, PayPal, logistics provider, email marketing platform, external web agency, cookie consent provider, and cloud DNS provider.
+  - id: cloud_services
+    answer: Shopify, Stripe dashboard, PayPal Business, Mailchimp, Google Analytics, cloud DNS, and cloud backup of exported orders.
+  - id: current_security_operations
+    answer: HTTPS, platform-managed authentication, MFA for store administrators, role-based access for the web agency, weekly export backups, security plugin monitoring, and fraud alerts from the payment provider.
+  - id: known_gaps
+    answer: Supplier accounts are reviewed manually, no documented incident response plan, no formal evidence of backup restore tests, and marketing exports are sometimes stored locally.
+  - id: methodology
+    answer: CIS Controls should be used as a pragmatic baseline, with PCI DSS awareness for payment handling even though card data is processed by providers.
+  - id: regulatory_hints
+    answer: GDPR, ePrivacy cookie obligations, consumer protection requirements, PCI DSS scope reduction through Stripe and PayPal, and marketplace supplier confidentiality.
+  - id: security_maturity
+    answer: Basic to intermediate; core SaaS controls exist but governance and supplier assurance are informal.
+  - id: risk_tolerance
+    answer: Low for payment configuration, customer data, store availability during campaigns, and unauthorized administrator access.
+  - id: governance_owner
+    answer: Systems Manager coordinates SaaS administration with the Operations Manager and external web agency.
+  - id: generic
+    answer: Specific policies adapted to e-commerce, cloud SaaS, suppliers, marketing exports, and payment provider dependencies.
+  - id: policy_type
+    answer: E-commerce access, supplier, and incident response policy.
+  - id: policy_scope
+    answer: Store administration, customer data, order management, payment provider dashboards, supplier portal, marketing tools, backups, and web agency access.
+  - id: policy_exclusions
+    answer: Product quality processes, artisan onboarding criteria unrelated to data security, and warehouse physical safety.
+  - id: policy_audience
+    answer: Store administrators, customer support, marketing team, operations staff, external web agency, and supplier portal administrators.
+  - id: need
+    answer: Ensure business continuity, protect customer and order data, control privileged SaaS access, and reduce impact during cyber incidents or provider outages.
+  - id: language
+    answer: English

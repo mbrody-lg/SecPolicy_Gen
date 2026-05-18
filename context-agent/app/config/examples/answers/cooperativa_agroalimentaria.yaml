@@ -1,19 +1,53 @@
-answers: 
-  - id: country 
-    answer: Spain 
-  - id: region 
-    answer: Andalusia 
-  - id: sector 
-    answer: Agri-food 
-  - id: important_assets 
-    answer: Traceability systems, production data, ERP. 
-  - id: critical_assets 
-    answer: Production and logistics database. 
-  - id: current_security_operations 
-    answer: Passwords, local backups. 
-  - id: methodology 
-    answer: ENISA's basic controls should be applied. 
-  - id: generic 
-    answer: Sectoral generics with logistical adaptation. 
-  - id: need 
-    answer: Reduce operational risk and avoid data loss.
+answers:
+  - id: country
+    answer: Spain
+  - id: region
+    answer: Andalusia
+  - id: sector
+    answer: Agri-food cooperative
+  - id: company_activity
+    answer: Cooperative that receives agricultural products from members, manages traceability, production batches, quality controls, cold storage, logistics, and invoicing to distributors.
+  - id: company_size
+    answer: 85 employees, 320 cooperative members, two production plants, seasonal peaks, and distribution across Spain and Portugal.
+  - id: business_model
+    answer: Cooperative production and logistics model with member services, batch processing, distribution contracts, and quality certification obligations.
+  - id: service_type
+    answer: Physical production and logistics operation supported by ERP, traceability software, warehouse systems, and industrial network equipment.
+  - id: important_assets
+    answer: Traceability systems, ERP, production data, quality records, member database, logistics schedules, cold storage monitoring, supplier contracts, and invoicing systems.
+  - id: critical_assets
+    answer: Production and logistics database, batch traceability system, ERP, warehouse terminals, cold storage monitoring, and backup repository.
+  - id: data_categories
+    answer: personal_data, member_data, supplier_data, production_data, traceability_data, financial_data, logistics_data.
+  - id: third_party_dependencies
+    answer: ERP vendor, traceability software provider, industrial maintenance provider, logistics companies, certification auditor, managed IT support, and cloud backup provider.
+  - id: cloud_services
+    answer: Cloud backup, Microsoft 365, ERP vendor remote portal, quality certification portal, and logistics provider portals.
+  - id: current_security_operations
+    answer: Individual ERP users, local backups and cloud backups, firewall between office and plant network, antivirus, restricted remote access for vendors, and manual checks of batch data.
+  - id: known_gaps
+    answer: Plant network assets are not fully inventoried, restore tests are irregular, vendor remote access is approved by email, and incident response does not cover production downtime.
+  - id: methodology
+    answer: ENISA basic controls, CIS Controls, and ISO 27002 should be applied with attention to operational continuity and supply chain risk.
+  - id: regulatory_hints
+    answer: GDPR, food traceability obligations, quality certification requirements, supply chain continuity, and contractual obligations with distributors.
+  - id: security_maturity
+    answer: Basic to intermediate; office IT is controlled but production and supplier access need stronger governance.
+  - id: risk_tolerance
+    answer: Low for traceability, production continuity, cold storage monitoring, ransomware exposure, and distributor commitments.
+  - id: governance_owner
+    answer: Systems Manager owns IT; Operations Manager owns plant continuity; Quality Manager owns traceability and certification evidence.
+  - id: generic
+    answer: Sector-specific policies adapted to agri-food traceability, production continuity, suppliers, and logistics.
+  - id: policy_type
+    answer: Business continuity, backup, and supplier access policy.
+  - id: policy_scope
+    answer: ERP, traceability system, production terminals, vendor remote access, backups, logistics portals, quality records, and incident escalation.
+  - id: policy_exclusions
+    answer: Agricultural production techniques, food safety procedures not related to information systems, and cooperative membership governance.
+  - id: policy_audience
+    answer: IT team, plant supervisors, quality team, administration, management, external vendors, and logistics coordinators.
+  - id: need
+    answer: Reduce operational risk, prevent traceability loss, protect production and member data, and keep logistics running during incidents.
+  - id: language
+    answer: English

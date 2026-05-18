@@ -1,19 +1,53 @@
 answers:
-- id: country
-  answer: Spain
-- id: region
-  answer: Catalonia
-- id: sector
-  answer: Education
-- id: important_assets
-  answer: Student information, grades, class calendar.
-- id: critical_assets
-  answer: Student database and academic records.
-- id: current_security_operations
-  answer: Antivirus, password management, local copies.
-- id: methodology
-  answer: None used; ISO 27002 should be implemented.
-- id: generic
-  answer: Generics adapted to educational environments.
-- id: need
-  answer: Protect personal data and ensure secure access to teachers.
+  - id: country
+    answer: Spain
+  - id: region
+    answer: Catalonia
+  - id: sector
+    answer: Education and language training
+  - id: company_activity
+    answer: Private language academy with in-person classes, online courses, placement tests, and exam preparation for children, adults, and corporate clients.
+  - id: company_size
+    answer: 28 employees, 45 freelance teachers, 1,200 active students, and three training centers.
+  - id: business_model
+    answer: Direct tuition fees, corporate training contracts, and online course subscriptions.
+  - id: service_type
+    answer: Hybrid education service with physical classrooms, remote teaching, and a student portal.
+  - id: important_assets
+    answer: Student information system, grades, attendance records, class calendar, teacher devices, online learning platform, billing records, and exam materials.
+  - id: critical_assets
+    answer: Student database, academic records, class scheduling platform, corporate client contracts, and Microsoft 365 tenant.
+  - id: data_categories
+    answer: personal_data, student_data, employee_data, billing_data, minor_data, academic_records.
+  - id: third_party_dependencies
+    answer: Microsoft 365, Moodle hosting provider, online payment gateway, external payroll provider, exam certification bodies, and managed IT support company.
+  - id: cloud_services
+    answer: Microsoft 365, Moodle SaaS hosting, Google Workspace for some teachers, cloud backup service, and payment provider dashboard.
+  - id: current_security_operations
+    answer: Antivirus on managed laptops, individual user accounts, basic password policy, daily cloud backups of the student system, MFA for administrators, and manual review of teacher access at course end.
+  - id: known_gaps
+    answer: No formal supplier review, shared classroom devices are not fully inventoried, MFA is not enforced for all teachers, and incident response is undocumented.
+  - id: methodology
+    answer: No formal framework is in place; ISO 27002 and CIS Controls should be used as the initial control baseline.
+  - id: regulatory_hints
+    answer: GDPR, Spanish data protection law, contractual requirements from corporate clients, and additional care for minors' personal data.
+  - id: security_maturity
+    answer: Basic with some managed controls but no formal governance cycle.
+  - id: risk_tolerance
+    answer: Low for student data, minor data, payment data, and platform availability during exam periods.
+  - id: governance_owner
+    answer: Systems Manager owns IT operations; the academy director owns budget and risk acceptance; administration owns student records.
+  - id: generic
+    answer: Specific policies adapted to education, minors, teachers, and hybrid learning platforms.
+  - id: policy_type
+    answer: Access control and acceptable use policy.
+  - id: policy_scope
+    answer: Student information system, Moodle, Microsoft 365, teacher devices, classroom devices, payment platform, and access granted to freelance teachers.
+  - id: policy_exclusions
+    answer: Pedagogical methodology, classroom behavior rules not related to information security, and physical building safety.
+  - id: policy_audience
+    answer: Teachers, administrative staff, center coordinators, external IT provider, and management.
+  - id: need
+    answer: Establish consistent access, device, backup, supplier, and incident practices to protect student data and keep classes operational.
+  - id: language
+    answer: English

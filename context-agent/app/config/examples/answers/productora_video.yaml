@@ -4,16 +4,50 @@ answers:
   - id: region
     answer: Central Europe
   - id: sector
-    answer: Audiovisual communication
+    answer: Audiovisual production
+  - id: company_activity
+    answer: Video production company that records, edits, stores, and delivers advertising, corporate, and documentary projects for clients and agencies.
+  - id: company_size
+    answer: 30 employees, 20 regular freelancers, one editing studio, and several remote post-production collaborators.
+  - id: business_model
+    answer: Project-based media production, post-production services, licensing, and recurring work with agencies.
+  - id: service_type
+    answer: Digital media production with large local storage, cloud collaboration, client portals, and remote editing workflows.
   - id: important_assets
-    answer: Multimedia files, video servers, editing tools.
+    answer: Raw footage, edited projects, video servers, NAS storage, editing workstations, client contracts, media rights documentation, and delivery portals.
   - id: critical_assets
-    answer: Projects in editing and contracts with clients.
+    answer: Projects in editing, raw footage, client deliverables, NAS storage, backup archives, contracts with clients, and privileged editing platform accounts.
+  - id: data_categories
+    answer: client_confidential_data, intellectual_property, media_assets, personal_data, contract_data, employee_data.
+  - id: third_party_dependencies
+    answer: Adobe Creative Cloud, Frame.io, cloud storage provider, freelance editors, external sound studio, equipment rental partner, and managed IT provider.
+  - id: cloud_services
+    answer: Adobe Creative Cloud, Frame.io, cloud object storage, Microsoft 365, cloud backup, and client delivery portals.
   - id: current_security_operations
-    answer: Restricted access to servers, backups.
+    answer: Restricted access to video servers, project folders by client, backups of final masters, MFA for creative cloud administrators, antivirus on workstations, and signed NDAs with freelancers.
+  - id: known_gaps
+    answer: Raw footage backup timing depends on project urgency, freelancer access removal is manual, client delivery links can remain active too long, and ransomware recovery has not been tested end to end.
   - id: methodology
-    answer: None; NIST controls should be considered.
+    answer: NIST Cybersecurity Framework and CIS Controls should be considered for pragmatic media workflow protection.
+  - id: regulatory_hints
+    answer: GDPR, client confidentiality clauses, intellectual property rights, media licensing obligations, and NDA commitments.
+  - id: security_maturity
+    answer: Basic to intermediate; technical access controls exist but media lifecycle and freelancer governance need formalization.
+  - id: risk_tolerance
+    answer: Low for unreleased content, client confidentiality, loss of raw footage, and ransomware impact before delivery deadlines.
+  - id: governance_owner
+    answer: Systems Manager owns storage and cloud tools; Production Director owns project risk and freelancer approvals.
   - id: generic
-    answer: Specific for digital media.
+    answer: Specific for digital media, large files, freelancers, client confidentiality, and intellectual property protection.
+  - id: policy_type
+    answer: Media asset protection, freelancer access, and backup policy.
+  - id: policy_scope
+    answer: NAS storage, editing workstations, Adobe and Frame.io accounts, client delivery links, freelancer access, project archives, and backup process.
+  - id: policy_exclusions
+    answer: Creative approval workflow, editorial decision-making, and equipment rental logistics not related to information security.
+  - id: policy_audience
+    answer: Editors, producers, freelancers, production managers, IT provider, and management.
   - id: need
-    answer: Avoid loss of material and content leakage.
+    answer: Avoid loss of material, prevent content leakage, control freelancer access, and ensure recoverability before client delivery deadlines.
+  - id: language
+    answer: English

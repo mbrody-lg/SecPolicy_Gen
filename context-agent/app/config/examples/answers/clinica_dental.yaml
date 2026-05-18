@@ -5,15 +5,49 @@ answers:
     answer: Valencian Community
   - id: sector
     answer: Private healthcare
+  - id: company_activity
+    answer: Dental clinic with patient care, radiology, orthodontics, implantology, appointment management, insurance coordination, and digital clinical history.
+  - id: company_size
+    answer: 32 employees, 14 dentists and hygienists, 9 treatment rooms, and approximately 18,000 active patient records.
+  - id: business_model
+    answer: Private healthcare services paid directly by patients, with insurance reimbursements and financing options for treatments.
+  - id: service_type
+    answer: Hybrid physical healthcare service with clinical systems, imaging devices, SaaS scheduling, and remote access for the external IT provider.
   - id: important_assets
-    answer: Medical records, digital equipment, management application.
+    answer: Medical records, radiology images, digital equipment, practice management application, appointment calendar, billing data, consent forms, and backup repository.
   - id: critical_assets
-    answer: Medical data and backup systems.
+    answer: Patient clinical records, radiology image archive, appointment and billing system, backup systems, and administrator credentials.
+  - id: data_categories
+    answer: personal_data, health_data, billing_data, appointment_data, employee_data, consent_records.
+  - id: third_party_dependencies
+    answer: Dental practice SaaS provider, radiology equipment vendor, external IT support, cloud backup provider, payment terminal provider, insurance portals, and laboratory partners.
+  - id: cloud_services
+    answer: Practice management SaaS, Microsoft 365, encrypted cloud backup, insurance web portals, and payment provider dashboard.
   - id: current_security_operations
-    answer: Antivirus protection, local copies, password access.
+    answer: Antivirus protection, named user accounts, MFA for administrators, role profiles by clinical function, daily backups, encrypted laptops for management, restricted remote support, and local access control to the server room.
+  - id: known_gaps
+    answer: Access reviews are not formally documented, supplier risk is not periodically assessed, radiology workstation patching depends on vendor availability, and incident procedures are known informally but not approved.
   - id: methodology
-    answer: GDPR and ISO 27799 should be applied.
+    answer: GDPR, ISO 27799, and ISO 27002 should guide the security controls, with practical implementation proportional to a private clinic.
+  - id: regulatory_hints
+    answer: GDPR, Spanish health data obligations, medical confidentiality, ISO 27799, patient consent requirements, and retention obligations for clinical records.
+  - id: security_maturity
+    answer: Intermediate operational maturity with several technical controls but weak formal governance and supplier evidence.
+  - id: risk_tolerance
+    answer: Very low for patient data, clinical record availability, radiology images, and unauthorized access by former staff.
+  - id: governance_owner
+    answer: Systems Manager coordinates IT controls; Clinic Director owns clinical risk; Data Protection Officer advises on privacy obligations.
   - id: generic
-    answer: Specific to the healthcare sector.
+    answer: Specific to private healthcare, patient data, clinical availability, and regulated health records.
+  - id: policy_type
+    answer: Clinical systems access control and health data protection policy.
+  - id: policy_scope
+    answer: Practice management SaaS, radiology systems, Microsoft 365, backups, payment terminal administration, remote support, clinical staff access, and supplier access.
+  - id: policy_exclusions
+    answer: Clinical treatment protocols, medical decision criteria, and occupational safety procedures not related to information security.
+  - id: policy_audience
+    answer: Dentists, hygienists, reception staff, clinic management, external IT support, DPO, and authorized suppliers.
   - id: need
-    answer: Comply with GDPR and protect patient data.
+    answer: Comply with GDPR, protect patient and health data, preserve clinical continuity, and define clear controls for access, backups, suppliers, and incidents.
+  - id: language
+    answer: English

@@ -4,16 +4,50 @@ answers:
   - id: region
     answer: Catalonia
   - id: sector
-    answer: Automotive and maintenance services
+    answer: Automotive maintenance services
+  - id: company_activity
+    answer: Mechanical workshop that manages vehicle repairs, diagnostics, customer appointments, spare parts, invoices, fleet maintenance contracts, and connected diagnostic equipment.
+  - id: company_size
+    answer: 16 employees, 8 mechanics, 3 reception staff, 2 workshops, and approximately 9,000 customer records.
+  - id: business_model
+    answer: Local service business with repair invoices, fleet maintenance agreements, spare part sales, and warranty documentation.
+  - id: service_type
+    answer: Physical automotive service supported by management software, diagnostic computers, supplier portals, and payment terminals.
   - id: important_assets
-    answer: Diagnostic computers, customer data, management software.
+    answer: Diagnostic computers, customer data, management software, vehicle history, billing system, spare parts stock, supplier portals, and workshop Wi-Fi.
   - id: critical_assets
-    answer: Customer database and billing systems.
+    answer: Customer database, billing system, appointment calendar, diagnostic laptops, supplier portal access, and backup copies.
+  - id: data_categories
+    answer: personal_data, vehicle_data, billing_data, supplier_data, employee_data, fleet_contract_data.
+  - id: third_party_dependencies
+    answer: Workshop management SaaS, diagnostic software vendor, spare parts suppliers, payment terminal provider, accountant, external IT support, and cloud backup provider.
+  - id: cloud_services
+    answer: Workshop management SaaS, Microsoft 365, cloud backup, payment provider dashboard, and supplier portals.
   - id: current_security_operations
-    answer: Basic antivirus, manual backups, passwords for access.
+    answer: Basic antivirus, named accounts for management software, manual backups plus cloud backup, separate guest Wi-Fi, passwords for diagnostic devices, and restricted administrator access.
+  - id: known_gaps
+    answer: Diagnostic laptops are shared between mechanics, patching is irregular, supplier portal passwords are not centrally managed, and no documented incident response procedure exists.
   - id: methodology
-    answer: No clear methodology applied; basic ISO 27001 should be established.
+    answer: Basic ISO 27001 and CIS Controls should be established in a proportional way for a small workshop.
+  - id: regulatory_hints
+    answer: GDPR, customer confidentiality, payment provider obligations, fleet contract clauses, and labor data protection.
+  - id: security_maturity
+    answer: Basic; core operations work but controls are informal and depend on individual habits.
+  - id: risk_tolerance
+    answer: Medium for general IT inconvenience, low for customer database loss, billing disruption, and compromised supplier or payment accounts.
+  - id: governance_owner
+    answer: Systems Manager coordinates IT with the workshop owner; reception supervisor owns customer records; accountant manages financial exports.
   - id: generic
-    answer: Specific to protect personal data and diagnostic equipment.
+    answer: Specific to small automotive workshops, diagnostic equipment, personal data, supplier portals, and practical backup controls.
+  - id: policy_type
+    answer: Small business access, device, and backup policy.
+  - id: policy_scope
+    answer: Workshop management SaaS, diagnostic laptops, customer database, billing system, supplier portals, backups, Wi-Fi, and payment terminal administration.
+  - id: policy_exclusions
+    answer: Mechanical repair procedures, workplace safety, spare part quality control, and commercial warranty decisions.
+  - id: policy_audience
+    answer: Mechanics, reception staff, workshop owner, accountant, external IT provider, and temporary employees.
   - id: need
-    answer: Data protection and systematization of digital security.
+    answer: Protect customer and vehicle data, formalize backup and device controls, reduce ransomware exposure, and keep invoicing and appointments available.
+  - id: language
+    answer: English

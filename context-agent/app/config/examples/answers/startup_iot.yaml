@@ -1,19 +1,53 @@
-answers: 
-  - id: country 
-    answer: Netherlands 
-  - id: region 
-    answer: Europe and USA 
-  - id: sector 
-    answer: Technology and electronics 
-  - id: important_assets 
-    answer: Firmware, designs, test data, IP. 
-  - id: critical_assets 
-    answer: Source code and development data. 
-  - id: current_security_operations 
-    answer: Version control, GitHub with 2FA. 
-  - id: methodology 
-    answer: SSDF from NIST is recommended. 
-  - id: generic 
-    answer: Specific by development cycle. 
-  - id: need 
-    answer: Protect intellectual property and avoid espionage.
+answers:
+  - id: country
+    answer: Netherlands
+  - id: region
+    answer: Europe and USA
+  - id: sector
+    answer: IoT technology and electronics
+  - id: company_activity
+    answer: Startup that designs IoT devices, develops firmware and cloud APIs, runs pilot deployments, and manages device telemetry for industrial customers.
+  - id: company_size
+    answer: 55 employees, 28 engineers, 6 DevOps staff, 3,000 pilot devices, and customers in the EU and USA.
+  - id: business_model
+    answer: Hardware sales, SaaS monitoring subscription, support contracts, and paid pilot integrations.
+  - id: service_type
+    answer: SaaS and connected-device business with firmware, cloud platform, CI/CD, APIs, telemetry, and customer integrations.
+  - id: important_assets
+    answer: Firmware, source code, device keys, cloud APIs, telemetry, test data, hardware designs, CI/CD pipelines, customer integration secrets, and product roadmap.
+  - id: critical_assets
+    answer: Source code, signing keys, production cloud environment, device management platform, customer telemetry, CI/CD credentials, and firmware release process.
+  - id: data_categories
+    answer: telemetry_data, customer_data, personal_data, intellectual_property, device_identifiers, security_credentials, employee_data.
+  - id: third_party_dependencies
+    answer: GitHub, AWS, device manufacturing partner, vulnerability scanning provider, CI/CD SaaS, support ticketing platform, and external penetration testing company.
+  - id: cloud_services
+    answer: AWS, GitHub, GitHub Actions, container registry, cloud monitoring, secrets manager, support SaaS, and vulnerability scanning SaaS.
+  - id: current_security_operations
+    answer: GitHub with mandatory 2FA, branch protection, code review, cloud IAM roles, secrets manager, endpoint protection, container image scanning, device key rotation process, and limited production access.
+  - id: known_gaps
+    answer: Secure development lifecycle is not fully documented, device decommissioning is immature, customer telemetry retention needs definition, and supplier security evidence is incomplete.
+  - id: methodology
+    answer: NIST SSDF, OWASP ASVS for APIs, CIS Controls, and ISO 27001 should guide the security program.
+  - id: regulatory_hints
+    answer: GDPR, EU Cyber Resilience Act readiness, NIS2 customer expectations, SOC 2-style customer questionnaires, and secure software development obligations.
+  - id: security_maturity
+    answer: Intermediate for engineering controls, basic for formal governance, supplier assurance, and evidence management.
+  - id: risk_tolerance
+    answer: Very low for signing keys, production cloud access, firmware integrity, customer telemetry, and supply chain compromise.
+  - id: governance_owner
+    answer: Head of Engineering owns product security; Systems Manager owns corporate IT; CTO approves risk exceptions.
+  - id: generic
+    answer: Specific to secure software development, IoT devices, cloud operations, supply chain, and customer assurance.
+  - id: policy_type
+    answer: Secure development, cloud access, and device key management policy.
+  - id: policy_scope
+    answer: Firmware development, cloud APIs, GitHub, CI/CD, AWS, device credentials, vulnerability management, customer telemetry, and production access.
+  - id: policy_exclusions
+    answer: Product pricing, hardware industrial design decisions, and sales qualification processes.
+  - id: policy_audience
+    answer: Engineering, DevOps, support, IT, product management, CTO, and external security testers.
+  - id: need
+    answer: Protect intellectual property, prevent firmware and cloud compromise, satisfy customer assurance requests, and create a repeatable secure development baseline.
+  - id: language
+    answer: English
