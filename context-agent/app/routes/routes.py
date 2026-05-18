@@ -12,10 +12,14 @@ from app.metrics import metrics_response
 from app.observability import log_event
 from app.services.logic import (
     PipelineStepError,
+    SECURITY_CONTEXT_VERSION,
+    build_context_security_context,
+    context_answer_fields,
     get_health_status,
     get_system_status,
     get_pipeline_diagnostic,
     get_readiness_status,
+    public_security_context_payload,
     refresh_system_state,
     generate_context_prompt,
     run_with_agent,
@@ -248,8 +252,9 @@ def _developer_diagnostics_enabled() -> bool:
 def create():
     """Create a new context and trigger the initial agent response."""
     if request.method == "POST":
-        allowed_fields = {"country", "region", "sector", "important_assets", "critical_assets", "current_security_operations", "methodology", "generic", "need"}
+        allowed_fields = context_answer_fields()
         data = {k: v.strip() for k, v in request.form.items() if k in allowed_fields}
+        security_context = build_context_security_context(data)
 
         initial_prompt = generate_context_prompt(data)
 
@@ -258,6 +263,8 @@ def create():
         inserted = mongo.db.contexts.insert_one({
             **data,
             "version": 1,
+            "security_context_version": SECURITY_CONTEXT_VERSION,
+            "security_context": security_context,
             "status": "pending",
             "created_at": created_at
         })
@@ -349,6 +356,34 @@ def context_detail(context_id):
         developer_diagnostics_enabled=_developer_diagnostics_enabled(),
     )
 
+
+@main.route("/context/<context_id>/security_context", methods=["GET"])
+def get_security_context(context_id):
+    """Return the structured security context for a stored context."""
+    from bson.errors import InvalidId
+    try:
+        object_id = ObjectId(context_id)
+    except (InvalidId, TypeError):
+        return jsonify({
+            "success": False,
+            "error_type": "contract_error",
+            "error_code": "invalid_context_id",
+            "message": "Invalid context_id format.",
+            "details": {"context_id": context_id},
+        }), 400
+
+    context = mongo.db.contexts.find_one({"_id": object_id})
+    if not context:
+        return jsonify({
+            "success": False,
+            "error_type": "validation_error",
+            "error_code": "context_not_found",
+            "message": "Context not found.",
+            "details": {"context_id": context_id},
+        }), 404
+
+    return jsonify(public_security_context_payload(context_id, context)), 200
+
 @main.route("/context/<context_id>/continue", methods=["POST"])
 def continue_context(context_id):
     """Append user input to an existing context and request next agent response."""
@@ -404,7 +439,16 @@ def continue_context(context_id):
 
     mongo.db.contexts.update_one(
         {"_id": ObjectId(context_id)},
-        {"$set": {"status": "completed"}}
+        {
+            "$set": {
+                "status": "completed",
+                "security_context_version": SECURITY_CONTEXT_VERSION,
+                "security_context": build_context_security_context(
+                    context,
+                    additional_need=new_prompt,
+                ),
+            }
+        }
     )
 
     return redirect(url_for("main.context_detail", context_id=context_id))

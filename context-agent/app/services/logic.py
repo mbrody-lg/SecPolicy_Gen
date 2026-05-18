@@ -20,12 +20,42 @@ from app import (
     mongo,
 )
 from app.agents.factory import create_agent_from_config
+from app.context_analysis import SECURITY_CONTEXT_VERSION, build_security_context_from_answers
+from app.context_analysis import security_context_to_business_context
 from app.observability import build_log_event, log_event
 
 logger = logging.getLogger(__name__)
 MAX_PIPELINE_DIAGNOSTIC_HOPS = 25
 SYSTEM_STATUS_TIMEOUT_SECONDS = 2.0
 SYSTEM_RAG_STATUS_TIMEOUT_SECONDS = 10.0
+CONTEXT_ANSWER_FIELDS = {
+    "country",
+    "region",
+    "sector",
+    "company_activity",
+    "company_size",
+    "business_model",
+    "service_type",
+    "important_assets",
+    "critical_assets",
+    "data_categories",
+    "third_party_dependencies",
+    "cloud_services",
+    "current_security_operations",
+    "known_gaps",
+    "methodology",
+    "regulatory_hints",
+    "security_maturity",
+    "risk_tolerance",
+    "governance_owner",
+    "generic",
+    "policy_type",
+    "policy_scope",
+    "policy_exclusions",
+    "policy_audience",
+    "need",
+    "language",
+}
 
 
 class PipelineStepError(Exception):
@@ -286,23 +316,107 @@ def load_questions(config_path: str | None = None):
         return yaml.safe_load(f)["questions"]
 
 
+def context_answer_fields(question_config: str | None = None) -> set[str]:
+    """Return supported context answer ids from configured questions plus legacy fields."""
+    try:
+        configured = {str(question["id"]) for question in load_questions(question_config)}
+    except Exception:
+        configured = set()
+    return CONTEXT_ANSWER_FIELDS.union(configured)
+
+
 def generate_context_prompt(data: dict, question_config: str | None = None) -> str:
     """
     Build a text prompt from form answers.
     This prompt is used to drive context generation.
     """
     questions = load_questions(question_config)
+    security_context = build_context_security_context(data)
 
-    lines = ["This is the context obtained from the questions asked:"]
+    lines = [
+        "You are Context Agent for an information-security policy workflow.",
+        "Your task is to transform the user's company answers into a detailed, concrete, security-focused company context.",
+        "Do not draft the final policy. Produce a refined context that downstream Policy Agent and RAG retrieval can use.",
+        "",
+        "Security context analysis:",
+        f"- Version: {security_context['version']}",
+        f"- Sector: {security_context['profile']['sector'] or 'unknown'}",
+        f"- Activity: {security_context['profile']['activity'] or 'unknown'}",
+        f"- Countries: {_format_list(security_context['profile']['operating_countries'])}",
+        f"- Region: {security_context['profile']['region'] or 'unknown'}",
+        f"- Important assets: {_format_list(security_context['information_assets']['important_assets'])}",
+        f"- Critical assets: {_format_list(security_context['information_assets']['critical_assets'])}",
+        f"- Data categories: {_format_list(security_context['information_assets']['data_categories'])}",
+        f"- Third-party dependencies: {_format_list(security_context['information_assets']['third_party_dependencies'])}",
+        f"- Cloud/SaaS services: {_format_list(security_context['information_assets']['cloud_services'])}",
+        f"- Current controls: {_format_list(security_context['security_posture']['current_controls'])}",
+        f"- Known gaps: {_format_list(security_context['security_posture']['known_gaps'])}",
+        f"- Regulatory hints: {_format_list(security_context['compliance']['regulatory_hints'])}",
+        f"- Methodologies: {_format_list(security_context['compliance']['methodologies'])}",
+        f"- Policy need: {security_context['policy_intent']['need'] or 'unknown'}",
+        f"- Policy type: {security_context['policy_intent']['policy_type'] or 'unknown'}",
+        f"- Scope: {security_context['policy_intent']['scope'] or 'unknown'}",
+        f"- Audience: {security_context['policy_intent']['audience'] or 'unknown'}",
+        f"- Specificity: {security_context['policy_intent']['specificity'] or 'unknown'}",
+        f"- Missing information: {_format_list(security_context['analysis']['missing_information'])}",
+        f"- Retrieval collection hints: {_format_list(security_context['retrieval_hints']['collection_families'])}",
+        "",
+        "User-provided answers:",
+    ]
     for q in questions:
         key = q["id"]
         answer = data.get(key, "").strip()
         if answer:
             lines.append(f"- {q['question']} {answer}")
     lines.append(
-        "This context will be used by other agents to generate policies, security frameworks or specific validations."
+        "Output requirements: write a concise but complete business and information-security context; identify the security domains, relevant assets, data categories, regulatory exposure, assumptions, missing information, and the concrete policy objective."
     )
     return "\n".join(lines)
+
+
+def _format_list(values: list[str]) -> str:
+    return ", ".join(values) if values else "unknown"
+
+
+def build_context_security_context(context_data: dict, *, additional_need: str | None = None) -> dict:
+    """Build the persisted security_context from Context Agent-owned fields."""
+    answers = {
+        field: str(context_data.get(field, "") or "").strip()
+        for field in CONTEXT_ANSWER_FIELDS
+    }
+    if additional_need and additional_need.strip():
+        current_need = answers.get("need", "")
+        answers["need"] = "\n".join(
+            part for part in (current_need, additional_need.strip()) if part
+        )
+    return build_security_context_from_answers(
+        answers,
+        language=str(context_data.get("language", "en") or "en"),
+    )
+
+
+def public_security_context_payload(context_id: str, context: dict) -> dict:
+    """Return a bounded public payload for a context's structured security context."""
+    security_context = context.get("security_context")
+    if not isinstance(security_context, dict):
+        security_context = build_context_security_context(context)
+    return {
+        "success": True,
+        "context_id": context_id,
+        "security_context_version": context.get(
+            "security_context_version",
+            SECURITY_CONTEXT_VERSION,
+        ),
+        "security_context": security_context,
+    }
+
+
+def business_context_from_context_record(context: dict) -> dict:
+    """Return the downstream shallow business_context for Policy Agent."""
+    security_context = context.get("security_context")
+    if not isinstance(security_context, dict):
+        security_context = build_context_security_context(context)
+    return security_context_to_business_context(security_context)
 
 
 def run_with_agent(prompt: str, context_id: str = None, model_version: str = None) -> str:
@@ -552,6 +666,7 @@ def get_context_and_prompt(context_id: str) -> dict:
         "refined_prompt": refined_prompt,
         "language": context.get("language", "en"),
         "model_version": str(context.get("version", "0.1.0")),
+        "business_context": business_context_from_context_record(context),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "correlation_id": correlation_id,
     }
