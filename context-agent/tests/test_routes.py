@@ -433,6 +433,10 @@ def test_context_detail_renders_context_intelligence_plan(client, monkeypatch):
     response = client.get(f"/context/{context_id}")
 
     assert response.status_code == 200
+    assert b"Context workflow" in response.data
+    assert b"Planning" in response.data
+    assert b"Next action:" in response.data
+    assert b"Approve the context intelligence plan." in response.data
     assert b"Context intelligence plan" in response.data
     assert b"Awaiting validation" in response.data
     assert b"Company profile and operating model" in response.data
@@ -1420,6 +1424,25 @@ def _insert_context_executed_for_final_synthesis(context_id):
             ],
         },
     })
+
+
+def test_context_detail_phase_navigation_shows_policy_ready_next_action(client, monkeypatch):
+    context_id = str(ObjectId())
+    _insert_policy_ready_context(context_id)
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
+
+    response = client.get(f"/context/{context_id}")
+
+    assert response.status_code == 200
+    assert b"Context workflow" in response.data
+    assert b"Context status: <span class=\"font-semibold\">context_ready_for_policy</span>" in response.data
+    assert b"Policy process: <span class=\"font-semibold\">not_started</span>" in response.data
+    assert b"Context generation" in response.data
+    assert b"Generate and validate the policy." in response.data
 
 
 def test_trigger_policy_generation_redirects_after_starting_job(client, monkeypatch):

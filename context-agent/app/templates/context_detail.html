@@ -4,6 +4,79 @@
 <div class="max-w-4xl mx-auto mt-6">
   <h1 class="text-2xl font-bold mb-4">Context detail</h1>
 
+  {% set pipeline_job = latest_pipeline_job %}
+  {% set pipeline_active = pipeline_job and pipeline_job.status in ['queued', 'running', 'policy_generating', 'policy_generated', 'validating'] %}
+  {% set runtime_ready = system_status and system_status.status == 'ready' %}
+  {% set context_building_ready = not context.context_building or context.context_building.status != 'needs_information' %}
+  {% set context_plan_ready = context.context_intelligence_plan and context.context_intelligence_plan.status == 'approved' %}
+  {% set context_execution_ready = context.context_task_results and context.context_task_results.status == 'completed' %}
+  {% set final_context_ready = context.final_context and context.final_context.context_ready_for_policy and context.refined_prompt %}
+  {% set security_context_ready = context.security_context and not context.security_context.analysis.missing_information %}
+  <div id="phase-navigation-panel" class="bg-white rounded-lg shadow p-4 mb-6" data-context-phase-navigation>
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h2 class="text-xl font-semibold mb-1">Context workflow</h2>
+        <div class="text-sm text-gray-700">
+          Context status: <span class="font-semibold">{{ context.status or 'not_started' }}</span>
+        </div>
+        <div class="mt-1 text-sm text-gray-700">
+          Policy process: <span class="font-semibold">{{ pipeline_job.status if pipeline_job else 'not_started' }}</span>
+        </div>
+      </div>
+      <div class="text-xs text-gray-500">
+        Runtime: {{ system_status.status if system_status else 'unknown' }}
+      </div>
+    </div>
+
+    <div class="mt-4 grid gap-2 md:grid-cols-4">
+      <a href="#context-building-panel"
+        class="rounded border p-3 text-sm {% if context_building_ready %}border-green-300 bg-green-50 text-green-950{% else %}border-amber-300 bg-amber-50 text-amber-950{% endif %}">
+        <div class="font-semibold">Context building</div>
+        <div class="mt-1 text-xs">{{ context.context_building.status if context.context_building else 'not_started' }}</div>
+      </a>
+      <a href="#context-intelligence-plan-panel"
+        class="rounded border p-3 text-sm {% if context_plan_ready %}border-green-300 bg-green-50 text-green-950{% elif context.context_intelligence_plan %}border-amber-300 bg-amber-50 text-amber-950{% else %}border-gray-200 bg-gray-50 text-gray-700{% endif %}">
+        <div class="font-semibold">Planning</div>
+        <div class="mt-1 text-xs">{{ context.context_intelligence_plan.status if context.context_intelligence_plan else 'not_started' }}</div>
+      </a>
+      <a href="#final-context-panel"
+        class="rounded border p-3 text-sm {% if final_context_ready %}border-green-300 bg-green-50 text-green-950{% elif context_execution_ready %}border-amber-300 bg-amber-50 text-amber-950{% else %}border-gray-200 bg-gray-50 text-gray-700{% endif %}">
+        <div class="font-semibold">Context generation</div>
+        <div class="mt-1 text-xs">{{ context.final_context.status if context.final_context else context.context_task_results.status if context.context_task_results else 'not_started' }}</div>
+      </a>
+      <a href="#system-readiness-panel"
+        class="rounded border p-3 text-sm {% if final_context_ready and runtime_ready and not pipeline_active %}border-green-300 bg-green-50 text-green-950{% elif pipeline_active %}border-blue-300 bg-blue-50 text-blue-950{% else %}border-gray-200 bg-gray-50 text-gray-700{% endif %}">
+        <div class="font-semibold">Policy generation</div>
+        <div class="mt-1 text-xs">{{ pipeline_job.current_stage if pipeline_job else 'not_started' }}</div>
+      </a>
+    </div>
+
+    <div class="mt-4 rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950">
+      <span class="font-semibold">Next action:</span>
+      {% if not context_building_ready %}
+        Answer context-building questions.
+      {% elif not context.context_intelligence_plan %}
+        Create or review the context intelligence plan.
+      {% elif not context_plan_ready %}
+        Approve the context intelligence plan.
+      {% elif not context_execution_ready %}
+        Execute the approved context plan.
+      {% elif context.final_context and context.final_context.status == 'needs_improvement' %}
+        Regenerate marked final-context sections.
+      {% elif not final_context_ready %}
+        Synthesize the final context.
+      {% elif not security_context_ready %}
+        Complete the security context.
+      {% elif pipeline_active %}
+        Wait for the policy process to finish.
+      {% elif not runtime_ready %}
+        Update runtime state.
+      {% else %}
+        Generate and validate the policy.
+      {% endif %}
+    </div>
+  </div>
+
   <div class="bg-white rounded-lg shadow p-4 mb-6">
     <h2 class="text-xl font-semibold mb-2">Conversation</h2>
     <div class="space-y-4">
@@ -327,7 +400,6 @@
 
   <div id="system-readiness-panel" class="bg-white rounded-lg shadow p-4 mt-6">
     <h2 class="text-xl font-semibold mb-2">Generate policies</h2>
-    {% set runtime_ready = system_status and system_status.status == 'ready' %}
     {% if not runtime_ready %}
       <div class="mb-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
         <div class="font-semibold">Application runtime is not ready</div>
@@ -379,12 +451,6 @@
         </div>
       </div>
     {% endif %}
-    {% set pipeline_job = latest_pipeline_job %}
-    {% set pipeline_active = pipeline_job and pipeline_job.status in ['queued', 'running', 'policy_generating', 'policy_generated', 'validating'] %}
-    {% set context_building_ready = not context.context_building or context.context_building.status != 'needs_information' %}
-    {% set context_plan_ready = context.context_intelligence_plan and context.context_intelligence_plan.status == 'approved' %}
-    {% set security_context_ready = context.security_context and not context.security_context.analysis.missing_information %}
-    {% set final_context_ready = context.final_context and context.final_context.context_ready_for_policy and context.refined_prompt %}
     {% set can_generate_policy = runtime_ready and not pipeline_active and context_building_ready and context_plan_ready and security_context_ready and final_context_ready %}
     <div id="pipeline-job-panel"
       class="mb-4 rounded border border-blue-300 bg-blue-50 p-3 text-sm text-blue-950"
