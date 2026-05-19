@@ -394,6 +394,49 @@ def test_context_building_answers_can_complete_context(client):
     assert context["context_intelligence_plan"]["context_snapshot"]["sector"] == "Healthcare"
 
 
+def test_context_building_question_can_be_deferred(client):
+    context_id = ObjectId()
+    security_context = routes_module.build_context_security_context({
+        "country": "Spain",
+        "need": "Build a security plan",
+    })
+    context_building = routes_module.build_context_building_state(
+        {"country": "Spain", "need": "Build a security plan"},
+        security_context=security_context,
+    )
+    routes_module.mongo.db.contexts.insert_one({
+        "_id": context_id,
+        "country": "Spain",
+        "need": "Build a security plan",
+        "status": "context_building_needs_input",
+        "security_context": security_context,
+        "context_building": context_building,
+    })
+
+    response = client.post(
+        f"/context/{context_id}/context-building/questions/defer",
+        json={
+            "question_id": "context_building_profile_sector",
+            "reason": "Waiting for the CIO.",
+        },
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert payload["deferred_question"]["status"] == "deferred"
+    context = routes_module.mongo.db.contexts.find_one({"_id": context_id})
+    assert context["status"] == "context_building_needs_input"
+    assert context["context_building"]["status"] == "needs_information"
+    question = next(
+        item
+        for item in context["context_building"]["questions"]
+        if item["id"] == "context_building_profile_sector"
+    )
+    assert question["deferred_reason"] == "Waiting for the CIO."
+
+
 def test_context_detail_renders_context_intelligence_plan(client, monkeypatch):
     context_id = ObjectId()
     monkeypatch.setattr(
@@ -951,6 +994,85 @@ def test_context_detail_renders_security_context_missing_information(client, mon
     assert b"Needs more information" in response.data
     assert b"Missing information" in response.data
     assert b"profile.sector" in response.data
+
+
+def test_context_detail_renders_context_building_questions_and_deferred_state(client, monkeypatch):
+    context_id = ObjectId()
+    security_context = routes_module.build_context_security_context({
+        "country": "Spain",
+        "need": "Build a security plan",
+    })
+    context_building = routes_module.build_context_building_state(
+        {"country": "Spain", "need": "Build a security plan"},
+        security_context=security_context,
+    )
+    context_building["questions"][0]["status"] = "deferred"
+    context_building["questions"][0]["deferred_reason"] = "Waiting for the CIO."
+    monkeypatch.setattr(
+        routes_module.mongo,
+        "db",
+        FakeDB(
+            contexts=[
+                {
+                    "_id": context_id,
+                    "country": "Spain",
+                    "need": "Build a security plan",
+                    "status": "context_building_needs_input",
+                    "security_context": security_context,
+                    "context_building": context_building,
+                }
+            ],
+            interactions=[],
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
+
+    response = client.get(f"/context/{context_id}")
+
+    assert response.status_code == 200
+    assert b"Sufficiency" in response.data
+    assert b"Missing fields" in response.data
+    assert b"Deferred: Waiting for the CIO." in response.data
+    assert b"Defer question" in response.data
+    assert b"Add security context" in response.data
+
+
+def test_context_detail_renders_context_building_fixture_bypass(client, monkeypatch):
+    context_id = ObjectId()
+    monkeypatch.setattr(
+        routes_module.mongo,
+        "db",
+        FakeDB(
+            contexts=[
+                {
+                    "_id": context_id,
+                    "status": "awaiting_task_validation",
+                    "context_building": routes_module.build_context_building_state(
+                        {},
+                        bypassed=True,
+                    ),
+                }
+            ],
+            interactions=[],
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
+
+    response = client.get(f"/context/{context_id}")
+
+    assert response.status_code == 200
+    assert b"Fixture bypass" in response.data
+    assert b"enabled" in response.data
 
 
 def test_context_detail_renders_security_context_absent_state(client, monkeypatch):

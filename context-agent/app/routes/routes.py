@@ -19,6 +19,7 @@ from app.services.logic import (
     build_context_security_context,
     build_context_intelligence_plan,
     context_plan_revision,
+    defer_context_building_question,
     context_answer_fields,
     get_health_status,
     get_system_status,
@@ -539,6 +540,44 @@ def answer_context_building_questions(context_id):
             })
 
     flash("Context building answers saved and security context updated.", "success")
+    return redirect(url_for("main.context_detail", context_id=context_id))
+
+
+@main.route("/context/<context_id>/context-building/questions/defer", methods=["POST"])
+def defer_context_building_question_route(context_id):
+    """Defer a CONTEXT BUILDING question while keeping planning blocked."""
+    context_obj_id = ObjectId(context_id)
+    context = mongo.db.contexts.find_one({"_id": context_obj_id})
+    if not context:
+        return abort(404, "Context not found.")
+
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+        question_id = payload.get("question_id")
+        reason = payload.get("reason")
+    else:
+        question_id = request.form.get("question_id")
+        reason = request.form.get("reason")
+
+    result = defer_context_building_question(context, str(question_id or ""), reason)
+    if not result.get("success"):
+        if _wants_json_response():
+            return jsonify(result), result.get("status_code", 400)
+        flash(result.get("message", "Context-building question could not be deferred."), "warning")
+        return redirect(url_for("main.context_detail", context_id=context_id))
+
+    mongo.db.contexts.update_one(
+        {"_id": context_obj_id},
+        {
+            "$set": {
+                "status": result["status"],
+                "context_building": result["context_building"],
+            }
+        },
+    )
+    if _wants_json_response():
+        return jsonify(result), 200
+    flash("Context-building question deferred. Planning remains blocked until required context is complete.", "info")
     return redirect(url_for("main.context_detail", context_id=context_id))
 
 

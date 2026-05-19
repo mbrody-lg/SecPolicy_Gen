@@ -584,6 +584,49 @@ def apply_context_building_answers(context: dict, submitted_answers: dict[str, s
     }
 
 
+def defer_context_building_question(context: dict, question_id: str, reason: str | None = None) -> dict:
+    """Mark a CONTEXT BUILDING question as deferred without unlocking planning."""
+    context_building = context.get("context_building") or build_context_building_state(context)
+    questions = context_building.get("questions", [])
+    if not isinstance(questions, list):
+        questions = []
+
+    now = datetime.now(timezone.utc).isoformat()
+    updated_questions = []
+    deferred = None
+    for question in questions:
+        if str(question.get("id", "")) != str(question_id):
+            updated_questions.append(question)
+            continue
+        deferred = dict(question)
+        deferred["status"] = "deferred"
+        deferred["deferred_at"] = now
+        deferred["deferred_reason"] = str(reason or "").strip() or None
+        updated_questions.append(deferred)
+
+    if not deferred:
+        return {
+            "success": False,
+            "error_type": "validation_error",
+            "error_code": "context_building_question_not_found",
+            "message": "Context-building question not found.",
+            "status_code": 404,
+        }
+
+    updated_building = {
+        **context_building,
+        "status": "needs_information",
+        "questions": updated_questions,
+        "updated_at": now,
+    }
+    return {
+        "success": True,
+        "context_building": updated_building,
+        "status": "context_building_needs_input",
+        "deferred_question": deferred,
+    }
+
+
 def _context_building_question(field_path: str, existing: dict | None = None) -> dict | None:
     definition = CONTEXT_BUILDING_QUESTION_MAP.get(field_path)
     if not definition:
@@ -602,7 +645,7 @@ def _context_building_question(field_path: str, existing: dict | None = None) ->
     if existing:
         question.update({
             key: existing[key]
-            for key in ("status", "answer", "answered_at")
+            for key in ("status", "answer", "answered_at", "deferred_at", "deferred_reason")
             if key in existing
         })
     if question.get("answer") and question.get("status") == "pending":
