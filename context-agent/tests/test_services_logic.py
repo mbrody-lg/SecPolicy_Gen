@@ -702,6 +702,101 @@ def test_synthesize_final_context_rejects_plan_revision_mismatch(monkeypatch):
     assert "final_context" not in fake_db.contexts.docs[0]
 
 
+def test_mark_final_context_section_for_improvement_blocks_policy_handoff(monkeypatch):
+    context_id = ObjectId()
+    context = {
+        "_id": context_id,
+        "status": "context_ready_for_policy",
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "data_categories": "health_data",
+        "need": "Build a security plan",
+        "security_context": logic.build_context_security_context({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "data_categories": "health_data",
+            "need": "Build a security plan",
+        }),
+        "context_intelligence_plan": _approved_context_plan(),
+        "context_task_results": _completed_context_task_results(),
+    }
+    context["final_context"] = logic.build_final_context(
+        context,
+        security_context=context["security_context"],
+        plan_revision=logic.context_plan_revision(context["context_intelligence_plan"]),
+    )
+    context["refined_prompt"] = logic.render_final_context_prompt(context["final_context"])
+    fake_db = FakeDB(contexts=[context], interactions=[])
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    result = logic.mark_final_context_sections_for_improvement(
+        str(context_id),
+        {"security_scope": "Clarify third-party laboratory dependencies."},
+    )
+
+    updated_context = fake_db.contexts.docs[0]
+    assert result["success"] is True
+    assert updated_context["status"] == "final_context_needs_improvement"
+    assert updated_context["final_context"]["context_ready_for_policy"] is False
+    assert updated_context["final_context"]["sections"]["security_scope"]["status"] == "needs_improvement"
+    with pytest.raises(logic.PipelineStepError) as exc_info:
+        logic.get_context_and_prompt(str(context_id))
+    assert exc_info.value.error_code == "context_not_ready_for_policy"
+
+
+def test_regenerate_final_context_sections_restores_policy_handoff_and_records_lesson(monkeypatch):
+    context_id = ObjectId()
+    context = {
+        "_id": context_id,
+        "status": "context_ready_for_policy",
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "data_categories": "health_data",
+        "need": "Build a security plan",
+        "security_context": logic.build_context_security_context({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "data_categories": "health_data",
+            "need": "Build a security plan",
+        }),
+        "context_intelligence_plan": _approved_context_plan(),
+        "context_task_results": _completed_context_task_results(),
+    }
+    context["final_context"] = logic.build_final_context(
+        context,
+        security_context=context["security_context"],
+        plan_revision=logic.context_plan_revision(context["context_intelligence_plan"]),
+    )
+    context["refined_prompt"] = logic.render_final_context_prompt(context["final_context"])
+    fake_db = FakeDB(contexts=[context], interactions=[])
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+    logic.mark_final_context_sections_for_improvement(
+        str(context_id),
+        {"security_scope": "Clarify third-party laboratory dependencies."},
+    )
+
+    result = logic.regenerate_final_context_sections(str(context_id))
+
+    updated_context = fake_db.contexts.docs[0]
+    assert result["success"] is True
+    assert result["regenerated_sections"] == ["security_scope"]
+    assert updated_context["status"] == "context_ready_for_policy"
+    assert updated_context["final_context"]["context_ready_for_policy"] is True
+    assert "third-party laboratory" in updated_context["refined_prompt"]
+    assert updated_context["context_lessons"][0]["status"] == "pending_review"
+    assert updated_context["context_lessons"][0]["section_id"] == "security_scope"
+
+    updated_context["context_lessons"][0]["status"] = "approved_for_export"
+    export = logic.export_context_lessons(str(context_id))
+    assert export["success"] is True
+    assert export["count"] == 1
+    assert export["lessons"][0]["lesson_id"] == "lesson-1"
+
+
 def test_public_security_context_payload_builds_context_for_legacy_records():
     payload = logic.public_security_context_payload(
         "context-1",

@@ -1038,6 +1038,241 @@ def render_final_context_prompt(final_context: dict) -> str:
     return "\n".join(lines).strip()
 
 
+def mark_final_context_sections_for_improvement(context_id: str, comments_by_section: dict) -> dict:
+    """Mark final-context sections as needing user-requested improvement."""
+    if not isinstance(comments_by_section, dict):
+        comments_by_section = {}
+    context_obj_id = ObjectId(context_id)
+    context = mongo.db.contexts.find_one({"_id": context_obj_id})
+    if not context:
+        return _final_context_error("context_not_found", "Context not found.", status_code=404)
+
+    final_context = context.get("final_context")
+    sections = final_context.get("sections") if isinstance(final_context, dict) else None
+    if not isinstance(sections, dict):
+        return _final_context_error(
+            "final_context_not_ready",
+            "Synthesize the final context before marking improvements.",
+            status_code=409,
+        )
+
+    marked_sections = []
+    now = datetime.now(timezone.utc).isoformat()
+    for section_id, comment in (comments_by_section or {}).items():
+        comment_text = str(comment or "").strip()
+        if not comment_text or section_id not in sections:
+            continue
+        section = dict(sections[section_id])
+        section["status"] = "needs_improvement"
+        section.setdefault("comments", [])
+        section["comments"].append({
+            "comment": comment_text,
+            "created_at": now,
+            "source": "user_review",
+        })
+        sections[section_id] = section
+        marked_sections.append(section_id)
+
+    if not marked_sections:
+        return _final_context_error(
+            "final_context_section_comment_required",
+            "Select a final-context section and provide an improvement comment.",
+            status_code=400,
+        )
+
+    updated_final_context = {
+        **final_context,
+        "status": "needs_improvement",
+        "context_ready_for_policy": False,
+        "sections": sections,
+        "updated_at": now,
+    }
+    mongo.db.contexts.update_one(
+        {"_id": context_obj_id},
+        {
+            "$set": {
+                "status": "final_context_needs_improvement",
+                "final_context": updated_final_context,
+            }
+        },
+    )
+    return {
+        "success": True,
+        "stage": "final_context_section_review",
+        "context_id": context_id,
+        "marked_sections": marked_sections,
+        "final_context": updated_final_context,
+    }
+
+
+def regenerate_final_context_sections(context_id: str) -> dict:
+    """Regenerate sections marked for improvement and create lesson candidates."""
+    context_obj_id = ObjectId(context_id)
+    context = mongo.db.contexts.find_one({"_id": context_obj_id})
+    if not context:
+        return _final_context_error("context_not_found", "Context not found.", status_code=404)
+
+    final_context = context.get("final_context")
+    sections = final_context.get("sections") if isinstance(final_context, dict) else None
+    if not isinstance(sections, dict):
+        return _final_context_error(
+            "final_context_not_ready",
+            "Synthesize the final context before regenerating sections.",
+            status_code=409,
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+    regenerated_sections = []
+    lesson_candidates = []
+    existing_lessons = list(context.get("context_lessons") or [])
+    for section_id, section in list(sections.items()):
+        if not isinstance(section, dict) or section.get("status") != "needs_improvement":
+            continue
+        comments = [
+            str(item.get("comment") or "").strip()
+            for item in section.get("comments", [])
+            if isinstance(item, dict) and str(item.get("comment") or "").strip()
+        ]
+        comment_summary = " ".join(comments)
+        regenerated_content = _regenerate_final_context_section_content(
+            section_id,
+            section,
+            context,
+            comment_summary,
+        )
+        updated_section = {
+            **section,
+            "status": "accepted",
+            "content": regenerated_content,
+            "regenerated_at": now,
+            "regeneration_source": "user_review",
+        }
+        sections[section_id] = updated_section
+        regenerated_sections.append(section_id)
+        lesson_candidates.append(
+            _build_context_lesson_candidate(
+                context,
+                section_id,
+                comment_summary,
+                regenerated_content,
+                len(existing_lessons) + len(lesson_candidates) + 1,
+                now,
+            )
+        )
+
+    if not regenerated_sections:
+        return _final_context_error(
+            "final_context_sections_not_marked",
+            "No final-context sections are marked for improvement.",
+            status_code=409,
+        )
+
+    updated_final_context = {
+        **final_context,
+        "status": "ready",
+        "context_ready_for_policy": True,
+        "sections": sections,
+        "updated_at": now,
+    }
+    refined_prompt = render_final_context_prompt(updated_final_context)
+    mongo.db.contexts.update_one(
+        {"_id": context_obj_id},
+        {
+            "$set": {
+                "status": "context_ready_for_policy",
+                "final_context": updated_final_context,
+                "refined_prompt": refined_prompt,
+                "context_lessons": existing_lessons + lesson_candidates,
+            }
+        },
+    )
+    return {
+        "success": True,
+        "stage": "final_context_section_regeneration",
+        "context_id": context_id,
+        "regenerated_sections": regenerated_sections,
+        "lesson_candidates": lesson_candidates,
+        "final_context": updated_final_context,
+        "refined_prompt": refined_prompt,
+    }
+
+
+def export_context_lessons(context_id: str) -> dict:
+    """Return reviewed context lessons ready for explicit RAG ingestion."""
+    context_obj_id = ObjectId(context_id)
+    context = mongo.db.contexts.find_one({"_id": context_obj_id})
+    if not context:
+        return _final_context_error("context_not_found", "Context not found.", status_code=404)
+
+    lessons = [
+        lesson
+        for lesson in context.get("context_lessons", [])
+        if isinstance(lesson, dict) and lesson.get("status") == "approved_for_export"
+    ]
+    return {
+        "success": True,
+        "stage": "context_lessons_export",
+        "context_id": context_id,
+        "lessons": lessons,
+        "count": len(lessons),
+    }
+
+
+def _regenerate_final_context_section_content(
+    section_id: str,
+    section: dict,
+    context: dict,
+    comment_summary: str,
+) -> str:
+    base_content = str(section.get("content") or "").strip()
+    plan = context.get("context_intelligence_plan") or {}
+    plan_revision = context_plan_revision(plan) or {}
+    task_titles = [
+        str(task.get("title") or "").strip()
+        for task in plan_revision.get("tasks", [])
+        if isinstance(task, dict) and task.get("title")
+    ]
+    lines = [base_content] if base_content else [section_id.replace("_", " ").title()]
+    if comment_summary:
+        lines.append(f"User review addressed: {comment_summary}")
+    if task_titles:
+        lines.append(f"Approved planning basis: {', '.join(task_titles)}.")
+    return "\n\n".join(lines).strip()
+
+
+def _build_context_lesson_candidate(
+    context: dict,
+    section_id: str,
+    comment_summary: str,
+    regenerated_content: str,
+    sequence: int,
+    created_at: str,
+) -> dict:
+    security_context = context.get("security_context") or build_context_security_context(context)
+    profile = security_context.get("profile", {})
+    return {
+        "lesson_id": f"lesson-{sequence}",
+        "status": "pending_review",
+        "source": "final_context_section_improvement",
+        "section_id": section_id,
+        "created_at": created_at,
+        "statement": (
+            f"Review feedback for {section_id.replace('_', ' ')} should be considered "
+            f"when building similar company security contexts."
+        ),
+        "review_comment": comment_summary,
+        "applicability": {
+            "sector": profile.get("sector"),
+            "countries": profile.get("operating_countries", []),
+            "plan_revision_id": (context.get("final_context") or {}).get("plan_revision_id"),
+            "final_context_version": (context.get("final_context") or {}).get("version"),
+        },
+        "evidence": {
+            "section_content": regenerated_content,
+        },
+    }
+
+
 def _final_context_company_profile(security_context: dict) -> str:
     profile = security_context["profile"]
     return (

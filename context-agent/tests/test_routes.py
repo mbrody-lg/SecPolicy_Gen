@@ -1380,6 +1380,48 @@ def _insert_policy_ready_context(context_id):
     })
 
 
+def _insert_context_executed_for_final_synthesis(context_id):
+    security_context = routes_module.build_context_security_context({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "data_categories": "health_data",
+        "need": "Build a security plan",
+    })
+    routes_module.mongo.db.contexts.insert_one({
+        "_id": ObjectId(context_id),
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "data_categories": "health_data",
+        "need": "Build a security plan",
+        "status": "context_plan_executed",
+        "security_context": security_context,
+        "context_building": {"status": "sufficient"},
+        "context_intelligence_plan": routes_module.approve_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "data_categories": "health_data",
+            "need": "Build a security plan",
+        }),
+        "context_task_results": {
+            "version": "1.0",
+            "status": "completed",
+            "plan_revision_id": "plan-rev-1",
+            "context_snapshot_hash": "hash-1",
+            "tasks": [
+                {
+                    "task_id": "information_assets",
+                    "title": "Information assets",
+                    "status": "completed",
+                    "result": "Patient records are the primary asset.",
+                }
+            ],
+        },
+    })
+
+
 def test_trigger_policy_generation_redirects_after_starting_job(client, monkeypatch):
     context_id = str(ObjectId())
     _insert_policy_ready_context(context_id)
@@ -1581,45 +1623,7 @@ def test_trigger_policy_generation_blocks_before_final_context_json(client, monk
 
 def test_trigger_final_context_synthesis_persists_policy_ready_context_json(client):
     context_id = str(ObjectId())
-    security_context = routes_module.build_context_security_context({
-        "country": "Spain",
-        "sector": "Healthcare",
-        "critical_assets": "Patient records",
-        "data_categories": "health_data",
-        "need": "Build a security plan",
-    })
-    routes_module.mongo.db.contexts.insert_one({
-        "_id": ObjectId(context_id),
-        "country": "Spain",
-        "sector": "Healthcare",
-        "critical_assets": "Patient records",
-        "data_categories": "health_data",
-        "need": "Build a security plan",
-        "status": "context_plan_executed",
-        "security_context": security_context,
-        "context_building": {"status": "sufficient"},
-        "context_intelligence_plan": routes_module.approve_context_intelligence_plan({
-            "country": "Spain",
-            "sector": "Healthcare",
-            "critical_assets": "Patient records",
-            "data_categories": "health_data",
-            "need": "Build a security plan",
-        }),
-        "context_task_results": {
-            "version": "1.0",
-            "status": "completed",
-            "plan_revision_id": "plan-rev-1",
-            "context_snapshot_hash": "hash-1",
-            "tasks": [
-                {
-                    "task_id": "information_assets",
-                    "title": "Information assets",
-                    "status": "completed",
-                    "result": "Patient records are the primary asset.",
-                }
-            ],
-        },
-    })
+    _insert_context_executed_for_final_synthesis(context_id)
 
     response = client.post(
         f"/context/{context_id}/final-context/synthesize",
@@ -1633,6 +1637,80 @@ def test_trigger_final_context_synthesis_persists_policy_ready_context_json(clie
     context = routes_module.mongo.db.contexts.find_one({"_id": ObjectId(context_id)})
     assert context["status"] == "context_ready_for_policy"
     assert "Patient records" in context["refined_prompt"]
+
+
+def test_mark_final_context_section_for_improvement_json(client):
+    context_id = str(ObjectId())
+    _insert_context_executed_for_final_synthesis(context_id)
+    client.post(
+        f"/context/{context_id}/final-context/synthesize",
+        headers={"Accept": "application/json"},
+    )
+
+    response = client.post(
+        f"/context/{context_id}/final-context/sections/improve",
+        json={"comments": {"security_scope": "Clarify third-party laboratory dependencies."}},
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert payload["marked_sections"] == ["security_scope"]
+    context = routes_module.mongo.db.contexts.find_one({"_id": ObjectId(context_id)})
+    assert context["status"] == "final_context_needs_improvement"
+    assert context["final_context"]["context_ready_for_policy"] is False
+    assert context["final_context"]["sections"]["security_scope"]["status"] == "needs_improvement"
+
+
+def test_regenerate_final_context_sections_records_lesson_candidate_json(client):
+    context_id = str(ObjectId())
+    _insert_context_executed_for_final_synthesis(context_id)
+    client.post(
+        f"/context/{context_id}/final-context/synthesize",
+        headers={"Accept": "application/json"},
+    )
+    client.post(
+        f"/context/{context_id}/final-context/sections/improve",
+        json={"comments": {"security_scope": "Clarify third-party laboratory dependencies."}},
+        headers={"Accept": "application/json"},
+    )
+
+    response = client.post(
+        f"/context/{context_id}/final-context/sections/regenerate",
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert payload["regenerated_sections"] == ["security_scope"]
+    context = routes_module.mongo.db.contexts.find_one({"_id": ObjectId(context_id)})
+    assert context["status"] == "context_ready_for_policy"
+    assert "third-party laboratory" in context["refined_prompt"]
+    assert context["context_lessons"][0]["status"] == "pending_review"
+
+
+def test_export_context_lessons_returns_only_approved_lessons_json(client):
+    context_id = str(ObjectId())
+    routes_module.mongo.db.contexts.insert_one({
+        "_id": ObjectId(context_id),
+        "context_lessons": [
+            {"lesson_id": "lesson-1", "status": "pending_review"},
+            {"lesson_id": "lesson-2", "status": "approved_for_export"},
+        ],
+    })
+
+    response = client.get(
+        f"/context/{context_id}/context-lessons/export",
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert payload["count"] == 1
+    assert payload["lessons"][0]["lesson_id"] == "lesson-2"
 
 
 def test_trigger_policy_generation_blocks_unapproved_context_plan_json(client, monkeypatch):

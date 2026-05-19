@@ -27,6 +27,9 @@ from app.services.logic import (
     public_security_context_payload,
     refresh_system_state,
     generate_context_plan_prompt,
+    export_context_lessons,
+    mark_final_context_sections_for_improvement,
+    regenerate_final_context_sections,
     run_with_agent,
     load_questions,
     render_markdown,
@@ -752,6 +755,46 @@ def trigger_final_context_synthesis(context_id):
     else:
         flash(result.get("message", "Final context synthesis failed."), "warning")
     return redirect(url_for("main.context_detail", context_id=context_id))
+
+
+@main.route("/context/<context_id>/final-context/sections/improve", methods=["POST"])
+def mark_final_context_sections_for_improvement_route(context_id):
+    """Mark one or more final-context sections as needing improvement."""
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+        comments_by_section = payload.get("comments") or payload.get("sections") or {}
+    else:
+        section_id = request.form.get("section_id")
+        comments_by_section = {section_id: request.form.get("comment")} if section_id else {}
+
+    result = mark_final_context_sections_for_improvement(context_id, comments_by_section)
+    if _wants_json_response():
+        return jsonify(result), 200 if result.get("success") else result.get("status_code", 500)
+    if result.get("success"):
+        flash("Final context section marked for improvement.", "success")
+    else:
+        flash(result.get("message", "Final context section review failed."), "warning")
+    return redirect(url_for("main.context_detail", context_id=context_id))
+
+
+@main.route("/context/<context_id>/final-context/sections/regenerate", methods=["POST"])
+def regenerate_final_context_sections_route(context_id):
+    """Regenerate final-context sections marked for improvement."""
+    result = regenerate_final_context_sections(context_id)
+    if _wants_json_response():
+        return jsonify(result), 200 if result.get("success") else result.get("status_code", 500)
+    if result.get("success"):
+        flash("Final context sections regenerated. Policy generation is available again.", "success")
+    else:
+        flash(result.get("message", "Final context section regeneration failed."), "warning")
+    return redirect(url_for("main.context_detail", context_id=context_id))
+
+
+@main.route("/context/<context_id>/context-lessons/export", methods=["GET"])
+def export_context_lessons_route(context_id):
+    """Export reviewed context lessons for explicit future RAG ingestion."""
+    result = export_context_lessons(context_id)
+    return jsonify(result), 200 if result.get("success") else result.get("status_code", 500)
 
 
 def _context_plan_execution_blocker(context: dict) -> dict | None:
