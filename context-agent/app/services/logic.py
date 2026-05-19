@@ -1261,6 +1261,52 @@ def export_context_lessons(context_id: str) -> dict:
     }
 
 
+def update_context_lesson_status(context_id: str, lesson_id: str, status: str) -> dict:
+    """Update the review/export status for one embedded context lesson."""
+    if status not in {"pending_review", "approved_for_export"}:
+        return _final_context_error(
+            "context_lesson_status_invalid",
+            "Context lesson status is invalid.",
+            status_code=400,
+        )
+
+    context_obj_id = ObjectId(context_id)
+    context = mongo.db.contexts.find_one({"_id": context_obj_id})
+    if not context:
+        return _final_context_error("context_not_found", "Context not found.", status_code=404)
+
+    lessons = []
+    updated_lesson = None
+    now = datetime.now(timezone.utc).isoformat()
+    for lesson in context.get("context_lessons", []):
+        if not isinstance(lesson, dict):
+            continue
+        candidate = dict(lesson)
+        if candidate.get("lesson_id") == lesson_id:
+            candidate["status"] = status
+            candidate["reviewed_at"] = now
+            updated_lesson = candidate
+        lessons.append(candidate)
+
+    if not updated_lesson:
+        return _final_context_error(
+            "context_lesson_not_found",
+            "Context lesson not found.",
+            status_code=404,
+        )
+
+    mongo.db.contexts.update_one(
+        {"_id": context_obj_id},
+        {"$set": {"context_lessons": lessons}},
+    )
+    return {
+        "success": True,
+        "stage": "context_lesson_review",
+        "context_id": context_id,
+        "lesson": updated_lesson,
+    }
+
+
 def _regenerate_final_context_section_content(
     section_id: str,
     section: dict,

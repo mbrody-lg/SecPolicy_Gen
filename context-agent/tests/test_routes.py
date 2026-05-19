@@ -1872,6 +1872,65 @@ def test_export_context_lessons_returns_only_approved_lessons_json(client):
     assert payload["lessons"][0]["lesson_id"] == "lesson-2"
 
 
+def test_update_context_lesson_status_marks_lesson_exportable_json(client):
+    context_id = str(ObjectId())
+    routes_module.mongo.db.contexts.insert_one({
+        "_id": ObjectId(context_id),
+        "context_lessons": [
+            {"lesson_id": "lesson-1", "status": "pending_review"},
+        ],
+    })
+
+    response = client.post(
+        f"/context/{context_id}/context-lessons/lesson-1/status",
+        json={"status": "approved_for_export"},
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert payload["lesson"]["status"] == "approved_for_export"
+    context = routes_module.mongo.db.contexts.find_one({"_id": ObjectId(context_id)})
+    assert context["context_lessons"][0]["status"] == "approved_for_export"
+
+
+def test_context_detail_renders_final_context_review_and_lessons(client, monkeypatch):
+    context_id = str(ObjectId())
+    _insert_context_executed_for_final_synthesis(context_id)
+    client.post(
+        f"/context/{context_id}/final-context/synthesize",
+        headers={"Accept": "application/json"},
+    )
+    client.post(
+        f"/context/{context_id}/final-context/sections/improve",
+        json={"comments": {"security_scope": "Clarify third-party laboratory dependencies."}},
+        headers={"Accept": "application/json"},
+    )
+    client.post(
+        f"/context/{context_id}/final-context/sections/regenerate",
+        headers={"Accept": "application/json"},
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
+
+    response = client.get(f"/context/{context_id}")
+
+    assert response.status_code == 200
+    assert b"Final context" in response.data
+    assert b"Sections" in response.data
+    assert b"Accepted" in response.data
+    assert b"Needs improvement" in response.data
+    assert b"Context lessons" in response.data
+    assert b"Pending review: 1. Approved for export: 0." in response.data
+    assert b"This lesson will not be exported until approved." in response.data
+    assert b"Approve for export" in response.data
+    assert b"Export approved lessons" in response.data
+
+
 def test_trigger_policy_generation_blocks_unapproved_context_plan_json(client, monkeypatch):
     context_id = str(ObjectId())
     security_context = routes_module.build_context_security_context({

@@ -826,6 +826,38 @@ def test_regenerate_final_context_sections_restores_policy_handoff_and_records_l
     assert export["lessons"][0]["lesson_id"] == "lesson-1"
 
 
+def test_update_context_lesson_status_controls_export_eligibility(monkeypatch):
+    context_id = ObjectId()
+    fake_db = FakeDB(
+        contexts=[
+            {
+                "_id": context_id,
+                "context_lessons": [
+                    {
+                        "lesson_id": "lesson-1",
+                        "status": "pending_review",
+                        "statement": "Review feedback should improve future contexts.",
+                    }
+                ],
+            }
+        ],
+        interactions=[],
+    )
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    result = logic.update_context_lesson_status(
+        str(context_id),
+        "lesson-1",
+        "approved_for_export",
+    )
+
+    assert result["success"] is True
+    assert result["lesson"]["status"] == "approved_for_export"
+    export = logic.export_context_lessons(str(context_id))
+    assert export["count"] == 1
+    assert export["lessons"][0]["lesson_id"] == "lesson-1"
+
+
 def test_public_security_context_payload_builds_context_for_legacy_records():
     payload = logic.public_security_context_payload(
         "context-1",

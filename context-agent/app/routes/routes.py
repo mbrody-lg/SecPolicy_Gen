@@ -36,6 +36,7 @@ from app.services.logic import (
     render_markdown,
     synthesize_final_context,
     store_validated_policy,
+    update_context_lesson_status,
 )
 from app.services.pipeline_jobs import (
     create_pipeline_job,
@@ -834,6 +835,25 @@ def export_context_lessons_route(context_id):
     """Export reviewed context lessons for explicit future RAG ingestion."""
     result = export_context_lessons(context_id)
     return jsonify(result), 200 if result.get("success") else result.get("status_code", 500)
+
+
+@main.route("/context/<context_id>/context-lessons/<lesson_id>/status", methods=["POST"])
+def update_context_lesson_status_route(context_id, lesson_id):
+    """Review one context lesson for explicit future RAG export."""
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+        status = payload.get("status", "pending_review")
+    else:
+        status = request.form.get("status", "pending_review")
+
+    result = update_context_lesson_status(context_id, lesson_id, status)
+    if _wants_json_response():
+        return jsonify(result), 200 if result.get("success") else result.get("status_code", 500)
+    if result.get("success"):
+        flash("Context lesson review status updated.", "success")
+    else:
+        flash(result.get("message", "Context lesson review failed."), "warning")
+    return redirect(url_for("main.context_detail", context_id=context_id))
 
 
 def _context_plan_execution_blocker(context: dict) -> dict | None:

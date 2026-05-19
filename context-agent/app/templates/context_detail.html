@@ -354,6 +354,23 @@
         {% endif %}
       </div>
       {% if context.final_context and context.final_context.sections %}
+        {% set final_sections = context.final_context.sections %}
+        {% set needs_improvement_sections = final_sections.values() | selectattr('status', 'equalto', 'needs_improvement') | list %}
+        {% set accepted_sections = final_sections.values() | selectattr('status', 'equalto', 'accepted') | list %}
+        <div class="mt-4 grid gap-3 md:grid-cols-3">
+          <div class="rounded border border-gray-200 p-3 text-sm">
+            <div class="font-semibold text-gray-900">Sections</div>
+            <div class="mt-1 text-gray-700">{{ final_sections | length }}</div>
+          </div>
+          <div class="rounded border border-gray-200 p-3 text-sm">
+            <div class="font-semibold text-gray-900">Accepted</div>
+            <div class="mt-1 text-gray-700">{{ accepted_sections | length }}</div>
+          </div>
+          <div class="rounded border border-gray-200 p-3 text-sm">
+            <div class="font-semibold text-gray-900">Needs improvement</div>
+            <div class="mt-1 text-gray-700">{{ needs_improvement_sections | length }}</div>
+          </div>
+        </div>
         <div class="mt-4 space-y-3 text-sm text-gray-700">
           {% for section_id, section in context.final_context.sections.items() %}
             <div class="rounded border border-gray-200 p-3">
@@ -386,6 +403,57 @@
               Regenerate marked sections
             </button>
           </form>
+        {% endif %}
+        {% if context.context_lessons %}
+          {% set exportable_lessons = context.context_lessons | selectattr('status', 'equalto', 'approved_for_export') | list %}
+          {% set pending_lessons = context.context_lessons | selectattr('status', 'equalto', 'pending_review') | list %}
+          <div id="context-lessons-panel" class="mt-6 rounded border border-gray-200 p-3">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div class="font-semibold text-gray-900">Context lessons</div>
+                <div class="mt-1 text-sm text-gray-700">
+                  Pending review: {{ pending_lessons | length }}. Approved for export: {{ exportable_lessons | length }}.
+                </div>
+              </div>
+              <a class="text-sm text-blue-700 underline"
+                href="{{ url_for('main.export_context_lessons_route', context_id=context._id) }}">
+                Export approved lessons
+              </a>
+            </div>
+            <div class="mt-3 space-y-3">
+              {% for lesson in context.context_lessons %}
+                <div class="rounded border border-gray-200 bg-gray-50 p-3 text-sm text-gray-800">
+                  <div class="flex flex-wrap items-start justify-between gap-2">
+                    <div class="font-semibold">{{ lesson.statement }}</div>
+                    <div class="text-xs text-gray-500">{{ lesson.status }}</div>
+                  </div>
+                  {% if lesson.review_comment %}
+                    <div class="mt-1 text-xs">Review comment: {{ lesson.review_comment }}</div>
+                  {% endif %}
+                  <div class="mt-2 text-xs">
+                    {% if lesson.status == 'approved_for_export' %}
+                      This lesson will be included in the explicit export payload.
+                    {% else %}
+                      This lesson will not be exported until approved.
+                    {% endif %}
+                  </div>
+                  <form method="post" action="{{ url_for('main.update_context_lesson_status_route', context_id=context._id, lesson_id=lesson.lesson_id) }}" class="mt-2">
+                    {% if lesson.status == 'approved_for_export' %}
+                      <input type="hidden" name="status" value="pending_review">
+                      <button type="submit" class="bg-white border border-gray-400 text-gray-700 px-3 py-1 rounded text-xs hover:bg-gray-50">
+                        Move back to review
+                      </button>
+                    {% else %}
+                      <input type="hidden" name="status" value="approved_for_export">
+                      <button type="submit" class="bg-white border border-blue-600 text-blue-700 px-3 py-1 rounded text-xs hover:bg-blue-50">
+                        Approve for export
+                      </button>
+                    {% endif %}
+                  </form>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
         {% endif %}
       {% else %}
         <form method="post" action="{{ url_for('main.trigger_final_context_synthesis', context_id=context._id) }}" class="mt-4">
