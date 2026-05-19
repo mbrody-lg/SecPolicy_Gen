@@ -61,6 +61,7 @@ CONTEXT_ANSWER_FIELDS = {
 CONTEXT_INTELLIGENCE_PLAN_VERSION = "1.0"
 CONTEXT_BUILDING_VERSION = "1.0"
 CONTEXT_TASK_RESULTS_VERSION = "1.0"
+FINAL_CONTEXT_VERSION = "1.0"
 CONTEXT_BUILDING_QUESTION_MAP = {
     "profile.sector": {
         "answer_field": "sector",
@@ -885,6 +886,202 @@ def _context_plan_execution_error(
     }
 
 
+def synthesize_final_context(context_id: str) -> dict:
+    """Synthesize completed task results into the canonical final context."""
+    context_obj_id = ObjectId(context_id)
+    context = mongo.db.contexts.find_one({"_id": context_obj_id})
+    if not context:
+        return _final_context_error("context_not_found", "Context not found.", status_code=404)
+
+    task_results = context.get("context_task_results")
+    if not isinstance(task_results, dict) or task_results.get("status") != "completed":
+        return _final_context_error(
+            "context_task_results_not_completed",
+            "Execute the approved context plan before final context synthesis.",
+            status_code=409,
+        )
+    plan = context.get("context_intelligence_plan")
+    if not isinstance(plan, dict) or plan.get("status") != "approved":
+        return _final_context_error(
+            "context_plan_not_approved",
+            "Approve the context intelligence plan before final context synthesis.",
+            status_code=409,
+        )
+    plan_revision = context_plan_revision(plan)
+    if not plan_revision:
+        return _final_context_error(
+            "context_plan_revision_not_found",
+            "Approved context plan revision not found.",
+            status_code=409,
+        )
+    if task_results.get("plan_revision_id") != plan_revision.get("revision_id"):
+        return _final_context_error(
+            "context_task_results_revision_mismatch",
+            "Context task results do not match the active approved plan revision.",
+            status_code=409,
+        )
+    security_context = context.get("security_context")
+    if not isinstance(security_context, dict):
+        security_context = build_context_security_context(context)
+    if security_context.get("analysis", {}).get("missing_information"):
+        return _final_context_error(
+            "security_context_not_sufficient",
+            "Complete the security context before final context synthesis.",
+            status_code=409,
+        )
+
+    final_context = build_final_context(
+        context,
+        security_context=security_context,
+        plan_revision=plan_revision,
+    )
+    refined_prompt = render_final_context_prompt(final_context)
+    mongo.db.contexts.update_one(
+        {"_id": context_obj_id},
+        {
+            "$set": {
+                "status": "context_ready_for_policy",
+                "final_context": final_context,
+                "refined_prompt": refined_prompt,
+                "security_context": security_context,
+                "security_context_version": SECURITY_CONTEXT_VERSION,
+            }
+        },
+    )
+    return {
+        "success": True,
+        "stage": "final_context_synthesis",
+        "context_id": context_id,
+        "final_context": final_context,
+        "refined_prompt": refined_prompt,
+    }
+
+
+def build_final_context(
+    context: dict,
+    *,
+    security_context: dict | None = None,
+    plan_revision: dict | None = None,
+) -> dict:
+    """Build a versioned final-context artifact from completed task results."""
+    security_context = security_context or context.get("security_context") or build_context_security_context(context)
+    task_results = context.get("context_task_results") or {}
+    approved_tasks = [
+        {
+            "task_id": task.get("id"),
+            "order": task.get("order"),
+            "title": task.get("title"),
+            "objective": task.get("objective"),
+        }
+        for task in (plan_revision or {}).get("tasks", [])
+        if isinstance(task, dict)
+    ]
+    tasks = [
+        {
+            "task_id": task.get("task_id"),
+            "title": task.get("title"),
+            "status": task.get("status"),
+            "result": str(task.get("result") or "").strip(),
+        }
+        for task in task_results.get("tasks", [])
+        if isinstance(task, dict)
+    ]
+    synthesized_at = datetime.now(timezone.utc).isoformat()
+    return {
+        "version": FINAL_CONTEXT_VERSION,
+        "status": "ready",
+        "context_ready_for_policy": True,
+        "synthesized_at": synthesized_at,
+        "plan_revision_id": task_results.get("plan_revision_id"),
+        "context_snapshot_hash": task_results.get("context_snapshot_hash"),
+        "approved_tasks": approved_tasks,
+        "sections": {
+            "company_profile": {
+                "status": "accepted",
+                "content": _final_context_company_profile(security_context),
+            },
+            "security_scope": {
+                "status": "accepted",
+                "content": _final_context_security_scope(security_context),
+            },
+            "task_findings": {
+                "status": "accepted",
+                "content": "\n\n".join(
+                    f"{task['title']}: {task['result']}"
+                    for task in tasks
+                    if task.get("result")
+                ),
+            },
+            "assumptions_and_missing_information": {
+                "status": "accepted",
+                "content": _final_context_assumptions(security_context),
+            },
+        },
+    }
+
+
+def render_final_context_prompt(final_context: dict) -> str:
+    """Render the canonical prompt consumed by Policy Agent."""
+    sections = final_context.get("sections", {})
+    lines = [
+        "Final company security context for policy generation.",
+        f"Final context version: {final_context.get('version')}",
+        f"Plan revision: {final_context.get('plan_revision_id') or 'unknown'}",
+        "",
+    ]
+    for title, section in sections.items():
+        lines.extend([
+            title.replace("_", " ").title(),
+            str(section.get("content") or "").strip(),
+            "",
+        ])
+    return "\n".join(lines).strip()
+
+
+def _final_context_company_profile(security_context: dict) -> str:
+    profile = security_context["profile"]
+    return (
+        f"Sector: {profile['sector'] or 'unknown'}. "
+        f"Activity: {profile['activity'] or 'unknown'}. "
+        f"Countries: {_format_list(profile['operating_countries'])}. "
+        f"Region: {profile['region'] or 'unknown'}."
+    )
+
+
+def _final_context_security_scope(security_context: dict) -> str:
+    assets = security_context["information_assets"]
+    posture = security_context["security_posture"]
+    intent = security_context["policy_intent"]
+    compliance = security_context["compliance"]
+    return (
+        f"Critical assets: {_format_list(assets['critical_assets'])}. "
+        f"Data categories: {_format_list(assets['data_categories'])}. "
+        f"Third-party dependencies: {_format_list(assets['third_party_dependencies'])}. "
+        f"Known gaps: {_format_list(posture['known_gaps'])}. "
+        f"Regulatory hints: {_format_list(compliance['regulatory_hints'])}. "
+        f"Policy objective: {intent['need'] or 'unknown'}."
+    )
+
+
+def _final_context_assumptions(security_context: dict) -> str:
+    missing = security_context.get("analysis", {}).get("missing_information", [])
+    confidence = security_context.get("analysis", {}).get("confidence", "unknown")
+    if missing:
+        return f"Confidence: {confidence}. Missing information: {_format_list(missing)}."
+    return f"Confidence: {confidence}. No required context-building gaps remain."
+
+
+def _final_context_error(error_code: str, message: str, *, status_code: int) -> dict:
+    return {
+        "success": False,
+        "stage": "final_context_synthesis",
+        "error_type": "workflow_error",
+        "error_code": error_code,
+        "message": message,
+        "status_code": status_code,
+    }
+
+
 def _context_snapshot_hash(context_snapshot: dict) -> str:
     """Return a deterministic hash for approval-time context snapshots."""
     serialized = json.dumps(
@@ -1141,6 +1338,17 @@ def get_context_and_prompt(context_id: str) -> dict:
             error_type="validation_error",
             error_code="context_not_found",
             status_code=404,
+            details={"context_id": context_id},
+            correlation_id=correlation_id,
+        )
+
+    if context.get("status") != "context_ready_for_policy":
+        raise PipelineStepError(
+            stage="context_fetch",
+            message="Context is not ready for policy generation.",
+            error_type="validation_error",
+            error_code="context_not_ready_for_policy",
+            status_code=409,
             details={"context_id": context_id},
             correlation_id=correlation_id,
         )

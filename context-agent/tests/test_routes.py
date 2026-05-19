@@ -1349,7 +1349,7 @@ def _insert_policy_ready_context(context_id):
         "sector": "Healthcare",
         "critical_assets": "Patient records",
         "need": "Build a security plan",
-        "status": "context_plan_approved",
+        "status": "context_ready_for_policy",
         "security_context": security_context,
         "context_building": {
             "version": "1.0",
@@ -1363,6 +1363,20 @@ def _insert_policy_ready_context(context_id):
             "critical_assets": "Patient records",
             "need": "Build a security plan",
         }),
+        "context_task_results": {
+            "version": "1.0",
+            "status": "completed",
+            "plan_revision_id": "plan-rev-1",
+            "context_snapshot_hash": "hash-1",
+            "tasks": [],
+        },
+        "final_context": {
+            "version": "1.0",
+            "status": "ready",
+            "context_ready_for_policy": True,
+            "sections": {},
+        },
+        "refined_prompt": "Final company security context.",
     })
 
 
@@ -1514,6 +1528,111 @@ def test_trigger_policy_generation_blocks_when_runtime_is_not_ready(client, monk
     with client.session_transaction() as session:
         flashes = session.get("_flashes", [])
     assert ("danger", "Application runtime is not ready. Update state before generating a policy.") in flashes
+
+
+def test_trigger_policy_generation_blocks_before_final_context_json(client, monkeypatch):
+    context_id = str(ObjectId())
+    security_context = routes_module.build_context_security_context({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "need": "Build a security plan",
+    })
+    routes_module.mongo.db.contexts.insert_one({
+        "_id": ObjectId(context_id),
+        "status": "context_plan_executed",
+        "security_context": security_context,
+        "context_building": {"status": "sufficient"},
+        "context_intelligence_plan": routes_module.approve_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "need": "Build a security plan",
+        }),
+        "context_task_results": {
+            "version": "1.0",
+            "status": "completed",
+            "plan_revision_id": "plan-rev-1",
+            "context_snapshot_hash": "hash-1",
+            "tasks": [],
+        },
+    })
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: pytest.fail("domain gating must run before runtime readiness"),
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "create_pipeline_job",
+        lambda **kwargs: pytest.fail("job must not be created before final context synthesis"),
+    )
+
+    response = client.post(
+        f"/context/{context_id}/generate_policy",
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 409
+    payload = response.get_json()
+    assert payload["error_code"] == "final_context_not_ready"
+    assert payload["message"] == "Synthesize the final context before generating a policy."
+
+
+def test_trigger_final_context_synthesis_persists_policy_ready_context_json(client):
+    context_id = str(ObjectId())
+    security_context = routes_module.build_context_security_context({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "data_categories": "health_data",
+        "need": "Build a security plan",
+    })
+    routes_module.mongo.db.contexts.insert_one({
+        "_id": ObjectId(context_id),
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "data_categories": "health_data",
+        "need": "Build a security plan",
+        "status": "context_plan_executed",
+        "security_context": security_context,
+        "context_building": {"status": "sufficient"},
+        "context_intelligence_plan": routes_module.approve_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "data_categories": "health_data",
+            "need": "Build a security plan",
+        }),
+        "context_task_results": {
+            "version": "1.0",
+            "status": "completed",
+            "plan_revision_id": "plan-rev-1",
+            "context_snapshot_hash": "hash-1",
+            "tasks": [
+                {
+                    "task_id": "information_assets",
+                    "title": "Information assets",
+                    "status": "completed",
+                    "result": "Patient records are the primary asset.",
+                }
+            ],
+        },
+    })
+
+    response = client.post(
+        f"/context/{context_id}/final-context/synthesize",
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert payload["final_context"]["context_ready_for_policy"] is True
+    context = routes_module.mongo.db.contexts.find_one({"_id": ObjectId(context_id)})
+    assert context["status"] == "context_ready_for_policy"
+    assert "Patient records" in context["refined_prompt"]
 
 
 def test_trigger_policy_generation_blocks_unapproved_context_plan_json(client, monkeypatch):

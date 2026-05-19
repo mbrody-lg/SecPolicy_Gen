@@ -181,6 +181,38 @@
     </div>
   {% endif %}
 
+  {% if context.context_task_results and context.context_task_results.status == 'completed' %}
+    <div id="final-context-panel" class="bg-white rounded-lg shadow p-4 mb-6">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 class="text-xl font-semibold mb-1">Final context</h2>
+          <div class="text-sm text-gray-700">
+            Status: {{ context.final_context.status if context.final_context else 'not synthesized' }}
+          </div>
+        </div>
+        {% if context.final_context %}
+          <div class="text-xs text-gray-500">Version {{ context.final_context.version }}</div>
+        {% endif %}
+      </div>
+      {% if context.final_context and context.final_context.sections %}
+        <div class="mt-4 space-y-3 text-sm text-gray-700">
+          {% for section_id, section in context.final_context.sections.items() %}
+            <div class="rounded border border-gray-200 p-3">
+              <div class="font-semibold text-gray-900">{{ section_id | replace('_', ' ') | title }}</div>
+              <div class="mt-1">{{ section.content }}</div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <form method="post" action="{{ url_for('main.trigger_final_context_synthesis', context_id=context._id) }}" class="mt-4">
+          <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+            Synthesize final context
+          </button>
+        </form>
+      {% endif %}
+    </div>
+  {% endif %}
+
   <div class="bg-white rounded-lg shadow p-4">
     <h2 class="text-xl font-semibold mb-2">Add more context</h2>
     <form method="post" action="{{ url_for('main.continue_context', context_id=context._id) }}">
@@ -327,7 +359,8 @@
     {% set context_building_ready = not context.context_building or context.context_building.status != 'needs_information' %}
     {% set context_plan_ready = context.context_intelligence_plan and context.context_intelligence_plan.status == 'approved' %}
     {% set security_context_ready = context.security_context and not context.security_context.analysis.missing_information %}
-    {% set can_generate_policy = runtime_ready and not pipeline_active and context_building_ready and context_plan_ready and security_context_ready %}
+    {% set final_context_ready = context.final_context and context.final_context.context_ready_for_policy and context.refined_prompt %}
+    {% set can_generate_policy = runtime_ready and not pipeline_active and context_building_ready and context_plan_ready and security_context_ready and final_context_ready %}
     <div id="pipeline-job-panel"
       class="mb-4 rounded border border-blue-300 bg-blue-50 p-3 text-sm text-blue-950"
       data-context-id="{{ context._id }}"
@@ -374,6 +407,8 @@
           Approve the context intelligence plan before generating a policy.
         {% elif not security_context_ready %}
           Complete the security context before generating a policy.
+        {% elif not final_context_ready %}
+          Synthesize the final context before generating a policy.
         {% elif pipeline_active %}
           Policy generation is already running.
         {% elif not runtime_ready %}

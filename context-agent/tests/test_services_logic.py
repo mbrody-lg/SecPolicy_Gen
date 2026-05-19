@@ -86,6 +86,7 @@ def test_get_context_and_prompt_prefers_context_refined_prompt(monkeypatch):
         contexts=[
             {
                 "_id": context_id,
+                "status": "context_ready_for_policy",
                 "refined_prompt": "canonical refined prompt",
                 "language": "es",
                 "version": "1.2.3",
@@ -116,7 +117,7 @@ def test_get_context_and_prompt_prefers_context_refined_prompt(monkeypatch):
 def test_get_context_and_prompt_falls_back_to_legacy_interaction(monkeypatch):
     context_id = ObjectId()
     fake_db = FakeDB(
-        contexts=[{"_id": context_id, "language": "en", "version": "0.2.0"}],
+        contexts=[{"_id": context_id, "status": "context_ready_for_policy", "language": "en", "version": "0.2.0"}],
         interactions=[
             {
                 "context_id": context_id,
@@ -139,7 +140,15 @@ def test_get_context_and_prompt_falls_back_to_legacy_interaction(monkeypatch):
 def test_get_context_and_prompt_normalizes_numeric_model_version(monkeypatch):
     context_id = ObjectId()
     fake_db = FakeDB(
-        contexts=[{"_id": context_id, "refined_prompt": "prompt", "language": "en", "version": 1}],
+        contexts=[
+            {
+                "_id": context_id,
+                "status": "context_ready_for_policy",
+                "refined_prompt": "prompt",
+                "language": "en",
+                "version": 1,
+            }
+        ],
         interactions=[],
     )
 
@@ -523,6 +532,174 @@ def test_execute_context_plan_persists_safe_task_failure(monkeypatch):
     assert context["context_task_results"]["tasks"][0]["error"]["error_code"] == (
         "context_task_execution_failed"
     )
+
+
+def _completed_context_task_results():
+    return {
+        "version": "1.0",
+        "status": "completed",
+        "plan_revision_id": "plan-rev-1",
+        "context_snapshot_hash": "hash-1",
+        "tasks": [
+            {
+                "task_id": "company_profile",
+                "title": "Company profile",
+                "status": "completed",
+                "result": "The company operates a healthcare clinic in Spain.",
+            },
+            {
+                "task_id": "information_assets",
+                "title": "Information assets",
+                "status": "completed",
+                "result": "Patient records are the primary critical asset.",
+            },
+        ],
+    }
+
+
+def _approved_context_plan():
+    return logic.approve_context_intelligence_plan({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "data_categories": "health_data",
+        "need": "Build a security plan",
+        "context_intelligence_plan": logic.build_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "data_categories": "health_data",
+            "need": "Build a security plan",
+        }),
+    })
+
+
+def test_synthesize_final_context_requires_completed_task_results(monkeypatch):
+    context_id = ObjectId()
+    fake_db = FakeDB(
+        contexts=[
+            {
+                "_id": context_id,
+                "country": "Spain",
+                "sector": "Healthcare",
+                "critical_assets": "Patient records",
+                "need": "Build a security plan",
+                "context_intelligence_plan": _approved_context_plan(),
+            }
+        ]
+    )
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    result = logic.synthesize_final_context(str(context_id))
+
+    assert result["success"] is False
+    assert result["error_code"] == "context_task_results_not_completed"
+    assert "final_context" not in fake_db.contexts.docs[0]
+    assert "refined_prompt" not in fake_db.contexts.docs[0]
+
+
+def test_synthesize_final_context_persists_final_context_and_refined_prompt(monkeypatch):
+    context_id = ObjectId()
+    security_context = logic.build_context_security_context({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "data_categories": "health_data",
+        "need": "Build a security plan",
+    })
+    fake_db = FakeDB(
+        contexts=[
+            {
+                "_id": context_id,
+                "country": "Spain",
+                "sector": "Healthcare",
+                "critical_assets": "Patient records",
+                "data_categories": "health_data",
+                "need": "Build a security plan",
+                "security_context": security_context,
+                "context_intelligence_plan": _approved_context_plan(),
+                "context_task_results": _completed_context_task_results(),
+            }
+        ],
+        interactions=[],
+    )
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    result = logic.synthesize_final_context(str(context_id))
+
+    context = fake_db.contexts.docs[0]
+    assert result["success"] is True
+    assert context["status"] == "context_ready_for_policy"
+    assert context["final_context"]["status"] == "ready"
+    assert context["final_context"]["context_ready_for_policy"] is True
+    assert context["final_context"]["plan_revision_id"] == "plan-rev-1"
+    assert "Patient records" in context["refined_prompt"]
+    payload = logic.get_context_and_prompt(str(context_id))
+    assert payload["refined_prompt"] == context["refined_prompt"]
+
+
+def test_synthesize_final_context_rejects_missing_security_context_information(monkeypatch):
+    context_id = ObjectId()
+    security_context = logic.build_context_security_context({
+        "country": "Spain",
+        "need": "Build a security plan",
+    })
+    fake_db = FakeDB(
+        contexts=[
+            {
+                "_id": context_id,
+                "country": "Spain",
+                "need": "Build a security plan",
+                "security_context": security_context,
+                "context_intelligence_plan": _approved_context_plan(),
+                "context_task_results": _completed_context_task_results(),
+            }
+        ],
+        interactions=[],
+    )
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    result = logic.synthesize_final_context(str(context_id))
+
+    assert result["success"] is False
+    assert result["error_code"] == "security_context_not_sufficient"
+    assert "final_context" not in fake_db.contexts.docs[0]
+    assert "refined_prompt" not in fake_db.contexts.docs[0]
+
+
+def test_synthesize_final_context_rejects_plan_revision_mismatch(monkeypatch):
+    context_id = ObjectId()
+    task_results = _completed_context_task_results()
+    task_results["plan_revision_id"] = "plan-rev-outdated"
+    fake_db = FakeDB(
+        contexts=[
+            {
+                "_id": context_id,
+                "country": "Spain",
+                "sector": "Healthcare",
+                "critical_assets": "Patient records",
+                "data_categories": "health_data",
+                "need": "Build a security plan",
+                "security_context": logic.build_context_security_context({
+                    "country": "Spain",
+                    "sector": "Healthcare",
+                    "critical_assets": "Patient records",
+                    "data_categories": "health_data",
+                    "need": "Build a security plan",
+                }),
+                "context_intelligence_plan": _approved_context_plan(),
+                "context_task_results": task_results,
+            }
+        ],
+        interactions=[],
+    )
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    result = logic.synthesize_final_context(str(context_id))
+
+    assert result["success"] is False
+    assert result["error_code"] == "context_task_results_revision_mismatch"
+    assert "final_context" not in fake_db.contexts.docs[0]
 
 
 def test_public_security_context_payload_builds_context_for_legacy_records():
@@ -1044,7 +1221,15 @@ def test_call_validator_agent_surfaces_dependency_error_metadata(app_context, mo
 def test_get_context_and_prompt_uses_request_correlation_id(monkeypatch, app):
     context_id = ObjectId()
     fake_db = FakeDB(
-        contexts=[{"_id": context_id, "refined_prompt": "prompt", "language": "en", "version": "0.2.0"}],
+        contexts=[
+            {
+                "_id": context_id,
+                "status": "context_ready_for_policy",
+                "refined_prompt": "prompt",
+                "language": "en",
+                "version": "0.2.0",
+            }
+        ],
         interactions=[],
     )
 

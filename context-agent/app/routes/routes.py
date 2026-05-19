@@ -30,6 +30,7 @@ from app.services.logic import (
     run_with_agent,
     load_questions,
     render_markdown,
+    synthesize_final_context,
     store_validated_policy,
 )
 from app.services.pipeline_jobs import (
@@ -284,6 +285,17 @@ def _policy_generation_blocker(context: dict | None) -> dict | None:
         return {
             "error_code": "context_plan_not_approved",
             "message": "Approve the context intelligence plan before generating a policy.",
+            "status_code": 409,
+        }
+    final_context = context.get("final_context")
+    if (
+        context.get("status") != "context_ready_for_policy"
+        or not isinstance(final_context, dict)
+        or final_context.get("context_ready_for_policy") is not True
+    ):
+        return {
+            "error_code": "final_context_not_ready",
+            "message": "Synthesize the final context before generating a policy.",
             "status_code": 409,
         }
     security_context = context.get("security_context")
@@ -726,6 +738,19 @@ def trigger_context_plan_execution(context_id):
     if _wants_json_response():
         return jsonify(payload), 202
     flash("Context plan execution started. Current stage: queued.", "info")
+    return redirect(url_for("main.context_detail", context_id=context_id))
+
+
+@main.route("/context/<context_id>/final-context/synthesize", methods=["POST"])
+def trigger_final_context_synthesis(context_id):
+    """Synthesize final context after approved plan execution."""
+    result = synthesize_final_context(context_id)
+    if _wants_json_response():
+        return jsonify(result), 200 if result.get("success") else result.get("status_code", 500)
+    if result.get("success"):
+        flash("Final context synthesized. Policy generation is now available.", "success")
+    else:
+        flash(result.get("message", "Final context synthesis failed."), "warning")
     return redirect(url_for("main.context_detail", context_id=context_id))
 
 
