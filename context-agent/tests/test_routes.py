@@ -1822,6 +1822,35 @@ def test_mark_final_context_section_for_improvement_json(client):
     assert context["final_context"]["sections"]["security_scope"]["status"] == "needs_improvement"
 
 
+def test_context_detail_disables_policy_generation_when_final_context_needs_improvement(client, monkeypatch):
+    context_id = str(ObjectId())
+    _insert_context_executed_for_final_synthesis(context_id)
+    client.post(
+        f"/context/{context_id}/final-context/synthesize",
+        headers={"Accept": "application/json"},
+    )
+    client.post(
+        f"/context/{context_id}/final-context/sections/improve",
+        json={"comments": {"security_scope": "Clarify third-party laboratory dependencies."}},
+        headers={"Accept": "application/json"},
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
+
+    response = client.get(f"/context/{context_id}")
+
+    assert response.status_code == 200
+    assert b"Regenerate marked final-context sections." in response.data
+    assert b"Synthesize the final context before generating a policy." in response.data
+    assert b"data-generate-policy-button" in response.data
+    assert b'data-domain-ready="0"' in response.data
+    assert b"disabled" in response.data
+    assert b"bg-gray-400 cursor-not-allowed" in response.data
+
+
 def test_regenerate_final_context_sections_records_lesson_candidate_json(client):
     context_id = str(ObjectId())
     _insert_context_executed_for_final_synthesis(context_id)

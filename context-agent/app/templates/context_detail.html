@@ -10,7 +10,7 @@
   {% set context_building_ready = not context.context_building or context.context_building.status != 'needs_information' %}
   {% set context_plan_ready = context.context_intelligence_plan and context.context_intelligence_plan.status == 'approved' %}
   {% set context_execution_ready = context.context_task_results and context.context_task_results.status == 'completed' %}
-  {% set final_context_ready = context.final_context and context.final_context.context_ready_for_policy and context.refined_prompt %}
+  {% set final_context_ready = context.status == 'context_ready_for_policy' and context.final_context and context.final_context.status == 'ready' and context.final_context.context_ready_for_policy is sameas true and context.refined_prompt %}
   {% set security_context_ready = context.security_context and not context.security_context.analysis.missing_information %}
   <div id="phase-navigation-panel" class="bg-white rounded-lg shadow p-4 mb-6" data-context-phase-navigation>
     <div class="flex flex-wrap items-start justify-between gap-3">
@@ -665,6 +665,7 @@
       <button type="submit"
         class="{% if can_generate_policy %}bg-green-600 hover:bg-green-700{% else %}bg-gray-400 cursor-not-allowed{% endif %} text-white px-4 py-2 rounded"
         data-generate-policy-button
+        data-domain-ready="{% if context_building_ready and context_plan_ready and security_context_ready and final_context_ready %}1{% else %}0{% endif %}"
         {% if not can_generate_policy %}disabled{% endif %}>
         Generate and validate
       </button>
