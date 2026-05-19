@@ -457,6 +457,8 @@ def test_context_detail_renders_context_intelligence_plan(client, monkeypatch):
                                 "order": 1,
                                 "title": "Company profile and operating model",
                                 "objective": "Clarify company operations.",
+                                "expected_output": "Company operating model summary.",
+                                "dependencies": ["context_building"],
                                 "status": "planned",
                             }
                         ],
@@ -482,7 +484,15 @@ def test_context_detail_renders_context_intelligence_plan(client, monkeypatch):
     assert b"Approve the context intelligence plan." in response.data
     assert b"Context intelligence plan" in response.data
     assert b"Awaiting validation" in response.data
+    assert b"Approval checkpoint" in response.data
+    assert b"Approval notes" in response.data
+    assert b"Execution" in response.data
+    assert b"blocked" in response.data
     assert b"Company profile and operating model" in response.data
+    assert b"Expected output:" in response.data
+    assert b"Company operating model summary." in response.data
+    assert b"Dependencies:" in response.data
+    assert b"context_building" in response.data
     assert b"Approve plan" in response.data
 
 
@@ -734,6 +744,10 @@ def test_context_detail_renders_approved_plan_revision_metadata(client, monkeypa
 
     assert response.status_code == 200
     assert b"Approved revision plan-rev-1" in response.data
+    assert b"Execution" in response.data
+    assert b"available" in response.data
+    assert b"Review" in response.data
+    assert b"not required" in response.data
     assert b"Snapshot:" in response.data
 
 

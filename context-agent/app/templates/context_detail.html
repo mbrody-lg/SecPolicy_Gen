@@ -228,6 +228,20 @@
         </div>
         <div class="text-xs text-gray-500">Version {{ context_plan.version }}</div>
       </div>
+      <div class="mt-4 grid gap-3 md:grid-cols-3">
+        <div class="rounded border border-gray-200 p-3 text-sm">
+          <div class="font-semibold text-gray-900">Tasks</div>
+          <div class="mt-1 text-gray-700">{{ context_plan.tasks | length }}</div>
+        </div>
+        <div class="rounded border border-gray-200 p-3 text-sm">
+          <div class="font-semibold text-gray-900">Review</div>
+          <div class="mt-1 text-gray-700">{% if context_plan.review and context_plan.review.required %}required{% else %}not required{% endif %}</div>
+        </div>
+        <div class="rounded border border-gray-200 p-3 text-sm">
+          <div class="font-semibold text-gray-900">Execution</div>
+          <div class="mt-1 text-gray-700">{% if context_plan.status == 'approved' %}available{% else %}blocked{% endif %}</div>
+        </div>
+      </div>
       {% if context_plan.approved_revision_id %}
         <div class="mt-3 rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950">
           <div class="font-semibold">Approved revision {{ context_plan.approved_revision_id }}</div>
@@ -249,6 +263,16 @@
               <div>
                 <div class="text-sm font-semibold text-gray-900">{{ task.title }}</div>
                 <div class="mt-1 text-sm text-gray-700">{{ task.objective }}</div>
+                {% if task.expected_output %}
+                  <div class="mt-2 text-xs text-gray-700">
+                    <span class="font-semibold">Expected output:</span> {{ task.expected_output }}
+                  </div>
+                {% endif %}
+                {% if task.dependencies %}
+                  <div class="mt-1 text-xs text-gray-700">
+                    <span class="font-semibold">Dependencies:</span> {{ task.dependencies | join(', ') }}
+                  </div>
+                {% endif %}
                 <div class="mt-1 text-xs text-gray-500">Status: {{ task.status }}</div>
               </div>
             </div>
@@ -258,15 +282,20 @@
 
       {% if context.context_building and context.context_building.status == 'needs_information' %}
         <div class="mt-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-          Answer the context-building questions before approving the plan.
+          <div class="font-semibold">Planning approval is blocked</div>
+          <div class="mt-1">Answer the context-building questions before approving the plan.</div>
         </div>
       {% elif context_plan.status != 'approved' %}
-        <form method="post" action="{{ url_for('main.approve_context_plan', context_id=context._id) }}" class="mt-4">
+        <form method="post" action="{{ url_for('main.approve_context_plan', context_id=context._id) }}" class="mt-4 rounded border border-blue-200 bg-blue-50 p-3">
+          <div class="text-sm font-semibold text-blue-950">Approval checkpoint</div>
+          <div class="mt-1 text-sm text-blue-900">
+            Confirm that the task list covers the company scope, information assets, risk posture, compliance drivers, and final synthesis.
+          </div>
           <label for="context-plan-feedback" class="block text-sm font-medium text-gray-900">
-            Add corrections before approving
+            Approval notes
           </label>
           <textarea id="context-plan-feedback" name="feedback" rows="3"
-            placeholder="Add missing business areas, IT constraints, systems, risks, or compliance concerns before execution."
+            placeholder="Add approval notes, constraints, missing business areas, IT systems, risks, or compliance concerns before execution."
             class="mt-2 w-full border rounded p-2 text-sm focus:outline-none focus:ring focus:border-blue-300"></textarea>
           <button type="submit" class="mt-3 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
             Approve plan
