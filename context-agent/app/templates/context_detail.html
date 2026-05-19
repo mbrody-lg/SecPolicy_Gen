@@ -151,6 +151,36 @@
     </div>
   {% endif %}
 
+  {% if context.context_intelligence_plan and context.context_intelligence_plan.status == 'approved' %}
+    {% set context_plan_job = latest_context_plan_job %}
+    {% set context_plan_active = context_plan_job and context_plan_job.status in ['queued', 'running', 'context_task_running'] %}
+    <div id="context-plan-execution-panel" class="bg-white rounded-lg shadow p-4 mb-6">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 class="text-xl font-semibold mb-1">Context plan execution</h2>
+          <div class="text-sm text-gray-700">
+            Status: {{ context.context_task_results.status if context.context_task_results else 'not started' }}
+          </div>
+        </div>
+        {% if context_plan_job %}
+          <div class="text-xs text-gray-500">Job {{ context_plan_job.job_id }}</div>
+        {% endif %}
+      </div>
+      {% if context.context_task_results and context.context_task_results.tasks %}
+        <div class="mt-4 text-sm text-gray-700">
+          Completed tasks: {{ context.context_task_results.tasks | length }}
+        </div>
+      {% endif %}
+      <form method="post" action="{{ url_for('main.trigger_context_plan_execution', context_id=context._id) }}" class="mt-4">
+        <button type="submit"
+          class="{% if context_plan_active %}bg-gray-400 cursor-not-allowed{% else %}bg-blue-600 hover:bg-blue-700{% endif %} text-white px-4 py-2 rounded"
+          {% if context_plan_active %}disabled{% endif %}>
+          Execute approved plan
+        </button>
+      </form>
+    </div>
+  {% endif %}
+
   <div class="bg-white rounded-lg shadow p-4">
     <h2 class="text-xl font-semibold mb-2">Add more context</h2>
     <form method="post" action="{{ url_for('main.continue_context', context_id=context._id) }}">

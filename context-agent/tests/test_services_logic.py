@@ -385,6 +385,146 @@ def test_context_plan_revision_returns_active_revision():
     assert revision["context_snapshot_hash"] == plan["review"]["context_snapshot_hash"]
 
 
+def test_execute_context_plan_requires_approved_revision(monkeypatch):
+    context_id = ObjectId()
+    fake_db = FakeDB(
+        contexts=[
+            {
+                "_id": context_id,
+                "context_intelligence_plan": logic.build_context_intelligence_plan({
+                    "country": "Spain",
+                    "sector": "Healthcare",
+                    "critical_assets": "Patient records",
+                    "need": "Build a security plan",
+                }),
+            }
+        ]
+    )
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+    monkeypatch.setattr(
+        logic,
+        "run_with_agent",
+        lambda *args, **kwargs: pytest.fail("draft plans must not execute"),
+    )
+
+    result = logic.execute_context_plan(str(context_id))
+
+    assert result["success"] is False
+    assert result["error_code"] == "context_plan_not_approved"
+    assert "context_task_results" not in fake_db.contexts.docs[0]
+
+
+def test_execute_context_plan_embeds_task_results_without_refined_prompt(monkeypatch):
+    context_id = ObjectId()
+    plan = logic.approve_context_intelligence_plan({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "need": "Build a security plan",
+        "context_intelligence_plan": logic.build_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "need": "Build a security plan",
+        }),
+    })
+    plan["tasks"] = plan["tasks"][:2]
+    plan["revisions"][0]["tasks"] = plan["revisions"][0]["tasks"][:2]
+    fake_db = FakeDB(
+        contexts=[
+            {
+                "_id": context_id,
+                "country": "Spain",
+                "sector": "Healthcare",
+                "critical_assets": "Patient records",
+                "need": "Build a security plan",
+                "security_context": logic.build_context_security_context({
+                    "country": "Spain",
+                    "sector": "Healthcare",
+                    "critical_assets": "Patient records",
+                    "need": "Build a security plan",
+                }),
+                "context_intelligence_plan": plan,
+                "refined_prompt": "must not be used",
+            }
+        ]
+    )
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+    captured_prompts = []
+    monkeypatch.setattr(
+        logic,
+        "run_with_agent",
+        lambda prompt, context_id, model_version=None: captured_prompts.append(prompt) or "task result",
+    )
+
+    result = logic.execute_context_plan(str(context_id))
+
+    context = fake_db.contexts.docs[0]
+    assert result["success"] is True
+    assert result["plan_revision_id"] == "plan-rev-1"
+    assert result["task_count"] == 2
+    assert context["status"] == "context_plan_executed"
+    assert context["context_task_results"]["status"] == "completed"
+    assert context["context_task_results"]["plan_revision_id"] == "plan-rev-1"
+    assert len(context["context_task_results"]["tasks"]) == 2
+    assert "refined_prompt" not in result
+    assert all("must not be used" not in prompt for prompt in captured_prompts)
+
+
+def test_execute_context_plan_persists_safe_task_failure(monkeypatch):
+    context_id = ObjectId()
+    plan = logic.approve_context_intelligence_plan({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "need": "Build a security plan",
+        "context_intelligence_plan": logic.build_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "need": "Build a security plan",
+        }),
+    })
+    plan["tasks"] = plan["tasks"][:1]
+    plan["revisions"][0]["tasks"] = plan["revisions"][0]["tasks"][:1]
+    fake_db = FakeDB(
+        contexts=[
+            {
+                "_id": context_id,
+                "country": "Spain",
+                "sector": "Healthcare",
+                "critical_assets": "Patient records",
+                "need": "Build a security plan",
+                "security_context": logic.build_context_security_context({
+                    "country": "Spain",
+                    "sector": "Healthcare",
+                    "critical_assets": "Patient records",
+                    "need": "Build a security plan",
+                }),
+                "context_intelligence_plan": plan,
+            }
+        ]
+    )
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    def failing_agent(*args, **kwargs):
+        raise RuntimeError("secret raw provider failure")
+
+    monkeypatch.setattr(logic, "run_with_agent", failing_agent)
+
+    result = logic.execute_context_plan(str(context_id))
+
+    context = fake_db.contexts.docs[0]
+    assert result["success"] is False
+    assert result["error_code"] == "context_task_execution_failed"
+    assert "secret raw provider failure" not in result["message"]
+    assert context["status"] == "context_plan_failed"
+    assert context["context_task_results"]["status"] == "failed"
+    assert context["context_task_results"]["tasks"][0]["error"]["error_code"] == (
+        "context_task_execution_failed"
+    )
+
+
 def test_public_security_context_payload_builds_context_for_legacy_records():
     payload = logic.public_security_context_payload(
         "context-1",

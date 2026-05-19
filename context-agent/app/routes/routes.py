@@ -57,6 +57,8 @@ POLICY_PROCESS_LABELS = {
     "policy_generating": "Generating policy",
     "policy_generated": "Policy generated",
     "validating": "Validating",
+    "context_task_running": "Executing context plan",
+    "context_task_completed": "Context plan executed",
     "completed": "Validated policy",
     "failed": "Failed",
     "cancelled": "Cancelled",
@@ -69,6 +71,8 @@ POLICY_PROCESS_TONES = {
     "policy_generating": "info",
     "policy_generated": "info",
     "validating": "info",
+    "context_task_running": "info",
+    "context_task_completed": "success",
     "completed": "success",
     "failed": "danger",
     "cancelled": "muted",
@@ -415,6 +419,7 @@ def context_detail(context_id):
         interactions=interactions,
         system_status=get_system_status(),
         latest_pipeline_job=find_latest_pipeline_job(str(context_id)),
+        latest_context_plan_job=find_latest_pipeline_job(str(context_id), command="execute_context_plan"),
         developer_diagnostics_enabled=_developer_diagnostics_enabled(),
     )
 
@@ -669,6 +674,84 @@ def approve_context_plan(context_id):
 
     flash("Context intelligence plan approved. Task execution can start next.", "success")
     return redirect(url_for("main.context_detail", context_id=context_id))
+
+
+@main.route("/context/<context_id>/context-plan/execute", methods=["POST"])
+def trigger_context_plan_execution(context_id):
+    """Start asynchronous execution of an approved context-intelligence plan."""
+    context_obj_id = ObjectId(context_id)
+    context = mongo.db.contexts.find_one({"_id": context_obj_id})
+    if not context:
+        return abort(404, "Context not found.")
+
+    blocker = _context_plan_execution_blocker(context)
+    if blocker:
+        payload = {
+            "success": False,
+            "error_type": "workflow_error",
+            "error_code": blocker["error_code"],
+            "message": blocker["message"],
+            "details": {"context_id": context_id},
+        }
+        if _wants_json_response():
+            return jsonify(payload), blocker["status_code"]
+        flash(payload["message"], "warning")
+        return redirect(url_for("main.context_detail", context_id=context_id))
+
+    active_job = find_active_pipeline_job(context_id, command="execute_context_plan")
+    if active_job:
+        payload = {
+            "success": True,
+            "status": "accepted",
+            "message": "Context plan execution is already running.",
+            "job": _public_pipeline_job(active_job),
+        }
+        if _wants_json_response():
+            return jsonify(payload), 202
+        flash("Context plan execution is already running.", "info")
+        return redirect(url_for("main.context_detail", context_id=context_id))
+
+    job = create_pipeline_job(
+        context_id=context_id,
+        command="execute_context_plan",
+        correlation_id=request.headers.get("X-Correlation-ID"),
+    )
+    start_pipeline_job_worker(job)
+    payload = {
+        "success": True,
+        "status": "accepted",
+        "message": "Context plan execution started.",
+        "job": _public_pipeline_job(job),
+    }
+    if _wants_json_response():
+        return jsonify(payload), 202
+    flash("Context plan execution started. Current stage: queued.", "info")
+    return redirect(url_for("main.context_detail", context_id=context_id))
+
+
+def _context_plan_execution_blocker(context: dict) -> dict | None:
+    """Return the first reason an approved context plan cannot execute."""
+    context_building = context.get("context_building")
+    if isinstance(context_building, dict) and context_building.get("status") == "needs_information":
+        return {
+            "error_code": "context_building_needs_information",
+            "message": "Answer the context-building questions before executing the plan.",
+            "status_code": 409,
+        }
+    plan = context.get("context_intelligence_plan")
+    if not isinstance(plan, dict) or plan.get("status") != "approved":
+        return {
+            "error_code": "context_plan_not_approved",
+            "message": "Approve the context intelligence plan before executing it.",
+            "status_code": 409,
+        }
+    if not plan.get("approved_revision_id"):
+        return {
+            "error_code": "context_plan_revision_not_found",
+            "message": "Approved context plan revision not found.",
+            "status_code": 409,
+        }
+    return None
 
 @main.route("/context/<context_id>/delete", methods=["POST"])
 def delete_context(context_id):

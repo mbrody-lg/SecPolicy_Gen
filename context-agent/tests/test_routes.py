@@ -526,6 +526,100 @@ def test_approve_context_plan_blocks_when_context_building_needs_information(cli
     assert context["context_intelligence_plan"]["status"] == "draft"
 
 
+def test_trigger_context_plan_execution_starts_job(client, monkeypatch):
+    context_id = str(ObjectId())
+    _insert_policy_ready_context(context_id)
+    captured = {}
+    monkeypatch.setattr(
+        routes_module,
+        "find_active_pipeline_job",
+        lambda current_context_id, command="generate_policy": None,
+    )
+
+    def fake_create_pipeline_job(**kwargs):
+        captured.update(kwargs)
+        return {
+            "job_id": "job-context-plan",
+            "context_id": kwargs["context_id"],
+            "correlation_id": "corr-1",
+            "command": kwargs["command"],
+            "status": "queued",
+            "current_stage": "queued",
+        }
+
+    monkeypatch.setattr(routes_module, "create_pipeline_job", fake_create_pipeline_job)
+    monkeypatch.setattr(
+        routes_module,
+        "start_pipeline_job_worker",
+        lambda job: {"started": True, "job_id": job["job_id"]},
+    )
+
+    response = client.post(f"/context/{context_id}/context-plan/execute", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith(f"/context/{context_id}")
+    assert captured["command"] == "execute_context_plan"
+    with client.session_transaction() as session:
+        flashes = session.get("_flashes", [])
+    assert ("info", "Context plan execution started. Current stage: queued.") in flashes
+
+
+def test_trigger_context_plan_execution_blocks_unapproved_plan_json(client, monkeypatch):
+    context_id = str(ObjectId())
+    routes_module.mongo.db.contexts.insert_one({
+        "_id": ObjectId(context_id),
+        "context_building": {"status": "sufficient"},
+        "context_intelligence_plan": routes_module.build_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "need": "Build a security plan",
+        }),
+    })
+    monkeypatch.setattr(
+        routes_module,
+        "create_pipeline_job",
+        lambda **kwargs: pytest.fail("job must not be created before plan approval"),
+    )
+
+    response = client.post(
+        f"/context/{context_id}/context-plan/execute",
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["error_code"] == "context_plan_not_approved"
+
+
+def test_trigger_context_plan_execution_reuses_active_job(client, monkeypatch):
+    context_id = str(ObjectId())
+    _insert_policy_ready_context(context_id)
+    monkeypatch.setattr(
+        routes_module,
+        "find_active_pipeline_job",
+        lambda current_context_id, command="generate_policy": {
+            "job_id": "job-active",
+            "context_id": current_context_id,
+            "correlation_id": "corr-active",
+            "command": command,
+            "status": "context_task_running",
+            "current_stage": "context_plan_execution",
+        },
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "create_pipeline_job",
+        lambda **kwargs: pytest.fail("must not create duplicate context plan job"),
+    )
+
+    response = client.post(f"/context/{context_id}/context-plan/execute", follow_redirects=False)
+
+    assert response.status_code == 302
+    with client.session_transaction() as session:
+        flashes = session.get("_flashes", [])
+    assert ("info", "Context plan execution is already running.") in flashes
+
+
 def test_context_plan_route_returns_plan_and_active_revision(client):
     context_id = ObjectId()
     plan = routes_module.approve_context_intelligence_plan({
@@ -594,6 +688,48 @@ def test_context_detail_renders_approved_plan_revision_metadata(client, monkeypa
     assert response.status_code == 200
     assert b"Approved revision plan-rev-1" in response.data
     assert b"Snapshot:" in response.data
+
+
+def test_context_detail_renders_context_plan_execution_panel(client, monkeypatch):
+    context_id = ObjectId()
+    plan = routes_module.approve_context_intelligence_plan({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "need": "Build a security plan",
+        "context_intelligence_plan": routes_module.build_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "need": "Build a security plan",
+        }),
+    })
+    monkeypatch.setattr(
+        routes_module.mongo,
+        "db",
+        FakeDB(
+            contexts=[
+                {
+                    "_id": context_id,
+                    "status": "context_plan_approved",
+                    "context_intelligence_plan": plan,
+                }
+            ],
+            interactions=[],
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
+
+    response = client.get(f"/context/{context_id}")
+
+    assert response.status_code == 200
+    assert b"Context plan execution" in response.data
+    assert b"Execute approved plan" in response.data
 
 
 def test_security_context_route_returns_persisted_context(client):

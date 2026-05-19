@@ -60,6 +60,7 @@ CONTEXT_ANSWER_FIELDS = {
 }
 CONTEXT_INTELLIGENCE_PLAN_VERSION = "1.0"
 CONTEXT_BUILDING_VERSION = "1.0"
+CONTEXT_TASK_RESULTS_VERSION = "1.0"
 CONTEXT_BUILDING_QUESTION_MAP = {
     "profile.sector": {
         "answer_field": "sector",
@@ -714,6 +715,174 @@ def context_plan_revision(plan: dict) -> dict | None:
         if isinstance(revision, dict) and revision.get("revision_id") == approved_revision_id:
             return revision
     return None
+
+
+def build_context_task_prompt(context: dict, task: dict, plan_revision: dict) -> str:
+    """Build the bounded prompt used to execute one approved context-plan task."""
+    security_context = context.get("security_context") or build_context_security_context(context)
+    return "\n".join([
+        "You are Context Agent executing one approved context-intelligence task.",
+        "Do not generate a policy. Produce only task analysis for final context synthesis.",
+        f"Task id: {task.get('id')}",
+        f"Task title: {task.get('title')}",
+        f"Task objective: {task.get('objective')}",
+        f"Approved revision: {plan_revision.get('revision_id')}",
+        f"Context snapshot hash: {plan_revision.get('context_snapshot_hash')}",
+        "",
+        "Current security context:",
+        f"- Sector: {security_context['profile']['sector'] or 'unknown'}",
+        f"- Activity: {security_context['profile']['activity'] or 'unknown'}",
+        f"- Countries: {_format_list(security_context['profile']['operating_countries'])}",
+        f"- Critical assets: {_format_list(security_context['information_assets']['critical_assets'])}",
+        f"- Data categories: {_format_list(security_context['information_assets']['data_categories'])}",
+        f"- Dependencies: {_format_list(security_context['information_assets']['third_party_dependencies'])}",
+        f"- Cloud/SaaS services: {_format_list(security_context['information_assets']['cloud_services'])}",
+        f"- Known gaps: {_format_list(security_context['security_posture']['known_gaps'])}",
+        f"- Regulatory hints: {_format_list(security_context['compliance']['regulatory_hints'])}",
+        f"- Policy objective: {security_context['policy_intent']['need'] or 'unknown'}",
+        "",
+        "Output requirements: return concise, concrete findings, assumptions, missing details, and implications for final company security context synthesis.",
+    ])
+
+
+def execute_context_plan(context_id: str) -> dict:
+    """Execute the approved context-intelligence plan and persist task results."""
+    context_obj_id = ObjectId(context_id)
+    context = mongo.db.contexts.find_one({"_id": context_obj_id})
+    if not context:
+        return _context_plan_execution_error(
+            "context_not_found",
+            "Context not found.",
+            status_code=404,
+        )
+
+    plan = context.get("context_intelligence_plan")
+    if not isinstance(plan, dict) or plan.get("status") != "approved":
+        return _context_plan_execution_error(
+            "context_plan_not_approved",
+            "Approve the context intelligence plan before executing it.",
+            status_code=409,
+        )
+    plan_revision = context_plan_revision(plan)
+    if not plan_revision:
+        return _context_plan_execution_error(
+            "context_plan_revision_not_found",
+            "Approved context plan revision not found.",
+            status_code=409,
+        )
+
+    started_at = datetime.now(timezone.utc).isoformat()
+    task_results = {
+        "version": CONTEXT_TASK_RESULTS_VERSION,
+        "status": "running",
+        "plan_revision_id": plan_revision["revision_id"],
+        "context_snapshot_hash": plan_revision.get("context_snapshot_hash"),
+        "started_at": started_at,
+        "updated_at": started_at,
+        "completed_at": None,
+        "tasks": [],
+    }
+    mongo.db.contexts.update_one(
+        {"_id": context_obj_id},
+        {"$set": {"status": "context_plan_executing", "context_task_results": task_results}},
+    )
+
+    completed_tasks = []
+    for task in plan_revision.get("tasks", []):
+        task_result = _execute_context_plan_task(context, task, plan_revision)
+        completed_tasks.append(task_result)
+        task_results["tasks"] = completed_tasks
+        task_results["updated_at"] = datetime.now(timezone.utc).isoformat()
+        mongo.db.contexts.update_one(
+            {"_id": context_obj_id},
+            {"$set": {"context_task_results": task_results}},
+        )
+        if task_result["status"] == "failed":
+            task_results["status"] = "failed"
+            task_results["completed_at"] = datetime.now(timezone.utc).isoformat()
+            mongo.db.contexts.update_one(
+                {"_id": context_obj_id},
+                {"$set": {"status": "context_plan_failed", "context_task_results": task_results}},
+            )
+            return _context_plan_execution_error(
+                task_result["error"]["error_code"],
+                task_result["error"]["safe_message"],
+                details={"task_id": task_result["task_id"]},
+            )
+
+    completed_at = datetime.now(timezone.utc).isoformat()
+    task_results["status"] = "completed"
+    task_results["updated_at"] = completed_at
+    task_results["completed_at"] = completed_at
+    mongo.db.contexts.update_one(
+        {"_id": context_obj_id},
+        {"$set": {"status": "context_plan_executed", "context_task_results": task_results}},
+    )
+    return {
+        "success": True,
+        "stage": "context_plan_execution",
+        "context_id": context_id,
+        "plan_revision_id": task_results["plan_revision_id"],
+        "task_count": len(completed_tasks),
+        "context_task_results": task_results,
+    }
+
+
+def _execute_context_plan_task(context: dict, task: dict, plan_revision: dict) -> dict:
+    started_at = datetime.now(timezone.utc).isoformat()
+    task_id = str(task.get("id") or "unknown")
+    base_result = {
+        "task_id": task_id,
+        "title": task.get("title"),
+        "objective": task.get("objective"),
+        "started_at": started_at,
+        "completed_at": None,
+    }
+    try:
+        result = run_with_agent(
+            build_context_task_prompt(context, task, plan_revision),
+            str(context["_id"]),
+            model_version=context.get("version", "0.1.0"),
+        )
+        completed_at = datetime.now(timezone.utc).isoformat()
+        return {
+            **base_result,
+            "status": "completed",
+            "result": str(result or "").strip(),
+            "completed_at": completed_at,
+        }
+    except Exception:
+        completed_at = datetime.now(timezone.utc).isoformat()
+        return {
+            **base_result,
+            "status": "failed",
+            "result": None,
+            "completed_at": completed_at,
+            "error": {
+                "error_type": "dependency_error",
+                "error_code": "context_task_execution_failed",
+                "safe_message": "Context plan task execution failed.",
+                "status_code": 502,
+            },
+        }
+
+
+def _context_plan_execution_error(
+    error_code: str,
+    message: str,
+    *,
+    status_code: int = 500,
+    details: dict | None = None,
+) -> dict:
+    return {
+        "success": False,
+        "stage": "context_plan_execution",
+        "error_type": "workflow_error",
+        "error_code": error_code,
+        "message": message,
+        "status_code": status_code,
+        "details": details or {},
+    }
 
 
 def _context_snapshot_hash(context_snapshot: dict) -> str:
