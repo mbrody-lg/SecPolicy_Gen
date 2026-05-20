@@ -51,6 +51,7 @@ class ProactiveGoalCreator(OpenAIClient):
             ],
             schema_name="context_agent_proactive_prompt",
             json_schema=PROACTIVE_PROMPT_SCHEMA,
+            phase="context_prompt_refinement",
             temperature=0.2,
             max_tokens=15000,
         )
