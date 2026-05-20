@@ -13,11 +13,12 @@ from app.agents.openai.roles.proactive import ProactiveGoalCreator
 class OpenAIAgent(Agent):
     """Concrete agent that uses OpenAI Assistants and role processors."""
 
-    def __init__(self, name, instructions, model, tools=None):
+    def __init__(self, name, instructions, model, tools=None, role_instructions=None):
         """Initialize OpenAI agent state and lazily created assistant id."""
         Agent.__init__(self, name, instructions, model, tools or [])
         self.client = OpenAIClient()
         self.assistant_id = None
+        self.role_instructions = role_instructions or {}
 
     def create(self, context_id: str = None):
         """Create or recover an assistant bound to the provided context."""
@@ -46,7 +47,10 @@ class OpenAIAgent(Agent):
     def run(self, prompt: str, context_id: str = None) -> str:
         """Run context generation lifecycle and persist outputs in Mongo."""
         # Improve prompt proactively
-        proactive = ProactiveGoalCreator()
+        proactive = ProactiveGoalCreator(
+            model=self.model,
+            instructions=self.role_instructions.get("proactive_goal_creator"),
+        )
         refined_prompt = proactive.execute(prompt)
 
         # Recover thread_id when available
@@ -94,7 +98,10 @@ class OpenAIAgent(Agent):
         raw_response = messages.data[0].content[0].text.value
 
         # Improve returned response
-        optimiser = PromptResponseOptimiser()
+        optimiser = PromptResponseOptimiser(
+            model=self.model,
+            instructions=self.role_instructions.get("response_optimiser"),
+        )
         result = optimiser.execute(refined_prompt, raw_response)
 
         if context_id:
