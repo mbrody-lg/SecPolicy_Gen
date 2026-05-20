@@ -30,6 +30,81 @@ logger = logging.getLogger(__name__)
 MAX_PIPELINE_DIAGNOSTIC_HOPS = 25
 SYSTEM_STATUS_TIMEOUT_SECONDS = 2.0
 SYSTEM_RAG_STATUS_TIMEOUT_SECONDS = 10.0
+DEFAULT_CONTEXT_PROMPT_TEMPLATES = {
+    "context_intake": "\n".join([
+        "You are Context Agent working inside the Context Workplace.",
+        "Phase: INTAKE / NEW CONTEXT.",
+        "Your task is to transform the user's company answers into a detailed, concrete, security-focused company context.",
+        "Do not draft the final policy. Produce a refined context that downstream Policy Agent and RAG retrieval can use.",
+        "",
+        "Security context analysis:",
+        "{security_context_summary}",
+        "",
+        "User-provided answers:",
+        "{user_answers}",
+        "",
+        "Output requirements: write a concise but complete business and information-security context; identify the security domains, relevant assets, data categories, regulatory exposure, assumptions, missing information, and the concrete policy objective.",
+    ]),
+    "context_update": "\n".join([
+        "You are Context Agent working inside the Context Workplace.",
+        "Phase: CONTEXT UPDATE.",
+        "The user has added new context or answered follow-up questions. Re-assess the case without losing prior facts.",
+        "",
+        "New user input:",
+        "{additional_context}",
+        "",
+        "Current security context analysis:",
+        "{security_context_summary}",
+        "",
+        "Existing case facts:",
+        "{user_answers}",
+        "",
+        "Output requirements: explain what changed, preserve explicit facts, identify remaining gaps as actionable follow-up questions. Do not draft a policy. Do not approve the plan.",
+    ]),
+    "context_planning": "\n".join([
+        "You are Context Agent working inside the Context Workplace.",
+        "Phase: PLANNING.",
+        "Produce a reviewable analysis plan that lists the tasks needed to reach a complete security context.",
+        "Ask the user to confirm whether this plan is appropriate or whether relevant business, IT, risk, or compliance aspects are missing.",
+        "",
+        "Initial security context:",
+        "{security_context_summary}",
+        "",
+        "Proposed context-intelligence tasks:",
+        "{context_tasks}",
+        "",
+        "User-provided answers:",
+        "{user_answers}",
+        "",
+        "Output requirements: explain the proposed tasks, identify any missing task, and end by asking the user to approve the plan or add more context before execution.",
+    ]),
+    "context_task_execution": "\n".join([
+        "You are Context Agent working inside the Context Workplace.",
+        "Phase: EXECUTION.",
+        "Execute one approved context-intelligence task. Do not generate a policy. Produce only task analysis for final context synthesis.",
+        "",
+        "Task:",
+        "{task_summary}",
+        "",
+        "Approved plan revision:",
+        "{plan_revision_summary}",
+        "",
+        "Current security context:",
+        "{security_context_summary}",
+        "",
+        "Output requirements: return concise, concrete findings, assumptions, missing details, and implications for final company security context synthesis.",
+    ]),
+    "policy_handoff": "\n".join([
+        "Final company security context for Policy Agent.",
+        "This is the approved handoff artifact, not a conversation transcript.",
+        "",
+        "Final context metadata:",
+        "{final_context_metadata}",
+        "",
+        "Approved sections:",
+        "{final_context_sections}",
+    ]),
+}
 CONTEXT_ANSWER_FIELDS = {
     "country",
     "region",
@@ -386,6 +461,36 @@ def load_questions(config_path: str | None = None):
         return yaml.safe_load(f)["questions"]
 
 
+def load_context_prompt_templates(config_path: str | None = None) -> dict[str, str]:
+    """Load phase-specific Context Workplace prompt templates from YAML config."""
+    resolved_config_path = config_path or _agent_config_path()
+    try:
+        with open(resolved_config_path, "r", encoding="utf-8") as f:
+            payload = yaml.safe_load(f) or {}
+    except OSError:
+        return dict(DEFAULT_CONTEXT_PROMPT_TEMPLATES)
+    templates = payload.get("prompts") if isinstance(payload, dict) else None
+    merged = dict(DEFAULT_CONTEXT_PROMPT_TEMPLATES)
+    if isinstance(templates, dict):
+        for key, value in templates.items():
+            if isinstance(value, str) and value.strip():
+                merged[str(key)] = value.strip()
+    return merged
+
+
+class _SafePromptValues(dict):
+    def __missing__(self, key):
+        return "unknown"
+
+
+def _render_context_prompt_template(template_name: str, values: dict[str, str]) -> str:
+    template = load_context_prompt_templates().get(
+        template_name,
+        DEFAULT_CONTEXT_PROMPT_TEMPLATES[template_name],
+    )
+    return template.format_map(_SafePromptValues(values)).strip()
+
+
 def context_answer_fields(question_config: str | None = None) -> set[str]:
     """Return supported context answer ids from configured questions plus legacy fields."""
     try:
@@ -395,20 +500,8 @@ def context_answer_fields(question_config: str | None = None) -> set[str]:
     return CONTEXT_ANSWER_FIELDS.union(configured)
 
 
-def generate_context_prompt(data: dict, question_config: str | None = None) -> str:
-    """
-    Build a text prompt from form answers.
-    This prompt is used to drive context generation.
-    """
-    questions = load_questions(question_config)
-    security_context = build_context_security_context(data)
-
-    lines = [
-        "You are Context Agent for an information-security policy workflow.",
-        "Your task is to transform the user's company answers into a detailed, concrete, security-focused company context.",
-        "Do not draft the final policy. Produce a refined context that downstream Policy Agent and RAG retrieval can use.",
-        "",
-        "Security context analysis:",
+def _security_context_prompt_summary(security_context: dict) -> str:
+    return "\n".join([
         f"- Version: {security_context['version']}",
         f"- Sector: {security_context['profile']['sector'] or 'unknown'}",
         f"- Activity: {security_context['profile']['activity'] or 'unknown'}",
@@ -430,18 +523,33 @@ def generate_context_prompt(data: dict, question_config: str | None = None) -> s
         f"- Specificity: {security_context['policy_intent']['specificity'] or 'unknown'}",
         f"- Missing information: {_format_list(security_context['analysis']['missing_information'])}",
         f"- Retrieval collection hints: {_format_list(security_context['retrieval_hints']['collection_families'])}",
-        "",
-        "User-provided answers:",
-    ]
-    for q in questions:
+    ])
+
+
+def _user_answers_prompt_summary(data: dict, question_config: str | None = None) -> str:
+    lines = []
+    for q in load_questions(question_config):
         key = q["id"]
-        answer = data.get(key, "").strip()
+        answer = str(data.get(key, "") or "").strip()
         if answer:
             lines.append(f"- {q['question']} {answer}")
-    lines.append(
-        "Output requirements: write a concise but complete business and information-security context; identify the security domains, relevant assets, data categories, regulatory exposure, assumptions, missing information, and the concrete policy objective."
+    return "\n".join(lines) if lines else "- No explicit answers available."
+
+
+def generate_context_prompt(data: dict, question_config: str | None = None) -> str:
+    """
+    Build a text prompt from form answers.
+    This prompt is used to drive context generation.
+    """
+    security_context = build_context_security_context(data)
+
+    return _render_context_prompt_template(
+        "context_intake",
+        {
+            "security_context_summary": _security_context_prompt_summary(security_context),
+            "user_answers": _user_answers_prompt_summary(data, question_config),
+        },
     )
-    return "\n".join(lines)
 
 
 def build_context_intelligence_plan(context_data: dict, existing_plan: dict | None = None) -> dict:
@@ -653,50 +761,43 @@ def _context_building_question(field_path: str, existing: dict | None = None) ->
     return question
 
 
+def _context_tasks_prompt_summary(plan: dict) -> str:
+    lines = []
+    for task in plan.get("tasks", []):
+        lines.append(f"{task['order']}. {task['title']}: {task['objective']}")
+    return "\n".join(lines) if lines else "- No context-intelligence tasks available."
+
+
 def generate_context_plan_prompt(data: dict, question_config: str | None = None) -> str:
     """Build the initial prompt that asks the agent to review the task plan."""
     security_context = build_context_security_context(data)
     plan = build_context_intelligence_plan(data)
-    questions = load_questions(question_config)
 
-    lines = [
-        "You are Context Agent for an information-security policy workflow.",
-        "The user has provided an initial company context. Your first task is not to write the final context.",
-        "Produce a reviewable analysis plan that lists the tasks needed to reach a complete security context.",
-        "Ask the user to confirm whether this plan is appropriate or whether relevant business, IT, risk, or compliance aspects are missing.",
-        "",
-        "Initial security context:",
-        f"- Sector: {security_context['profile']['sector'] or 'unknown'}",
-        f"- Activity: {security_context['profile']['activity'] or 'unknown'}",
-        f"- Countries: {_format_list(security_context['profile']['operating_countries'])}",
-        f"- Critical assets: {_format_list(security_context['information_assets']['critical_assets'])}",
-        f"- Data categories: {_format_list(security_context['information_assets']['data_categories'])}",
-        f"- Dependencies: {_format_list(security_context['information_assets']['third_party_dependencies'])}",
-        f"- Cloud/SaaS services: {_format_list(security_context['information_assets']['cloud_services'])}",
-        f"- Known gaps: {_format_list(security_context['security_posture']['known_gaps'])}",
-        f"- Regulatory hints: {_format_list(security_context['compliance']['regulatory_hints'])}",
-        f"- Policy objective: {security_context['policy_intent']['need'] or 'unknown'}",
-        f"- Missing information: {_format_list(security_context['analysis']['missing_information'])}",
-        "",
-        "Proposed context-intelligence tasks:",
-    ]
-    for task in plan["tasks"]:
-        lines.append(f"{task['order']}. {task['title']}: {task['objective']}")
-
-    lines.extend([
-        "",
-        "User-provided answers:",
-    ])
-    for q in questions:
-        key = q["id"]
-        answer = str(data.get(key, "") or "").strip()
-        if answer:
-            lines.append(f"- {q['question']} {answer}")
-
-    lines.append(
-        "Output requirements: explain the proposed tasks, identify any missing task, and end by asking the user to approve the plan or add more context before execution."
+    return _render_context_prompt_template(
+        "context_planning",
+        {
+            "security_context_summary": _security_context_prompt_summary(security_context),
+            "context_tasks": _context_tasks_prompt_summary(plan),
+            "user_answers": _user_answers_prompt_summary(data, question_config),
+        },
     )
-    return "\n".join(lines)
+
+
+def generate_context_update_prompt(context: dict, additional_context: str) -> str:
+    """Build the prompt used when Intake adds more context after creation."""
+    updated_context = {**context, "need": additional_context or context.get("need", "")}
+    security_context = build_context_security_context(
+        context,
+        additional_need=additional_context,
+    )
+    return _render_context_prompt_template(
+        "context_update",
+        {
+            "additional_context": additional_context,
+            "security_context_summary": _security_context_prompt_summary(security_context),
+            "user_answers": _user_answers_prompt_summary(updated_context),
+        },
+    )
 
 
 def approve_context_intelligence_plan(
@@ -764,29 +865,21 @@ def context_plan_revision(plan: dict) -> dict | None:
 def build_context_task_prompt(context: dict, task: dict, plan_revision: dict) -> str:
     """Build the bounded prompt used to execute one approved context-plan task."""
     security_context = context.get("security_context") or build_context_security_context(context)
-    return "\n".join([
-        "You are Context Agent executing one approved context-intelligence task.",
-        "Do not generate a policy. Produce only task analysis for final context synthesis.",
-        f"Task id: {task.get('id')}",
-        f"Task title: {task.get('title')}",
-        f"Task objective: {task.get('objective')}",
-        f"Approved revision: {plan_revision.get('revision_id')}",
-        f"Context snapshot hash: {plan_revision.get('context_snapshot_hash')}",
-        "",
-        "Current security context:",
-        f"- Sector: {security_context['profile']['sector'] or 'unknown'}",
-        f"- Activity: {security_context['profile']['activity'] or 'unknown'}",
-        f"- Countries: {_format_list(security_context['profile']['operating_countries'])}",
-        f"- Critical assets: {_format_list(security_context['information_assets']['critical_assets'])}",
-        f"- Data categories: {_format_list(security_context['information_assets']['data_categories'])}",
-        f"- Dependencies: {_format_list(security_context['information_assets']['third_party_dependencies'])}",
-        f"- Cloud/SaaS services: {_format_list(security_context['information_assets']['cloud_services'])}",
-        f"- Known gaps: {_format_list(security_context['security_posture']['known_gaps'])}",
-        f"- Regulatory hints: {_format_list(security_context['compliance']['regulatory_hints'])}",
-        f"- Policy objective: {security_context['policy_intent']['need'] or 'unknown'}",
-        "",
-        "Output requirements: return concise, concrete findings, assumptions, missing details, and implications for final company security context synthesis.",
-    ])
+    return _render_context_prompt_template(
+        "context_task_execution",
+        {
+            "task_summary": "\n".join([
+                f"- Task id: {task.get('id')}",
+                f"- Task title: {task.get('title')}",
+                f"- Task objective: {task.get('objective')}",
+            ]),
+            "plan_revision_summary": "\n".join([
+                f"- Approved revision: {plan_revision.get('revision_id')}",
+                f"- Context snapshot hash: {plan_revision.get('context_snapshot_hash')}",
+            ]),
+            "security_context_summary": _security_context_prompt_summary(security_context),
+        },
+    )
 
 
 def execute_context_plan(context_id: str) -> dict:
@@ -1029,6 +1122,17 @@ def build_final_context(
         for task in task_results.get("tasks", [])
         if isinstance(task, dict)
     ]
+    task_items = [
+        {
+            "item_id": task.get("task_id") or f"task-{index + 1}",
+            "order": index + 1,
+            "title": task.get("title") or f"Context task {index + 1}",
+            "status": task.get("status") or "unknown",
+            "content": task.get("result") or "",
+        }
+        for index, task in enumerate(tasks)
+        if task.get("result")
+    ]
     synthesized_at = datetime.now(timezone.utc).isoformat()
     return {
         "version": FINAL_CONTEXT_VERSION,
@@ -1054,6 +1158,7 @@ def build_final_context(
                     for task in tasks
                     if task.get("result")
                 ),
+                "items": task_items,
             },
             "assumptions_and_missing_information": {
                 "status": "accepted",
@@ -1066,19 +1171,24 @@ def build_final_context(
 def render_final_context_prompt(final_context: dict) -> str:
     """Render the canonical prompt consumed by Policy Agent."""
     sections = final_context.get("sections", {})
-    lines = [
-        "Final company security context for policy generation.",
-        f"Final context version: {final_context.get('version')}",
-        f"Plan revision: {final_context.get('plan_revision_id') or 'unknown'}",
-        "",
-    ]
+    section_lines = []
     for title, section in sections.items():
-        lines.extend([
+        section_lines.extend([
             title.replace("_", " ").title(),
             str(section.get("content") or "").strip(),
             "",
         ])
-    return "\n".join(lines).strip()
+    return _render_context_prompt_template(
+        "policy_handoff",
+        {
+            "final_context_metadata": "\n".join([
+                f"- Final context version: {final_context.get('version')}",
+                f"- Plan revision: {final_context.get('plan_revision_id') or 'unknown'}",
+                f"- Context snapshot hash: {final_context.get('context_snapshot_hash') or 'unknown'}",
+            ]),
+            "final_context_sections": "\n".join(section_lines).strip(),
+        },
+    )
 
 
 def mark_final_context_sections_for_improvement(context_id: str, comments_by_section: dict) -> dict:
@@ -1258,6 +1368,52 @@ def export_context_lessons(context_id: str) -> dict:
         "context_id": context_id,
         "lessons": lessons,
         "count": len(lessons),
+    }
+
+
+def update_context_lesson_status(context_id: str, lesson_id: str, status: str) -> dict:
+    """Update the review/export status for one embedded context lesson."""
+    if status not in {"pending_review", "approved_for_export"}:
+        return _final_context_error(
+            "context_lesson_status_invalid",
+            "Context lesson status is invalid.",
+            status_code=400,
+        )
+
+    context_obj_id = ObjectId(context_id)
+    context = mongo.db.contexts.find_one({"_id": context_obj_id})
+    if not context:
+        return _final_context_error("context_not_found", "Context not found.", status_code=404)
+
+    lessons = []
+    updated_lesson = None
+    now = datetime.now(timezone.utc).isoformat()
+    for lesson in context.get("context_lessons", []):
+        if not isinstance(lesson, dict):
+            continue
+        candidate = dict(lesson)
+        if candidate.get("lesson_id") == lesson_id:
+            candidate["status"] = status
+            candidate["reviewed_at"] = now
+            updated_lesson = candidate
+        lessons.append(candidate)
+
+    if not updated_lesson:
+        return _final_context_error(
+            "context_lesson_not_found",
+            "Context lesson not found.",
+            status_code=404,
+        )
+
+    mongo.db.contexts.update_one(
+        {"_id": context_obj_id},
+        {"$set": {"context_lessons": lessons}},
+    )
+    return {
+        "success": True,
+        "stage": "context_lesson_review",
+        "context_id": context_id,
+        "lesson": updated_lesson,
     }
 
 
