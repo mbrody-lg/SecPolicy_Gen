@@ -19,6 +19,7 @@ from app.services.logic import (
     build_context_security_context,
     build_context_intelligence_plan,
     context_plan_revision,
+    defer_context_building_question,
     context_answer_fields,
     get_health_status,
     get_system_status,
@@ -27,10 +28,16 @@ from app.services.logic import (
     public_security_context_payload,
     refresh_system_state,
     generate_context_plan_prompt,
+    generate_context_update_prompt,
+    export_context_lessons,
+    mark_final_context_sections_for_improvement,
+    regenerate_final_context_sections,
     run_with_agent,
     load_questions,
     render_markdown,
+    synthesize_final_context,
     store_validated_policy,
+    update_context_lesson_status,
 )
 from app.services.pipeline_jobs import (
     create_pipeline_job,
@@ -286,6 +293,17 @@ def _policy_generation_blocker(context: dict | None) -> dict | None:
             "message": "Approve the context intelligence plan before generating a policy.",
             "status_code": 409,
         }
+    final_context = context.get("final_context")
+    if (
+        context.get("status") != "context_ready_for_policy"
+        or not isinstance(final_context, dict)
+        or final_context.get("context_ready_for_policy") is not True
+    ):
+        return {
+            "error_code": "final_context_not_ready",
+            "message": "Synthesize the final context before generating a policy.",
+            "status_code": 409,
+        }
     security_context = context.get("security_context")
     missing_information = []
     if isinstance(security_context, dict):
@@ -409,6 +427,24 @@ def context_detail(context_id):
                 item["rendered_answer"] = render_markdown(item["answer"])
             else:
                 item["rendered_answer"] = item.get("answer", "")
+        context_agent_response = next(
+            (
+                item.get("rendered_answer")
+                for item in reversed(interactions)
+                if item.get("origin") == "agent" and item.get("answer")
+            ),
+            "",
+        )
+        final_sections = ((context.get("final_context") or {}).get("sections") or {})
+        for section in final_sections.values():
+            if isinstance(section, dict):
+                section["rendered_content"] = render_markdown(section.get("content") or "")
+                for item in section.get("items") or []:
+                    if isinstance(item, dict):
+                        item["rendered_content"] = render_markdown(item.get("content") or "")
+        for task in ((context.get("context_task_results") or {}).get("tasks") or []):
+            if isinstance(task, dict):
+                task["rendered_result"] = render_markdown(task.get("result") or "")
 
     except (InvalidId, TypeError, Exception):
         return abort(400, "Invalid identifier.")
@@ -421,6 +457,7 @@ def context_detail(context_id):
         latest_pipeline_job=find_latest_pipeline_job(str(context_id)),
         latest_context_plan_job=find_latest_pipeline_job(str(context_id), command="execute_context_plan"),
         developer_diagnostics_enabled=_developer_diagnostics_enabled(),
+        context_agent_response=context_agent_response,
     )
 
 
@@ -499,7 +536,7 @@ def answer_context_building_questions(context_id):
     submitted_answers = _context_building_answers_from_request()
     if not submitted_answers:
         flash("Add at least one answer before updating the context.", "warning")
-        return redirect(url_for("main.context_detail", context_id=context_id))
+        return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-intake"))
 
     result = apply_context_building_answers(context, submitted_answers)
     update_payload = {
@@ -512,19 +549,72 @@ def answer_context_building_questions(context_id):
     }
     mongo.db.contexts.update_one({"_id": context_obj_id}, {"$set": update_payload})
 
+    questions_by_id = {
+        str(question.get("id", "")): question
+        for question in (context.get("context_building") or {}).get("questions", [])
+        if isinstance(question, dict)
+    }
     for question_id, answer in submitted_answers.items():
         if answer.strip():
+            question = questions_by_id.get(str(question_id), {})
+            question_text = question.get("question") or "Context building question"
+            mongo.db.interactions.insert_one({
+                "context_id": context_obj_id,
+                "question_id": f"{question_id}_question",
+                "question_text": question_text,
+                "answer": "",
+                "timestamp": datetime.now(timezone.utc),
+                "origin": "agent",
+            })
             mongo.db.interactions.insert_one({
                 "context_id": context_obj_id,
                 "question_id": question_id,
-                "question_text": "Context building answer",
+                "question_text": question_text,
                 "answer": answer.strip(),
                 "timestamp": datetime.now(timezone.utc),
                 "origin": "user",
             })
 
     flash("Context building answers saved and security context updated.", "success")
-    return redirect(url_for("main.context_detail", context_id=context_id))
+    return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-intake"))
+
+
+@main.route("/context/<context_id>/context-building/questions/defer", methods=["POST"])
+def defer_context_building_question_route(context_id):
+    """Defer a CONTEXT BUILDING question while keeping planning blocked."""
+    context_obj_id = ObjectId(context_id)
+    context = mongo.db.contexts.find_one({"_id": context_obj_id})
+    if not context:
+        return abort(404, "Context not found.")
+
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+        question_id = payload.get("question_id")
+        reason = payload.get("reason")
+    else:
+        question_id = request.form.get("question_id")
+        reason = request.form.get("reason")
+
+    result = defer_context_building_question(context, str(question_id or ""), reason)
+    if not result.get("success"):
+        if _wants_json_response():
+            return jsonify(result), result.get("status_code", 400)
+        flash(result.get("message", "Context-building question could not be deferred."), "warning")
+        return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-planning"))
+
+    mongo.db.contexts.update_one(
+        {"_id": context_obj_id},
+        {
+            "$set": {
+                "status": result["status"],
+                "context_building": result["context_building"],
+            }
+        },
+    )
+    if _wants_json_response():
+        return jsonify(result), 200
+    flash("Context-building question deferred. Planning remains blocked until required context is complete.", "info")
+    return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-intake"))
 
 
 def _context_building_answers_from_request() -> dict[str, str]:
@@ -556,7 +646,7 @@ def continue_context(context_id):
 
     new_prompt = request.form.get("prompt", "").strip()
     if not new_prompt:
-        return redirect(url_for("main.context_detail", context_id=context_id))
+        return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-intake"))
 
     count = mongo.db.interactions.count_documents({
         "context_id": ObjectId(context_id),
@@ -574,9 +664,10 @@ def continue_context(context_id):
         "origin": "user"
     })
 
-    # 2. Execute agent
+    # 2. Execute agent with a phase-specific context-update prompt
+    context_update_prompt = generate_context_update_prompt(context, new_prompt)
     response = run_with_agent(
-        new_prompt,
+        context_update_prompt,
         context_id,
         model_version=context.get("version", "0.1.0"),
     )
@@ -588,7 +679,7 @@ def continue_context(context_id):
             {"$set": {"status": "pending"}}
         )
         flash("A response could not be generated. Please try again.", "warning")
-        return redirect(url_for("main.context_detail", context_id=context_id))
+        return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-intake"))
 
     # 4. Save agent response
     mongo.db.interactions.insert_one({
@@ -636,7 +727,7 @@ def continue_context(context_id):
         }
     )
 
-    return redirect(url_for("main.context_detail", context_id=context_id))
+    return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-intake"))
 
 
 @main.route("/context/<context_id>/context-plan/approve", methods=["POST"])
@@ -673,7 +764,7 @@ def approve_context_plan(context_id):
     })
 
     flash("Context intelligence plan approved. Task execution can start next.", "success")
-    return redirect(url_for("main.context_detail", context_id=context_id))
+    return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-execution"))
 
 
 @main.route("/context/<context_id>/context-plan/execute", methods=["POST"])
@@ -696,7 +787,7 @@ def trigger_context_plan_execution(context_id):
         if _wants_json_response():
             return jsonify(payload), blocker["status_code"]
         flash(payload["message"], "warning")
-        return redirect(url_for("main.context_detail", context_id=context_id))
+        return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-execution"))
 
     active_job = find_active_pipeline_job(context_id, command="execute_context_plan")
     if active_job:
@@ -709,7 +800,7 @@ def trigger_context_plan_execution(context_id):
         if _wants_json_response():
             return jsonify(payload), 202
         flash("Context plan execution is already running.", "info")
-        return redirect(url_for("main.context_detail", context_id=context_id))
+        return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-execution"))
 
     job = create_pipeline_job(
         context_id=context_id,
@@ -726,6 +817,85 @@ def trigger_context_plan_execution(context_id):
     if _wants_json_response():
         return jsonify(payload), 202
     flash("Context plan execution started. Current stage: queued.", "info")
+    return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-execution"))
+
+
+@main.route("/context/<context_id>/final-context/synthesize", methods=["POST"])
+def trigger_final_context_synthesis(context_id):
+    """Synthesize final context after approved plan execution."""
+    result = synthesize_final_context(context_id)
+    if _wants_json_response():
+        return jsonify(result), 200 if result.get("success") else result.get("status_code", 500)
+    if result.get("success"):
+        flash("Final context synthesized. Policy generation is now available.", "success")
+    else:
+        flash(result.get("message", "Final context synthesis failed."), "warning")
+    return redirect(url_for("main.context_detail", context_id=context_id))
+
+
+@main.route("/context/<context_id>/final-context/sections/improve", methods=["POST"])
+def mark_final_context_sections_for_improvement_route(context_id):
+    """Mark one or more final-context sections as needing improvement."""
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+        comments_by_section = payload.get("comments") or payload.get("sections") or {}
+    else:
+        section_id = request.form.get("section_id")
+        comment = request.form.get("comment")
+        comment_scope = (request.form.get("comment_scope") or "").strip()
+        selected_excerpt = (request.form.get("selected_excerpt") or "").strip()
+        if selected_excerpt:
+            comment = f"Selected text: {selected_excerpt}\n\nComment: {comment or 'Improve the selected text.'}"
+        if comment_scope and comment:
+            comment = f"[{comment_scope}] {comment}"
+        comments_by_section = {section_id: comment} if section_id else {}
+
+    result = mark_final_context_sections_for_improvement(context_id, comments_by_section)
+    if _wants_json_response():
+        return jsonify(result), 200 if result.get("success") else result.get("status_code", 500)
+    if result.get("success"):
+        flash("Final context section marked for improvement.", "success")
+    else:
+        flash(result.get("message", "Final context section review failed."), "warning")
+    return redirect(url_for("main.context_detail", context_id=context_id))
+
+
+@main.route("/context/<context_id>/final-context/sections/regenerate", methods=["POST"])
+def regenerate_final_context_sections_route(context_id):
+    """Regenerate final-context sections marked for improvement."""
+    result = regenerate_final_context_sections(context_id)
+    if _wants_json_response():
+        return jsonify(result), 200 if result.get("success") else result.get("status_code", 500)
+    if result.get("success"):
+        flash("Final context sections regenerated. Policy generation is available again.", "success")
+    else:
+        flash(result.get("message", "Final context section regeneration failed."), "warning")
+    return redirect(url_for("main.context_detail", context_id=context_id))
+
+
+@main.route("/context/<context_id>/context-lessons/export", methods=["GET"])
+def export_context_lessons_route(context_id):
+    """Export reviewed context lessons for explicit future RAG ingestion."""
+    result = export_context_lessons(context_id)
+    return jsonify(result), 200 if result.get("success") else result.get("status_code", 500)
+
+
+@main.route("/context/<context_id>/context-lessons/<lesson_id>/status", methods=["POST"])
+def update_context_lesson_status_route(context_id, lesson_id):
+    """Review one context lesson for explicit future RAG export."""
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+        status = payload.get("status", "pending_review")
+    else:
+        status = request.form.get("status", "pending_review")
+
+    result = update_context_lesson_status(context_id, lesson_id, status)
+    if _wants_json_response():
+        return jsonify(result), 200 if result.get("success") else result.get("status_code", 500)
+    if result.get("success"):
+        flash("Context lesson review status updated.", "success")
+    else:
+        flash(result.get("message", "Context lesson review failed."), "warning")
     return redirect(url_for("main.context_detail", context_id=context_id))
 
 

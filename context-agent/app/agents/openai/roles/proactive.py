@@ -8,30 +8,25 @@ class ProactiveGoalCreator(OpenAIClient):
     def execute(self, input_prompt: str) -> str:
         """Return an enhanced objective prompt using chat completion."""
         instructions = """
-        Improve this objective to make it more effective in generating security context. 
-        Enumerate which technical requirements must needed to secure this type of SME's.
-        Enumerate which legal requirements must comply the company based on their operational context.
-        - Once you have all the answers to the initial questionnaire, develop the policy strictly following the **Recommended Structure**:
-        1. Introduction
-        2. Scope
-        2. General Objectives
-        3. Risk Analysis
-        4. Policy Development (with detailed sections)
-        5. Technology Integration
-        6. Employee Training
-        7. Regulatory Compliance and Regulation
-        8. Cost Management
-        9. Continuous Improvement
-        - Maintain a formal and structured tone.
-        - Make sure to include specific examples (free tools, step-by-step procedures) adapted to the size of an SME.
-        - Use subsections and lists to facilitate reading and practical application.
-        - End with a **Expected Results** section and a brief **Conclusion**.
+        Improve this Context Agent prompt without changing its workflow phase.
+        Context Agent works inside Context Workplace. Do not draft a policy.
+
+        Rules:
+        - Preserve the phase intent exactly: INTAKE, CONTEXT UPDATE, PLANNING, EXECUTION, or Policy Agent handoff.
+        - Preserve explicit user facts, field names, task ids, revision ids, hashes, and output constraints.
+        - Strengthen the prompt so the answer is concrete for information-security context analysis.
+        - Keep missing information as questions or assumptions; do not invent facts.
+        - Do not ask the model to develop, write, validate, or approve a policy.
+        - Do not replace a task-execution prompt with a general consulting answer.
+        - Return only the improved prompt text.
         """
         response = self.client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": instructions},
                 {"role": "user", "content": input_prompt}
-            ]
+            ],
+        temperature = 0.7,
+        max_tokens = 15000
         )
         return response.choices[0].message.content.strip()
