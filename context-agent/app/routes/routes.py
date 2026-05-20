@@ -28,6 +28,7 @@ from app.services.logic import (
     public_security_context_payload,
     refresh_system_state,
     generate_context_plan_prompt,
+    generate_context_update_prompt,
     export_context_lessons,
     mark_final_context_sections_for_improvement,
     regenerate_final_context_sections,
@@ -441,6 +442,9 @@ def context_detail(context_id):
                 for item in section.get("items") or []:
                     if isinstance(item, dict):
                         item["rendered_content"] = render_markdown(item.get("content") or "")
+        for task in ((context.get("context_task_results") or {}).get("tasks") or []):
+            if isinstance(task, dict):
+                task["rendered_result"] = render_markdown(task.get("result") or "")
 
     except (InvalidId, TypeError, Exception):
         return abort(400, "Invalid identifier.")
@@ -532,7 +536,7 @@ def answer_context_building_questions(context_id):
     submitted_answers = _context_building_answers_from_request()
     if not submitted_answers:
         flash("Add at least one answer before updating the context.", "warning")
-        return redirect(url_for("main.context_detail", context_id=context_id))
+        return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-intake"))
 
     result = apply_context_building_answers(context, submitted_answers)
     update_payload = {
@@ -545,19 +549,34 @@ def answer_context_building_questions(context_id):
     }
     mongo.db.contexts.update_one({"_id": context_obj_id}, {"$set": update_payload})
 
+    questions_by_id = {
+        str(question.get("id", "")): question
+        for question in (context.get("context_building") or {}).get("questions", [])
+        if isinstance(question, dict)
+    }
     for question_id, answer in submitted_answers.items():
         if answer.strip():
+            question = questions_by_id.get(str(question_id), {})
+            question_text = question.get("question") or "Context building question"
+            mongo.db.interactions.insert_one({
+                "context_id": context_obj_id,
+                "question_id": f"{question_id}_question",
+                "question_text": question_text,
+                "answer": "",
+                "timestamp": datetime.now(timezone.utc),
+                "origin": "agent",
+            })
             mongo.db.interactions.insert_one({
                 "context_id": context_obj_id,
                 "question_id": question_id,
-                "question_text": "Context building answer",
+                "question_text": question_text,
                 "answer": answer.strip(),
                 "timestamp": datetime.now(timezone.utc),
                 "origin": "user",
             })
 
     flash("Context building answers saved and security context updated.", "success")
-    return redirect(url_for("main.context_detail", context_id=context_id))
+    return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-intake"))
 
 
 @main.route("/context/<context_id>/context-building/questions/defer", methods=["POST"])
@@ -581,7 +600,7 @@ def defer_context_building_question_route(context_id):
         if _wants_json_response():
             return jsonify(result), result.get("status_code", 400)
         flash(result.get("message", "Context-building question could not be deferred."), "warning")
-        return redirect(url_for("main.context_detail", context_id=context_id))
+        return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-planning"))
 
     mongo.db.contexts.update_one(
         {"_id": context_obj_id},
@@ -595,7 +614,7 @@ def defer_context_building_question_route(context_id):
     if _wants_json_response():
         return jsonify(result), 200
     flash("Context-building question deferred. Planning remains blocked until required context is complete.", "info")
-    return redirect(url_for("main.context_detail", context_id=context_id))
+    return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-intake"))
 
 
 def _context_building_answers_from_request() -> dict[str, str]:
@@ -627,7 +646,7 @@ def continue_context(context_id):
 
     new_prompt = request.form.get("prompt", "").strip()
     if not new_prompt:
-        return redirect(url_for("main.context_detail", context_id=context_id))
+        return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-intake"))
 
     count = mongo.db.interactions.count_documents({
         "context_id": ObjectId(context_id),
@@ -645,9 +664,10 @@ def continue_context(context_id):
         "origin": "user"
     })
 
-    # 2. Execute agent
+    # 2. Execute agent with a phase-specific context-update prompt
+    context_update_prompt = generate_context_update_prompt(context, new_prompt)
     response = run_with_agent(
-        new_prompt,
+        context_update_prompt,
         context_id,
         model_version=context.get("version", "0.1.0"),
     )
@@ -659,7 +679,7 @@ def continue_context(context_id):
             {"$set": {"status": "pending"}}
         )
         flash("A response could not be generated. Please try again.", "warning")
-        return redirect(url_for("main.context_detail", context_id=context_id))
+        return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-intake"))
 
     # 4. Save agent response
     mongo.db.interactions.insert_one({
@@ -707,7 +727,7 @@ def continue_context(context_id):
         }
     )
 
-    return redirect(url_for("main.context_detail", context_id=context_id))
+    return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-intake"))
 
 
 @main.route("/context/<context_id>/context-plan/approve", methods=["POST"])
@@ -744,7 +764,7 @@ def approve_context_plan(context_id):
     })
 
     flash("Context intelligence plan approved. Task execution can start next.", "success")
-    return redirect(url_for("main.context_detail", context_id=context_id))
+    return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-execution"))
 
 
 @main.route("/context/<context_id>/context-plan/execute", methods=["POST"])
@@ -767,7 +787,7 @@ def trigger_context_plan_execution(context_id):
         if _wants_json_response():
             return jsonify(payload), blocker["status_code"]
         flash(payload["message"], "warning")
-        return redirect(url_for("main.context_detail", context_id=context_id))
+        return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-execution"))
 
     active_job = find_active_pipeline_job(context_id, command="execute_context_plan")
     if active_job:
@@ -780,7 +800,7 @@ def trigger_context_plan_execution(context_id):
         if _wants_json_response():
             return jsonify(payload), 202
         flash("Context plan execution is already running.", "info")
-        return redirect(url_for("main.context_detail", context_id=context_id))
+        return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-execution"))
 
     job = create_pipeline_job(
         context_id=context_id,
@@ -797,7 +817,7 @@ def trigger_context_plan_execution(context_id):
     if _wants_json_response():
         return jsonify(payload), 202
     flash("Context plan execution started. Current stage: queued.", "info")
-    return redirect(url_for("main.context_detail", context_id=context_id))
+    return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-execution"))
 
 
 @main.route("/context/<context_id>/final-context/synthesize", methods=["POST"])

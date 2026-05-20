@@ -7,6 +7,8 @@ from uuid import UUID
 
 from test_base import *
 import app.routes.routes as routes_module
+from ui_workflow_fixtures import context_document
+from ui_workflow_fixtures import interactions as ui_interactions
 
 
 class FakeCursor:
@@ -347,6 +349,7 @@ def test_context_building_answers_update_context_and_rebuild_plan(client, monkey
     )
 
     assert response.status_code == 302
+    assert response.headers["Location"].endswith(f"/context/{context_id}#workflow-tab-intake")
     context = routes_module.mongo.db.contexts.find_one({"_id": context_id})
     assert context["sector"] == "Healthcare"
     assert context["status"] == "context_building_needs_input"
@@ -358,6 +361,14 @@ def test_context_building_answers_update_context_and_rebuild_plan(client, monkey
         "question_id": "context_building_profile_sector",
     })
     assert interaction["answer"] == "Healthcare"
+    assert interaction["question_text"] == "Which business sector should the security context use?"
+    question_interaction = routes_module.mongo.db.interactions.find_one({
+        "context_id": context_id,
+        "question_id": "context_building_profile_sector_question",
+    })
+    assert question_interaction["origin"] == "agent"
+    assert question_interaction["answer"] == ""
+    assert question_interaction["question_text"] == "Which business sector should the security context use?"
 
 
 def test_context_building_answers_can_complete_context(client):
@@ -392,6 +403,40 @@ def test_context_building_answers_can_complete_context(client):
     assert context["status"] == "awaiting_task_validation"
     assert context["context_building"]["status"] == "sufficient"
     assert context["context_intelligence_plan"]["context_snapshot"]["sector"] == "Healthcare"
+
+
+def test_continue_context_uses_context_update_prompt(client, monkeypatch):
+    context_id = ObjectId()
+    routes_module.mongo.db.contexts.insert_one({
+        "_id": context_id,
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "need": "Build a security plan",
+        "version": "0.1.0",
+    })
+    captured = {}
+    monkeypatch.setattr(
+        routes_module,
+        "run_with_agent",
+        lambda prompt, context_id, model_version=None: captured.update({
+            "prompt": prompt,
+            "context_id": context_id,
+            "model_version": model_version,
+        }) or "Updated context assessment.",
+    )
+
+    response = client.post(
+        f"/context/{context_id}/continue",
+        data={"prompt": "Add outsourced laboratory access and monthly access reviews."},
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith(f"/context/{context_id}#workflow-tab-intake")
+    assert "Phase: CONTEXT UPDATE" in captured["prompt"]
+    assert "outsourced laboratory access" in captured["prompt"]
+    assert "Patient records" in captured["prompt"]
+    assert captured["model_version"] == "0.1.0"
 
 
 def test_context_building_question_can_be_deferred(client):
@@ -523,6 +568,7 @@ def test_approve_context_plan_updates_status_and_stores_feedback(client, monkeyp
     )
 
     assert response.status_code == 302
+    assert response.headers["Location"].endswith(f"/context/{context_id}#workflow-tab-execution")
     context = routes_module.mongo.db.contexts.find_one({"_id": context_id})
     assert context["status"] == "context_plan_approved"
     assert context["context_intelligence_plan"]["status"] == "approved"
@@ -614,7 +660,7 @@ def test_trigger_context_plan_execution_starts_job(client, monkeypatch):
     response = client.post(f"/context/{context_id}/context-plan/execute", follow_redirects=False)
 
     assert response.status_code == 302
-    assert response.headers["Location"].endswith(f"/context/{context_id}")
+    assert response.headers["Location"].endswith(f"/context/{context_id}#workflow-tab-execution")
     assert captured["command"] == "execute_context_plan"
     with client.session_transaction() as session:
         flashes = session.get("_flashes", [])
@@ -672,6 +718,7 @@ def test_trigger_context_plan_execution_reuses_active_job(client, monkeypatch):
     response = client.post(f"/context/{context_id}/context-plan/execute", follow_redirects=False)
 
     assert response.status_code == 302
+    assert response.headers["Location"].endswith(f"/context/{context_id}#workflow-tab-execution")
     with client.session_transaction() as session:
         flashes = session.get("_flashes", [])
     assert ("info", "Context plan execution is already running.") in flashes
@@ -953,7 +1000,7 @@ def test_context_detail_renders_security_context_panel(client, monkeypatch):
     assert b"Healthcare" in response.data
     assert b"health_data" in response.data
     assert b"legal_norms, sector_norms" in response.data
-    assert b"Version 1.0" in response.data
+    assert b"Version 1.0" not in response.data
 
 
 def test_context_detail_renders_security_context_missing_information(client, monkeypatch):
@@ -1575,11 +1622,15 @@ def test_context_detail_phase_navigation_shows_policy_ready_next_action(client, 
 
     assert response.status_code == 200
     assert b"Context workflow" in response.data
-    assert b"Follow the process left to right" in response.data
+    assert b"Follow the process through three workspaces" in response.data
     assert b"Operational status" in response.data
+    assert b"Context Workplace" in response.data
+    assert b"Policy Workplace" in response.data
+    assert b"Validator Workplace" in response.data
     assert b'data-workflow-step="context-intake"' in response.data
     assert b'data-workflow-step="validated"' in response.data
-    assert b'data-workflow-tab-panel="policy"' in response.data
+    assert b'data-workflow-tab-panel="policy-generation"' in response.data
+    assert b'data-workflow-tab-panel="validator-review"' in response.data
     assert b'data-workflow-tab-trigger="final-context"' in response.data
     assert b"Context: ready" in response.data
     assert b"Policy: idle" in response.data
@@ -1980,6 +2031,132 @@ def test_context_detail_renders_final_context_review_and_lessons(client, monkeyp
     assert b"This lesson will not be exported until approved." in response.data
     assert b"Approve for export" in response.data
     assert b"Export approved lessons" in response.data
+
+
+def test_context_detail_workflow_tabs_render_required_content(client, monkeypatch):
+    context_id = str(ObjectId())
+    _insert_context_executed_for_final_synthesis(context_id)
+    routes_module.mongo.db.interactions.insert_one({
+        "context_id": ObjectId(context_id),
+        "origin": "user",
+        "answer": "We operate a dental clinic with patient records.",
+        "timestamp": 1,
+    })
+    routes_module.mongo.db.interactions.insert_one({
+        "context_id": ObjectId(context_id),
+        "origin": "agent",
+        "answer": "## Context Agent assessment\nThe initial context is sufficient for planning.",
+        "timestamp": 2,
+    })
+    client.post(
+        f"/context/{context_id}/final-context/synthesize",
+        headers={"Accept": "application/json"},
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
+
+    response = client.get(f"/context/{context_id}")
+
+    assert response.status_code == 200
+    assert b'data-workflow-tab-panel="intake"' in response.data
+    assert b"Intake conversation" in response.data
+    assert b"We operate a dental clinic with patient records." in response.data
+    assert b"Add context" in response.data
+    assert b'data-workflow-tab-panel="context-building"' in response.data
+    assert b"Context Agent response for approval" in response.data
+    assert b"Context Agent assessment" in response.data
+    assert b'data-workflow-tab-panel="planning"' in response.data
+    assert b"Security context" in response.data
+    assert b"Context intelligence plan" in response.data
+    assert b"Context plan execution" in response.data
+    assert b'data-workflow-tab-panel="final-context"' in response.data
+    assert b"Final context" in response.data
+    assert b"data-selectable-final-context" in response.data
+    assert b'data-workflow-tab-panel="policy-generation"' in response.data
+    assert b"Generate policies" in response.data
+    assert b"Policy pipeline" in response.data
+    assert b'data-workflow-tab-panel="validator-review"' in response.data
+    assert b"Validator workplace" in response.data
+
+
+@pytest.mark.parametrize(
+    ("state", "expected_content"),
+    [
+        ("intake", [
+            b"Intake conversation",
+            b"Add context",
+            b"Context building has not generated follow-up questions yet.",
+            b"The planning artifact is not available yet.",
+            b"Final context is not available until the approved plan has been executed.",
+            b"Generate policies",
+            b"Validator workplace",
+        ]),
+        ("questions", [
+            b"New questions",
+            b"Which third-party providers process patient records?",
+            b"Context Agent has 1 pending question",
+            b"Needs more information",
+            b"Update context",
+        ]),
+        ("planning", [
+            b"Security context",
+            b"Context intelligence plan",
+            b"Awaiting validation",
+            b"Approve plan",
+            b"Final context is not available until the approved plan has been executed.",
+        ]),
+        ("executed", [
+            b"Context plan execution",
+            b"Completed tasks: 1",
+            b"Final context",
+            b"Synthesize final context",
+        ]),
+        ("final_needs_improvement", [
+            b"Final context",
+            b"Needs improvement",
+            b"Regenerate marked sections",
+            b"Synthesize the final context before generating a policy.",
+        ]),
+        ("final_only", [
+            b"Final context",
+            b"Information assets",
+            b"data-selectable-final-context",
+            b"Generate and validate",
+        ]),
+        ("ready", [
+            b"Operational status",
+            b"Context: ready",
+            b"Information assets",
+            b"data-selectable-final-context",
+            b"Generate and validate",
+        ]),
+    ],
+)
+def test_context_detail_ui_workflow_fixture_states_render_expected_content(
+    client,
+    monkeypatch,
+    state,
+    expected_content,
+):
+    context_id = str(ObjectId())
+    routes_module.mongo.db.contexts.insert_one(context_document(context_id, state))
+    routes_module.mongo.db.interactions.insert_many(ui_interactions(context_id))
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
+
+    response = client.get(f"/context/{context_id}")
+
+    assert response.status_code == 200
+    for expected in expected_content:
+        assert expected in response.data
+    assert b"data-workflow-step-trigger" in response.data
+    assert b"data-workplace-trigger" in response.data
 
 
 def test_final_context_plan_point_comment_is_scoped(client):
