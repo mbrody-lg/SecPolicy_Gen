@@ -295,6 +295,35 @@ def test_apply_context_building_answers_rebuilds_security_context_and_plan():
     assert result["context_intelligence_plan"]["context_snapshot"]["sector"] == "Healthcare"
 
 
+def test_defer_context_building_question_keeps_context_building_blocked():
+    context = {
+        "country": "Spain",
+        "need": "Build a security plan",
+    }
+    security_context = logic.build_context_security_context(context)
+    context["context_building"] = logic.build_context_building_state(
+        context,
+        security_context=security_context,
+    )
+
+    result = logic.defer_context_building_question(
+        context,
+        "context_building_profile_sector",
+        "Waiting for the CIO.",
+    )
+
+    assert result["success"] is True
+    assert result["status"] == "context_building_needs_input"
+    assert result["context_building"]["status"] == "needs_information"
+    question = next(
+        item
+        for item in result["context_building"]["questions"]
+        if item["id"] == "context_building_profile_sector"
+    )
+    assert question["status"] == "deferred"
+    assert question["deferred_reason"] == "Waiting for the CIO."
+
+
 def test_context_building_state_can_be_bypassed_for_fixture_imports():
     context_building = logic.build_context_building_state(
         {},
@@ -793,6 +822,38 @@ def test_regenerate_final_context_sections_restores_policy_handoff_and_records_l
     updated_context["context_lessons"][0]["status"] = "approved_for_export"
     export = logic.export_context_lessons(str(context_id))
     assert export["success"] is True
+    assert export["count"] == 1
+    assert export["lessons"][0]["lesson_id"] == "lesson-1"
+
+
+def test_update_context_lesson_status_controls_export_eligibility(monkeypatch):
+    context_id = ObjectId()
+    fake_db = FakeDB(
+        contexts=[
+            {
+                "_id": context_id,
+                "context_lessons": [
+                    {
+                        "lesson_id": "lesson-1",
+                        "status": "pending_review",
+                        "statement": "Review feedback should improve future contexts.",
+                    }
+                ],
+            }
+        ],
+        interactions=[],
+    )
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    result = logic.update_context_lesson_status(
+        str(context_id),
+        "lesson-1",
+        "approved_for_export",
+    )
+
+    assert result["success"] is True
+    assert result["lesson"]["status"] == "approved_for_export"
+    export = logic.export_context_lessons(str(context_id))
     assert export["count"] == 1
     assert export["lessons"][0]["lesson_id"] == "lesson-1"
 
