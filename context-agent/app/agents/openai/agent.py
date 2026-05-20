@@ -68,7 +68,7 @@ class OpenAIAgent(Agent):
         self.client.beta.threads.messages.create(
             thread_id=thread_id,
             role="user",
-            content=prompt
+            content=refined_prompt
         )
 
         # Execute the run
