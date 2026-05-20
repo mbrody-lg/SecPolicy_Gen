@@ -86,6 +86,7 @@ def test_get_context_and_prompt_prefers_context_refined_prompt(monkeypatch):
         contexts=[
             {
                 "_id": context_id,
+                "status": "context_ready_for_policy",
                 "refined_prompt": "canonical refined prompt",
                 "language": "es",
                 "version": "1.2.3",
@@ -116,7 +117,7 @@ def test_get_context_and_prompt_prefers_context_refined_prompt(monkeypatch):
 def test_get_context_and_prompt_falls_back_to_legacy_interaction(monkeypatch):
     context_id = ObjectId()
     fake_db = FakeDB(
-        contexts=[{"_id": context_id, "language": "en", "version": "0.2.0"}],
+        contexts=[{"_id": context_id, "status": "context_ready_for_policy", "language": "en", "version": "0.2.0"}],
         interactions=[
             {
                 "context_id": context_id,
@@ -139,7 +140,15 @@ def test_get_context_and_prompt_falls_back_to_legacy_interaction(monkeypatch):
 def test_get_context_and_prompt_normalizes_numeric_model_version(monkeypatch):
     context_id = ObjectId()
     fake_db = FakeDB(
-        contexts=[{"_id": context_id, "refined_prompt": "prompt", "language": "en", "version": 1}],
+        contexts=[
+            {
+                "_id": context_id,
+                "status": "context_ready_for_policy",
+                "refined_prompt": "prompt",
+                "language": "en",
+                "version": 1,
+            }
+        ],
         interactions=[],
     )
 
@@ -194,6 +203,135 @@ def test_build_context_intelligence_plan_creates_reviewable_tasks():
     assert plan["tasks"][-1]["id"] == "final_synthesis"
     assert plan["context_snapshot"]["sector"] == "Professional services"
     assert "client_confidential_data" in plan["context_snapshot"]["data_categories"]
+    assert plan["approved_revision_id"] is None
+    assert plan["revisions"] == []
+
+
+def test_build_context_intelligence_plan_preserves_existing_revisions():
+    existing_plan = logic.approve_context_intelligence_plan({
+        "country": "Spain",
+        "sector": "Professional services",
+        "critical_assets": "Client contracts",
+        "need": "Build a security plan",
+        "context_intelligence_plan": logic.build_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Professional services",
+            "critical_assets": "Client contracts",
+            "need": "Build a security plan",
+        }),
+    })
+
+    rebuilt = logic.build_context_intelligence_plan(
+        {
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "need": "Build a security plan",
+        },
+        existing_plan=existing_plan,
+    )
+
+    assert rebuilt["status"] == "draft"
+    assert rebuilt["approved_revision_id"] is None
+    assert rebuilt["revisions"] == existing_plan["revisions"]
+    assert rebuilt["context_snapshot"]["sector"] == "Healthcare"
+
+
+def test_build_context_building_state_creates_questions_for_missing_required_context():
+    security_context = logic.build_context_security_context({
+        "country": "Spain",
+        "need": "Build a security plan",
+    })
+
+    context_building = logic.build_context_building_state(
+        {"country": "Spain", "need": "Build a security plan"},
+        security_context=security_context,
+    )
+
+    assert context_building["status"] == "needs_information"
+    assert context_building["version"] == logic.CONTEXT_BUILDING_VERSION
+    assert context_building["missing_information"] == [
+        "profile.sector",
+        "information_assets.critical_assets",
+    ]
+    assert [question["field_path"] for question in context_building["questions"]] == [
+        "profile.sector",
+        "information_assets.critical_assets",
+    ]
+    assert context_building["questions"][0]["answer_field"] == "sector"
+
+
+def test_apply_context_building_answers_rebuilds_security_context_and_plan():
+    context = {
+        "country": "Spain",
+        "need": "Build a security plan",
+    }
+    security_context = logic.build_context_security_context(context)
+    context["security_context"] = security_context
+    context["context_building"] = logic.build_context_building_state(
+        context,
+        security_context=security_context,
+    )
+
+    result = logic.apply_context_building_answers(
+        context,
+        {
+            "context_building_profile_sector": "Healthcare",
+            "context_building_information_assets_critical_assets": "Patient records",
+        },
+    )
+
+    assert result["status"] == "awaiting_task_validation"
+    assert result["answer_updates"] == {
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+    }
+    assert result["context_building"]["status"] == "sufficient"
+    assert {
+        question["status"]
+        for question in result["context_building"]["questions"]
+    } == {"answered"}
+    assert result["security_context"]["profile"]["sector"] == "Healthcare"
+    assert result["context_intelligence_plan"]["context_snapshot"]["sector"] == "Healthcare"
+
+
+def test_defer_context_building_question_keeps_context_building_blocked():
+    context = {
+        "country": "Spain",
+        "need": "Build a security plan",
+    }
+    security_context = logic.build_context_security_context(context)
+    context["context_building"] = logic.build_context_building_state(
+        context,
+        security_context=security_context,
+    )
+
+    result = logic.defer_context_building_question(
+        context,
+        "context_building_profile_sector",
+        "Waiting for the CIO.",
+    )
+
+    assert result["success"] is True
+    assert result["status"] == "context_building_needs_input"
+    assert result["context_building"]["status"] == "needs_information"
+    question = next(
+        item
+        for item in result["context_building"]["questions"]
+        if item["id"] == "context_building_profile_sector"
+    )
+    assert question["status"] == "deferred"
+    assert question["deferred_reason"] == "Waiting for the CIO."
+
+
+def test_context_building_state_can_be_bypassed_for_fixture_imports():
+    context_building = logic.build_context_building_state(
+        {},
+        bypassed=True,
+    )
+
+    assert context_building["status"] == "approved"
+    assert context_building["bypassed"] is True
 
 
 def test_approve_context_intelligence_plan_marks_tasks_and_feedback():
@@ -218,8 +356,506 @@ def test_approve_context_intelligence_plan_marks_tasks_and_feedback():
     assert approved["status"] == "approved"
     assert approved["review"]["required"] is False
     assert approved["review"]["user_feedback"] == "Add supplier review to the execution scope."
+    assert approved["review"]["approval_notes"] == "Add supplier review to the execution scope."
     assert approved["review"]["approved_at"]
+    assert approved["review"]["approved_by"] == "user"
+    assert approved["review"]["approval_source"] == "ui"
+    assert approved["review"]["context_snapshot_hash"]
+    assert approved["approved_revision_id"] == "plan-rev-1"
+    assert len(approved["revisions"]) == 1
+    assert approved["revisions"][0]["revision_id"] == "plan-rev-1"
+    assert approved["revisions"][0]["approval_notes"] == "Add supplier review to the execution scope."
+    assert approved["revisions"][0]["context_snapshot_hash"] == approved["review"]["context_snapshot_hash"]
     assert {task["status"] for task in approved["tasks"]} == {"approved"}
+
+
+def test_approve_context_intelligence_plan_preserves_previous_revision():
+    context = {
+        "country": "Spain",
+        "sector": "Professional services",
+        "critical_assets": "Client contracts",
+        "need": "Build a security plan",
+        "context_intelligence_plan": logic.approve_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Professional services",
+            "critical_assets": "Client contracts",
+            "need": "Build a security plan",
+            "context_intelligence_plan": logic.build_context_intelligence_plan({
+                "country": "Spain",
+                "sector": "Professional services",
+                "critical_assets": "Client contracts",
+                "need": "Build a security plan",
+            }),
+        }),
+    }
+    first_revision = dict(context["context_intelligence_plan"]["revisions"][0])
+
+    approved = logic.approve_context_intelligence_plan(
+        context,
+        "Second approval after re-planning.",
+        approved_by="fixture-import",
+        approval_source="generate_from_yaml",
+    )
+
+    assert approved["approved_revision_id"] == "plan-rev-2"
+    assert len(approved["revisions"]) == 2
+    assert approved["revisions"][0] == first_revision
+    assert approved["revisions"][1]["approval_source"] == "generate_from_yaml"
+
+
+def test_context_plan_revision_returns_active_revision():
+    plan = logic.approve_context_intelligence_plan({
+        "country": "Spain",
+        "sector": "Professional services",
+        "critical_assets": "Client contracts",
+        "need": "Build a security plan",
+        "context_intelligence_plan": logic.build_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Professional services",
+            "critical_assets": "Client contracts",
+            "need": "Build a security plan",
+        }),
+    })
+
+    revision = logic.context_plan_revision(plan)
+
+    assert revision["revision_id"] == plan["approved_revision_id"]
+    assert revision["context_snapshot_hash"] == plan["review"]["context_snapshot_hash"]
+
+
+def test_execute_context_plan_requires_approved_revision(monkeypatch):
+    context_id = ObjectId()
+    fake_db = FakeDB(
+        contexts=[
+            {
+                "_id": context_id,
+                "context_intelligence_plan": logic.build_context_intelligence_plan({
+                    "country": "Spain",
+                    "sector": "Healthcare",
+                    "critical_assets": "Patient records",
+                    "need": "Build a security plan",
+                }),
+            }
+        ]
+    )
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+    monkeypatch.setattr(
+        logic,
+        "run_with_agent",
+        lambda *args, **kwargs: pytest.fail("draft plans must not execute"),
+    )
+
+    result = logic.execute_context_plan(str(context_id))
+
+    assert result["success"] is False
+    assert result["error_code"] == "context_plan_not_approved"
+    assert "context_task_results" not in fake_db.contexts.docs[0]
+
+
+def test_execute_context_plan_embeds_task_results_without_refined_prompt(monkeypatch):
+    context_id = ObjectId()
+    plan = logic.approve_context_intelligence_plan({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "need": "Build a security plan",
+        "context_intelligence_plan": logic.build_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "need": "Build a security plan",
+        }),
+    })
+    plan["tasks"] = plan["tasks"][:2]
+    plan["revisions"][0]["tasks"] = plan["revisions"][0]["tasks"][:2]
+    fake_db = FakeDB(
+        contexts=[
+            {
+                "_id": context_id,
+                "country": "Spain",
+                "sector": "Healthcare",
+                "critical_assets": "Patient records",
+                "need": "Build a security plan",
+                "security_context": logic.build_context_security_context({
+                    "country": "Spain",
+                    "sector": "Healthcare",
+                    "critical_assets": "Patient records",
+                    "need": "Build a security plan",
+                }),
+                "context_intelligence_plan": plan,
+                "refined_prompt": "must not be used",
+            }
+        ]
+    )
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+    captured_prompts = []
+    monkeypatch.setattr(
+        logic,
+        "run_with_agent",
+        lambda prompt, context_id, model_version=None: captured_prompts.append(prompt) or "task result",
+    )
+
+    result = logic.execute_context_plan(str(context_id))
+
+    context = fake_db.contexts.docs[0]
+    assert result["success"] is True
+    assert result["plan_revision_id"] == "plan-rev-1"
+    assert result["task_count"] == 2
+    assert context["status"] == "context_plan_executed"
+    assert context["context_task_results"]["status"] == "completed"
+    assert context["context_task_results"]["plan_revision_id"] == "plan-rev-1"
+    assert len(context["context_task_results"]["tasks"]) == 2
+    assert "refined_prompt" not in result
+    assert all("must not be used" not in prompt for prompt in captured_prompts)
+
+
+def test_execute_context_plan_persists_safe_task_failure(monkeypatch):
+    context_id = ObjectId()
+    plan = logic.approve_context_intelligence_plan({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "need": "Build a security plan",
+        "context_intelligence_plan": logic.build_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "need": "Build a security plan",
+        }),
+    })
+    plan["tasks"] = plan["tasks"][:1]
+    plan["revisions"][0]["tasks"] = plan["revisions"][0]["tasks"][:1]
+    fake_db = FakeDB(
+        contexts=[
+            {
+                "_id": context_id,
+                "country": "Spain",
+                "sector": "Healthcare",
+                "critical_assets": "Patient records",
+                "need": "Build a security plan",
+                "security_context": logic.build_context_security_context({
+                    "country": "Spain",
+                    "sector": "Healthcare",
+                    "critical_assets": "Patient records",
+                    "need": "Build a security plan",
+                }),
+                "context_intelligence_plan": plan,
+            }
+        ]
+    )
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    def failing_agent(*args, **kwargs):
+        raise RuntimeError("secret raw provider failure")
+
+    monkeypatch.setattr(logic, "run_with_agent", failing_agent)
+
+    result = logic.execute_context_plan(str(context_id))
+
+    context = fake_db.contexts.docs[0]
+    assert result["success"] is False
+    assert result["error_code"] == "context_task_execution_failed"
+    assert "secret raw provider failure" not in result["message"]
+    assert context["status"] == "context_plan_failed"
+    assert context["context_task_results"]["status"] == "failed"
+    assert context["context_task_results"]["tasks"][0]["error"]["error_code"] == (
+        "context_task_execution_failed"
+    )
+
+
+def _completed_context_task_results():
+    return {
+        "version": "1.0",
+        "status": "completed",
+        "plan_revision_id": "plan-rev-1",
+        "context_snapshot_hash": "hash-1",
+        "tasks": [
+            {
+                "task_id": "company_profile",
+                "title": "Company profile",
+                "status": "completed",
+                "result": "The company operates a healthcare clinic in Spain.",
+            },
+            {
+                "task_id": "information_assets",
+                "title": "Information assets",
+                "status": "completed",
+                "result": "Patient records are the primary critical asset.",
+            },
+        ],
+    }
+
+
+def _approved_context_plan():
+    return logic.approve_context_intelligence_plan({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "data_categories": "health_data",
+        "need": "Build a security plan",
+        "context_intelligence_plan": logic.build_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "data_categories": "health_data",
+            "need": "Build a security plan",
+        }),
+    })
+
+
+def test_synthesize_final_context_requires_completed_task_results(monkeypatch):
+    context_id = ObjectId()
+    fake_db = FakeDB(
+        contexts=[
+            {
+                "_id": context_id,
+                "country": "Spain",
+                "sector": "Healthcare",
+                "critical_assets": "Patient records",
+                "need": "Build a security plan",
+                "context_intelligence_plan": _approved_context_plan(),
+            }
+        ]
+    )
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    result = logic.synthesize_final_context(str(context_id))
+
+    assert result["success"] is False
+    assert result["error_code"] == "context_task_results_not_completed"
+    assert "final_context" not in fake_db.contexts.docs[0]
+    assert "refined_prompt" not in fake_db.contexts.docs[0]
+
+
+def test_synthesize_final_context_persists_final_context_and_refined_prompt(monkeypatch):
+    context_id = ObjectId()
+    security_context = logic.build_context_security_context({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "data_categories": "health_data",
+        "need": "Build a security plan",
+    })
+    fake_db = FakeDB(
+        contexts=[
+            {
+                "_id": context_id,
+                "country": "Spain",
+                "sector": "Healthcare",
+                "critical_assets": "Patient records",
+                "data_categories": "health_data",
+                "need": "Build a security plan",
+                "security_context": security_context,
+                "context_intelligence_plan": _approved_context_plan(),
+                "context_task_results": _completed_context_task_results(),
+            }
+        ],
+        interactions=[],
+    )
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    result = logic.synthesize_final_context(str(context_id))
+
+    context = fake_db.contexts.docs[0]
+    assert result["success"] is True
+    assert context["status"] == "context_ready_for_policy"
+    assert context["final_context"]["status"] == "ready"
+    assert context["final_context"]["context_ready_for_policy"] is True
+    assert context["final_context"]["plan_revision_id"] == "plan-rev-1"
+    assert "Patient records" in context["refined_prompt"]
+    payload = logic.get_context_and_prompt(str(context_id))
+    assert payload["refined_prompt"] == context["refined_prompt"]
+
+
+def test_synthesize_final_context_rejects_missing_security_context_information(monkeypatch):
+    context_id = ObjectId()
+    security_context = logic.build_context_security_context({
+        "country": "Spain",
+        "need": "Build a security plan",
+    })
+    fake_db = FakeDB(
+        contexts=[
+            {
+                "_id": context_id,
+                "country": "Spain",
+                "need": "Build a security plan",
+                "security_context": security_context,
+                "context_intelligence_plan": _approved_context_plan(),
+                "context_task_results": _completed_context_task_results(),
+            }
+        ],
+        interactions=[],
+    )
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    result = logic.synthesize_final_context(str(context_id))
+
+    assert result["success"] is False
+    assert result["error_code"] == "security_context_not_sufficient"
+    assert "final_context" not in fake_db.contexts.docs[0]
+    assert "refined_prompt" not in fake_db.contexts.docs[0]
+
+
+def test_synthesize_final_context_rejects_plan_revision_mismatch(monkeypatch):
+    context_id = ObjectId()
+    task_results = _completed_context_task_results()
+    task_results["plan_revision_id"] = "plan-rev-outdated"
+    fake_db = FakeDB(
+        contexts=[
+            {
+                "_id": context_id,
+                "country": "Spain",
+                "sector": "Healthcare",
+                "critical_assets": "Patient records",
+                "data_categories": "health_data",
+                "need": "Build a security plan",
+                "security_context": logic.build_context_security_context({
+                    "country": "Spain",
+                    "sector": "Healthcare",
+                    "critical_assets": "Patient records",
+                    "data_categories": "health_data",
+                    "need": "Build a security plan",
+                }),
+                "context_intelligence_plan": _approved_context_plan(),
+                "context_task_results": task_results,
+            }
+        ],
+        interactions=[],
+    )
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    result = logic.synthesize_final_context(str(context_id))
+
+    assert result["success"] is False
+    assert result["error_code"] == "context_task_results_revision_mismatch"
+    assert "final_context" not in fake_db.contexts.docs[0]
+
+
+def test_mark_final_context_section_for_improvement_blocks_policy_handoff(monkeypatch):
+    context_id = ObjectId()
+    context = {
+        "_id": context_id,
+        "status": "context_ready_for_policy",
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "data_categories": "health_data",
+        "need": "Build a security plan",
+        "security_context": logic.build_context_security_context({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "data_categories": "health_data",
+            "need": "Build a security plan",
+        }),
+        "context_intelligence_plan": _approved_context_plan(),
+        "context_task_results": _completed_context_task_results(),
+    }
+    context["final_context"] = logic.build_final_context(
+        context,
+        security_context=context["security_context"],
+        plan_revision=logic.context_plan_revision(context["context_intelligence_plan"]),
+    )
+    context["refined_prompt"] = logic.render_final_context_prompt(context["final_context"])
+    fake_db = FakeDB(contexts=[context], interactions=[])
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    result = logic.mark_final_context_sections_for_improvement(
+        str(context_id),
+        {"security_scope": "Clarify third-party laboratory dependencies."},
+    )
+
+    updated_context = fake_db.contexts.docs[0]
+    assert result["success"] is True
+    assert updated_context["status"] == "final_context_needs_improvement"
+    assert updated_context["final_context"]["context_ready_for_policy"] is False
+    assert updated_context["final_context"]["sections"]["security_scope"]["status"] == "needs_improvement"
+    with pytest.raises(logic.PipelineStepError) as exc_info:
+        logic.get_context_and_prompt(str(context_id))
+    assert exc_info.value.error_code == "context_not_ready_for_policy"
+
+
+def test_regenerate_final_context_sections_restores_policy_handoff_and_records_lesson(monkeypatch):
+    context_id = ObjectId()
+    context = {
+        "_id": context_id,
+        "status": "context_ready_for_policy",
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "data_categories": "health_data",
+        "need": "Build a security plan",
+        "security_context": logic.build_context_security_context({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "data_categories": "health_data",
+            "need": "Build a security plan",
+        }),
+        "context_intelligence_plan": _approved_context_plan(),
+        "context_task_results": _completed_context_task_results(),
+    }
+    context["final_context"] = logic.build_final_context(
+        context,
+        security_context=context["security_context"],
+        plan_revision=logic.context_plan_revision(context["context_intelligence_plan"]),
+    )
+    context["refined_prompt"] = logic.render_final_context_prompt(context["final_context"])
+    fake_db = FakeDB(contexts=[context], interactions=[])
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+    logic.mark_final_context_sections_for_improvement(
+        str(context_id),
+        {"security_scope": "Clarify third-party laboratory dependencies."},
+    )
+
+    result = logic.regenerate_final_context_sections(str(context_id))
+
+    updated_context = fake_db.contexts.docs[0]
+    assert result["success"] is True
+    assert result["regenerated_sections"] == ["security_scope"]
+    assert updated_context["status"] == "context_ready_for_policy"
+    assert updated_context["final_context"]["context_ready_for_policy"] is True
+    assert "third-party laboratory" in updated_context["refined_prompt"]
+    assert updated_context["context_lessons"][0]["status"] == "pending_review"
+    assert updated_context["context_lessons"][0]["section_id"] == "security_scope"
+
+    updated_context["context_lessons"][0]["status"] = "approved_for_export"
+    export = logic.export_context_lessons(str(context_id))
+    assert export["success"] is True
+    assert export["count"] == 1
+    assert export["lessons"][0]["lesson_id"] == "lesson-1"
+
+
+def test_update_context_lesson_status_controls_export_eligibility(monkeypatch):
+    context_id = ObjectId()
+    fake_db = FakeDB(
+        contexts=[
+            {
+                "_id": context_id,
+                "context_lessons": [
+                    {
+                        "lesson_id": "lesson-1",
+                        "status": "pending_review",
+                        "statement": "Review feedback should improve future contexts.",
+                    }
+                ],
+            }
+        ],
+        interactions=[],
+    )
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    result = logic.update_context_lesson_status(
+        str(context_id),
+        "lesson-1",
+        "approved_for_export",
+    )
+
+    assert result["success"] is True
+    assert result["lesson"]["status"] == "approved_for_export"
+    export = logic.export_context_lessons(str(context_id))
+    assert export["count"] == 1
+    assert export["lessons"][0]["lesson_id"] == "lesson-1"
 
 
 def test_public_security_context_payload_builds_context_for_legacy_records():
@@ -741,7 +1377,15 @@ def test_call_validator_agent_surfaces_dependency_error_metadata(app_context, mo
 def test_get_context_and_prompt_uses_request_correlation_id(monkeypatch, app):
     context_id = ObjectId()
     fake_db = FakeDB(
-        contexts=[{"_id": context_id, "refined_prompt": "prompt", "language": "en", "version": "0.2.0"}],
+        contexts=[
+            {
+                "_id": context_id,
+                "status": "context_ready_for_policy",
+                "refined_prompt": "prompt",
+                "language": "en",
+                "version": "0.2.0",
+            }
+        ],
         interactions=[],
     )
 

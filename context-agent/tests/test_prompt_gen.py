@@ -1,7 +1,16 @@
 from test_base import *
+from pathlib import Path
 
 from app.services import logic
-from app.services.logic import generate_context_plan_prompt, generate_context_prompt, load_questions
+from app.services.logic import (
+    build_context_task_prompt,
+    generate_context_plan_prompt,
+    generate_context_prompt,
+    generate_context_update_prompt,
+    load_context_prompt_templates,
+    load_questions,
+    render_final_context_prompt,
+)
 
 def test_question_loader():
     questions = load_questions()
@@ -57,6 +66,108 @@ def test_context_plan_prompt_lists_analysis_tasks():
     assert "Third-party, SaaS, and cloud dependencies" in prompt
     assert "Final security context synthesis" in prompt
     assert "approve the plan or add more context before execution" in prompt
+
+
+def test_context_prompts_are_loaded_from_agent_yaml(app_context, tmp_path):
+    config = tmp_path / "context_agent.yaml"
+    config.write_text(
+        """
+name: context-agent
+type: mock
+model: simulator
+prompts:
+  context_planning: |
+    CUSTOM PLANNING
+    {security_context_summary}
+    {context_tasks}
+    {user_answers}
+""",
+        encoding="utf-8",
+    )
+    logic.current_app.config["CONFIG_PATH"] = str(config)
+
+    templates = load_context_prompt_templates()
+    prompt = generate_context_plan_prompt({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "need": "Create a security plan",
+    })
+
+    assert "CUSTOM PLANNING" in templates["context_planning"]
+    assert "CUSTOM PLANNING" in prompt
+    assert "Company profile and operating model" in prompt
+    assert "Patient records" in prompt
+
+
+def test_context_update_prompt_uses_context_workplace_phase():
+    prompt = generate_context_update_prompt(
+        {
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "need": "Build a security plan",
+        },
+        "Add outsourced laboratory access and monthly access reviews.",
+    )
+
+    assert "Phase: CONTEXT UPDATE" in prompt
+    assert "outsourced laboratory access" in prompt
+    assert "Patient records" in prompt
+    assert "Do not draft a policy" in prompt
+
+
+def test_context_task_prompt_uses_execution_phase():
+    prompt = build_context_task_prompt(
+        {
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "need": "Build a security plan",
+        },
+        {
+            "id": "information_assets",
+            "title": "Information assets",
+            "objective": "Identify critical assets and ownership.",
+        },
+        {
+            "revision_id": "plan-rev-1",
+            "context_snapshot_hash": "hash-1",
+        },
+    )
+
+    assert "Phase: EXECUTION" in prompt
+    assert "Information assets" in prompt
+    assert "plan-rev-1" in prompt
+    assert "Do not generate a policy" in prompt
+
+
+def test_policy_handoff_prompt_uses_final_context_template():
+    prompt = render_final_context_prompt({
+        "version": "1.0",
+        "plan_revision_id": "plan-rev-1",
+        "context_snapshot_hash": "hash-1",
+        "sections": {
+            "task_findings": {
+                "content": "Patient records require access controls.",
+            }
+        },
+    })
+
+    assert "Final company security context for Policy Agent" in prompt
+    assert "Plan revision: plan-rev-1" in prompt
+    assert "Patient records require access controls." in prompt
+
+
+def test_openai_role_prompts_do_not_override_context_workplace_contract():
+    roles_dir = Path(__file__).resolve().parents[1] / "app" / "agents" / "openai" / "roles"
+
+    proactive = (roles_dir / "proactive.py").read_text(encoding="utf-8")
+    optimiser = (roles_dir / "optimiser.py").read_text(encoding="utf-8")
+
+    assert "develop the policy" not in proactive
+    assert "Do not draft a policy" in proactive
+    assert "must not draft a policy" in optimiser
 
 
 def test_load_questions_uses_questions_config_path_env(monkeypatch, tmp_path):

@@ -17,6 +17,8 @@ PIPELINE_JOB_STATUSES = frozenset(
         "policy_generating",
         "policy_generated",
         "validating",
+        "context_task_running",
+        "context_task_completed",
         "completed",
         "failed",
         "cancelled",
@@ -29,9 +31,10 @@ PIPELINE_JOB_ACTIVE_STATUSES = frozenset(
         "policy_generating",
         "policy_generated",
         "validating",
+        "context_task_running",
     }
 )
-PIPELINE_JOB_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
+PIPELINE_JOB_TERMINAL_STATUSES = frozenset({"completed", "context_task_completed", "failed", "cancelled"})
 PIPELINE_JOB_ERROR_FIELDS = frozenset(
     {"failed_stage", "stage", "error_type", "error_code", "safe_message", "status_code"}
 )
