@@ -1575,9 +1575,12 @@ def test_context_detail_phase_navigation_shows_policy_ready_next_action(client, 
 
     assert response.status_code == 200
     assert b"Context workflow" in response.data
-    assert b"Context status: <span class=\"font-semibold\">context_ready_for_policy</span>" in response.data
-    assert b"Policy process: <span class=\"font-semibold\">not_started</span>" in response.data
-    assert b"Context generation" in response.data
+    assert b"Follow the process left to right" in response.data
+    assert b'data-workflow-step="context-intake"' in response.data
+    assert b'data-workflow-step="validated"' in response.data
+    assert b"Context: ready" in response.data
+    assert b"Policy: idle" in response.data
+    assert b"Final context" in response.data
     assert b"Generate and validate the policy." in response.data
 
 
@@ -1796,6 +1799,9 @@ def test_trigger_final_context_synthesis_persists_policy_ready_context_json(clie
     context = routes_module.mongo.db.contexts.find_one({"_id": ObjectId(context_id)})
     assert context["status"] == "context_ready_for_policy"
     assert "Patient records" in context["refined_prompt"]
+    task_findings = context["final_context"]["sections"]["task_findings"]
+    assert task_findings["items"][0]["title"] == "Information assets"
+    assert "Patient records are the primary asset." in task_findings["items"][0]["content"]
 
 
 def test_mark_final_context_section_for_improvement_json(client):
@@ -1950,14 +1956,50 @@ def test_context_detail_renders_final_context_review_and_lessons(client, monkeyp
 
     assert response.status_code == 200
     assert b"Final context" in response.data
+    assert b"Context workflow" in response.data
+    assert b"Operational security context workspace" in response.data
+    assert b"Runtime: ready" in response.data
+    assert b"RAG: ready" in response.data
+    assert b"Policy: idle" in response.data
+    assert b"aria-current=\"step\"" in response.data
     assert b"Sections" in response.data
     assert b"Accepted" in response.data
     assert b"Needs improvement" in response.data
+    assert b"Plan point 1" in response.data
+    assert b'data-final-context-point="information_assets"' in response.data
+    assert b"data-final-context-point-review-form" in response.data
+    assert b"Mark this point for improvement" in response.data
     assert b"Context lessons" in response.data
     assert b"Pending review: 1. Approved for export: 0." in response.data
     assert b"This lesson will not be exported until approved." in response.data
     assert b"Approve for export" in response.data
     assert b"Export approved lessons" in response.data
+
+
+def test_final_context_plan_point_comment_is_scoped(client):
+    context_id = str(ObjectId())
+    _insert_context_executed_for_final_synthesis(context_id)
+    client.post(
+        f"/context/{context_id}/final-context/synthesize",
+        headers={"Accept": "application/json"},
+    )
+
+    response = client.post(
+        f"/context/{context_id}/final-context/sections/improve",
+        data={
+            "section_id": "task_findings",
+            "comment_scope": "Information assets",
+            "comment": "Add more detail about clinical records ownership.",
+        },
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 200
+    context = routes_module.mongo.db.contexts.find_one({"_id": ObjectId(context_id)})
+    comments = context["final_context"]["sections"]["task_findings"]["comments"]
+    assert comments[-1]["comment"] == (
+        "[Information assets] Add more detail about clinical records ownership."
+    )
 
 
 def test_trigger_policy_generation_blocks_unapproved_context_plan_json(client, monkeypatch):

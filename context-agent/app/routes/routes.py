@@ -805,7 +805,11 @@ def mark_final_context_sections_for_improvement_route(context_id):
         comments_by_section = payload.get("comments") or payload.get("sections") or {}
     else:
         section_id = request.form.get("section_id")
-        comments_by_section = {section_id: request.form.get("comment")} if section_id else {}
+        comment = request.form.get("comment")
+        comment_scope = (request.form.get("comment_scope") or "").strip()
+        if comment_scope and comment:
+            comment = f"[{comment_scope}] {comment}"
+        comments_by_section = {section_id: comment} if section_id else {}
 
     result = mark_final_context_sections_for_improvement(context_id, comments_by_section)
     if _wants_json_response():

@@ -1029,6 +1029,17 @@ def build_final_context(
         for task in task_results.get("tasks", [])
         if isinstance(task, dict)
     ]
+    task_items = [
+        {
+            "item_id": task.get("task_id") or f"task-{index + 1}",
+            "order": index + 1,
+            "title": task.get("title") or f"Context task {index + 1}",
+            "status": task.get("status") or "unknown",
+            "content": task.get("result") or "",
+        }
+        for index, task in enumerate(tasks)
+        if task.get("result")
+    ]
     synthesized_at = datetime.now(timezone.utc).isoformat()
     return {
         "version": FINAL_CONTEXT_VERSION,
@@ -1054,6 +1065,7 @@ def build_final_context(
                     for task in tasks
                     if task.get("result")
                 ),
+                "items": task_items,
             },
             "assumptions_and_missing_information": {
                 "status": "accepted",
