@@ -30,9 +30,12 @@ def create_agent_from_config(config_path: str):
     if not agent_class:
         raise ValueError(f"No agent has been registered with type '{agent_type}'")
 
-    return agent_class(
-        name=config["name"],
-        instructions=config["instructions"],
-        model=config["model"],
-        tools=config.get("tools", [])
-    )
+    kwargs = {
+        "name": config["name"],
+        "instructions": config["instructions"],
+        "model": config["model"],
+        "tools": config.get("tools", []),
+    }
+    if "role_instructions" in config:
+        kwargs["role_instructions"] = config["role_instructions"]
+    return agent_class(**kwargs)
