@@ -65,6 +65,9 @@ def test_recreate_context_from_answers_can_auto_approve_plan(monkeypatch):
     assert plan["review"]["user_feedback"] == (
         "Automatically approved during fixture import."
     )
+    assert plan["review"]["approved_by"] == "fixture-import"
+    assert plan["review"]["approval_source"] == "generate_context_from_yaml"
+    assert plan["approved_revision_id"] == "plan-rev-1"
     assert {task["status"] for task in plan["tasks"]} == {"approved"}
 
 

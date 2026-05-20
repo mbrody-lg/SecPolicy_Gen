@@ -146,6 +146,8 @@ def recreate_context_from_answers(data, *, auto_approve_plan=False):
             "context_intelligence_plan": approve_context_intelligence_plan(
                 context_record,
                 "Automatically approved during fixture import.",
+                approved_by="fixture-import",
+                approval_source="generate_context_from_yaml",
             ),
         }
         status = "context_plan_approved"

@@ -79,6 +79,25 @@ def test_create_pipeline_job_persists_job_and_initial_event(monkeypatch):
     ]
 
 
+def test_create_pipeline_job_accepts_execute_context_plan_command(monkeypatch):
+    fake_db = FakeDB()
+    monkeypatch.setattr(pipeline_jobs.mongo, "db", fake_db, raising=False)
+    monkeypatch.setattr(
+        pipeline_jobs,
+        "record_pipeline_job_transition",
+        lambda **kwargs: None,
+    )
+
+    job = pipeline_jobs.create_pipeline_job(
+        context_id="ctx-1",
+        command="execute_context_plan",
+        correlation_id="corr-1",
+    )
+
+    assert job["command"] == "execute_context_plan"
+    assert fake_db.pipeline_events.docs[0]["status"] == "queued"
+
+
 def test_find_active_pipeline_job_ignores_terminal_jobs(monkeypatch):
     fake_db = FakeDB(
         pipeline_jobs_docs=[
@@ -101,6 +120,30 @@ def test_find_active_pipeline_job_ignores_terminal_jobs(monkeypatch):
     job = pipeline_jobs.find_active_pipeline_job("ctx-1")
 
     assert job["job_id"] == "job-active"
+
+
+def test_find_active_pipeline_job_scopes_by_command(monkeypatch):
+    fake_db = FakeDB(
+        pipeline_jobs_docs=[
+            {
+                "job_id": "job-policy",
+                "context_id": "ctx-1",
+                "command": "generate_policy",
+                "status": "policy_generating",
+            },
+            {
+                "job_id": "job-context-plan",
+                "context_id": "ctx-1",
+                "command": "execute_context_plan",
+                "status": "context_task_running",
+            },
+        ]
+    )
+    monkeypatch.setattr(pipeline_jobs.mongo, "db", fake_db, raising=False)
+
+    job = pipeline_jobs.find_active_pipeline_job("ctx-1", command="execute_context_plan")
+
+    assert job["job_id"] == "job-context-plan"
 
 
 def test_find_active_pipeline_job_marks_stale_job_failed(monkeypatch):

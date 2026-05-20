@@ -16,8 +16,10 @@
     var panel = byId("pipeline-job-panel");
     var activeJob = panel && panel.dataset.activeJobId;
     document.querySelectorAll("[data-generate-policy-button]").forEach(function (button) {
-      button.disabled = !ready || Boolean(activeJob);
-      button.className = ready && !activeJob
+      var domainReady = button.dataset.domainReady !== "0";
+      var enabled = ready && domainReady && !activeJob;
+      button.disabled = !enabled;
+      button.className = enabled
         ? "bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded"
         : "bg-gray-400 cursor-not-allowed text-white px-4 py-2 rounded";
     });
