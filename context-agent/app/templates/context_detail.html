@@ -1,5 +1,30 @@
 {% extends 'base.html' %}
 
+{% block nav_status %}
+  {% set nav_pipeline_job = latest_pipeline_job %}
+  {% set nav_pipeline_active = nav_pipeline_job and nav_pipeline_job.status in ['queued', 'running', 'policy_generating', 'policy_generated', 'validating'] %}
+  {% set nav_runtime_ready = system_status and system_status.status == 'ready' %}
+  {% set nav_final_context_ready = context.status == 'context_ready_for_policy' and context.final_context and context.final_context.status == 'ready' and context.final_context.context_ready_for_policy is sameas true and context.refined_prompt %}
+  <details class="relative text-sm" data-operational-status-menu>
+    <summary class="cursor-pointer list-none rounded border px-3 py-1.5 font-semibold {% if nav_runtime_ready and nav_final_context_ready and not nav_pipeline_active %}border-green-300 bg-green-50 text-green-800{% elif nav_pipeline_active %}border-blue-300 bg-blue-50 text-blue-800{% else %}border-amber-300 bg-amber-50 text-amber-800{% endif %}">
+      Operational status
+    </summary>
+    <div class="absolute right-0 z-20 mt-2 w-80 rounded border border-gray-200 bg-white p-3 shadow-lg">
+      <dl class="space-y-2 text-xs text-gray-700">
+        <div class="flex justify-between gap-3"><dt class="font-semibold">Runtime: {{ system_status.status if system_status else 'unknown' }}</dt></div>
+        <div class="flex justify-between gap-3"><dt class="font-semibold">RAG: {{ system_status.rag.status if system_status and system_status.rag else 'unknown' }}</dt></div>
+        <div class="flex justify-between gap-3"><dt class="font-semibold">Agent: {{ agent_type or 'configured' }}</dt></div>
+        <div class="flex justify-between gap-3"><dt class="font-semibold">Context: {{ context.final_context.status if context.final_context else context.status or 'draft' }}</dt></div>
+        <div class="flex justify-between gap-3"><dt class="font-semibold">Version: {{ context.final_context.version if context.final_context else 'draft' }}</dt></div>
+        <div class="flex justify-between gap-3"><dt class="font-semibold">Policy: {{ nav_pipeline_job.status if nav_pipeline_job else 'idle' }}</dt></div>
+        {% if nav_pipeline_job and nav_pipeline_job.correlation_id %}
+          <div class="flex justify-between gap-3"><dt class="font-semibold">Correlation</dt><dd class="break-all text-right">{{ nav_pipeline_job.correlation_id }}</dd></div>
+        {% endif %}
+      </dl>
+    </div>
+  </details>
+{% endblock %}
+
 {% block content %}
 <div class="max-w-6xl mx-auto mt-6">
   <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -20,7 +45,8 @@
   {% set workflow_steps = [
     {
       'label': 'Context intake',
-      'href': '#conversation-panel',
+      'href': '#workflow-tab-intake',
+      'tab': 'intake',
       'status': context.status or 'started',
       'done': true,
       'current': false,
@@ -28,7 +54,8 @@
     },
     {
       'label': 'Context building',
-      'href': '#context-building-panel',
+      'href': '#workflow-tab-context-building',
+      'tab': 'context-building',
       'status': context.context_building.status if context.context_building else 'not_started',
       'done': context_building_ready,
       'current': not context_building_ready,
@@ -36,7 +63,8 @@
     },
     {
       'label': 'Planning',
-      'href': '#context-intelligence-plan-panel',
+      'href': '#workflow-tab-planning',
+      'tab': 'planning',
       'status': context.context_intelligence_plan.status if context.context_intelligence_plan else 'not_started',
       'done': context_plan_ready,
       'current': context_building_ready and not context_plan_ready,
@@ -44,7 +72,8 @@
     },
     {
       'label': 'Execution',
-      'href': '#context-plan-execution-panel',
+      'href': '#workflow-tab-planning',
+      'tab': 'planning',
       'status': context.context_task_results.status if context.context_task_results else 'not_started',
       'done': context_execution_ready,
       'current': context_plan_ready and not context_execution_ready,
@@ -52,7 +81,8 @@
     },
     {
       'label': 'Final context',
-      'href': '#final-context-panel',
+      'href': '#workflow-tab-final-context',
+      'tab': 'final-context',
       'status': context.final_context.status if context.final_context else 'not_synthesized',
       'done': final_context_ready,
       'current': context_execution_ready and not final_context_ready,
@@ -60,7 +90,8 @@
     },
     {
       'label': 'Policy',
-      'href': '#system-readiness-panel',
+      'href': '#workflow-tab-policy',
+      'tab': 'policy',
       'status': pipeline_job.status if pipeline_job else 'idle',
       'done': pipeline_job and pipeline_job.status == 'completed',
       'current': final_context_ready and not pipeline_active and runtime_ready,
@@ -68,7 +99,8 @@
     },
     {
       'label': 'Validated',
-      'href': '#pipeline-job-panel',
+      'href': '#workflow-tab-policy',
+      'tab': 'policy',
       'status': pipeline_job.current_stage if pipeline_job else 'pending',
       'done': pipeline_job and pipeline_job.status == 'completed',
       'current': pipeline_active,
@@ -80,26 +112,6 @@
       <div>
         <h2 class="text-xl font-semibold mb-1">Context workflow</h2>
         <div class="text-sm text-gray-700">Follow the process left to right, then work down the page for detail.</div>
-      </div>
-      <div class="flex flex-wrap justify-start gap-2 md:justify-end">
-        <span class="rounded-full border px-3 py-1 text-xs font-semibold {% if runtime_ready %}border-green-300 bg-green-50 text-green-800{% else %}border-amber-300 bg-amber-50 text-amber-800{% endif %}">
-          Runtime: {{ system_status.status if system_status else 'unknown' }}
-        </span>
-        <span class="rounded-full border px-3 py-1 text-xs font-semibold {% if system_status and system_status.rag and system_status.rag.status == 'ready' %}border-green-300 bg-green-50 text-green-800{% else %}border-slate-300 bg-slate-50 text-slate-700{% endif %}">
-          RAG: {{ system_status.rag.status if system_status and system_status.rag else 'unknown' }}
-        </span>
-        <span class="rounded-full border border-slate-300 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700" data-status-chip="agent">
-          Agent: {{ agent_type or 'configured' }}
-        </span>
-        <span class="rounded-full border border-slate-300 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
-          Version: {{ context.final_context.version if context.final_context else 'draft' }}
-        </span>
-        <span class="rounded-full border px-3 py-1 text-xs font-semibold {% if final_context_ready %}border-green-300 bg-green-50 text-green-800{% elif context.final_context and context.final_context.status == 'needs_improvement' %}border-amber-300 bg-amber-50 text-amber-800{% else %}border-slate-300 bg-slate-50 text-slate-700{% endif %}" data-status-chip="context">
-          Context: {{ context.final_context.status if context.final_context else context.status or 'draft' }}
-        </span>
-        <span class="rounded-full border px-3 py-1 text-xs font-semibold {% if pipeline_active %}border-blue-300 bg-blue-50 text-blue-800{% elif pipeline_job and pipeline_job.status == 'failed' %}border-red-300 bg-red-50 text-red-800{% elif pipeline_job and pipeline_job.status == 'completed' %}border-green-300 bg-green-50 text-green-800{% else %}border-slate-300 bg-slate-50 text-slate-700{% endif %}" data-status-chip="policy">
-          Policy: {{ pipeline_job.status if pipeline_job else 'idle' }}
-        </span>
       </div>
     </div>
 
@@ -114,6 +126,7 @@
               <div class="absolute left-8 right-0 top-4 h-0.5 {% if step.done %}bg-green-300{% elif step.current %}bg-blue-300{% else %}bg-gray-200{% endif %}"></div>
             {% endif %}
             <a href="{{ step.href }}" class="relative flex items-start gap-3 rounded-md p-2 hover:bg-gray-50"
+              data-workflow-tab-trigger="{{ step.tab }}"
               {% if step.current %}aria-current="step"{% endif %}>
               <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-sm font-semibold {% if step.done %}border-green-500 bg-green-600 text-white{% elif step.current %}border-blue-500 bg-blue-600 text-white{% else %}border-gray-300 bg-white text-gray-600{% endif %}">
                 {{ loop.index }}
@@ -155,9 +168,10 @@
     </div>
   </div>
 
-  <div id="conversation-panel" class="bg-white rounded-lg shadow p-4 mb-6">
-    <h2 class="text-xl font-semibold mb-2">Conversation</h2>
-    <div class="space-y-4">
+  <section id="workflow-tab-intake" data-workflow-tab-panel="intake" class="space-y-6">
+  <div id="conversation-panel" class="bg-white rounded-lg shadow p-4">
+    <h2 class="text-xl font-semibold mb-2">Intake conversation</h2>
+    <div class="mx-auto max-w-3xl space-y-4">
       {% for item in interactions %}
         {% if item.origin == 'agent' and item.answer == '' %}
           <div class="flex justify-end">
@@ -171,17 +185,23 @@
               {{ item.answer }}
             </div>
           </div>
-        {% elif item.origin == 'agent' %}
-          <div class="flex justify-end">
-            <div class="bg-green-100 p-3 rounded-lg max-w-3xl shadow text-sm prose prose-sm prose-green">
-              {{ item.rendered_answer | safe }}
-            </div>
-          </div>
         {% endif %}
       {% endfor %}
     </div>
   </div>
+  <div class="bg-white rounded-lg shadow p-4">
+    <h2 class="text-xl font-semibold mb-2">Add context</h2>
+    <form method="post" action="{{ url_for('main.continue_context', context_id=context._id) }}">
+      <textarea name="prompt" placeholder="Add more information, constraints, risks, systems, vendors, or new questions..." rows="4"
+        class="w-full border rounded p-2 text-sm focus:outline-none focus:ring focus:border-blue-300 mb-4"></textarea>
+      <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+        Add context
+      </button>
+    </form>
+  </div>
+  </section>
 
+  <section id="workflow-tab-context-building" data-workflow-tab-panel="context-building" class="hidden space-y-6">
   {% if context.context_building %}
     {% set context_building = context.context_building %}
     <div id="context-building-panel" class="bg-white rounded-lg shadow p-4 mb-6"
@@ -202,6 +222,14 @@
         </div>
         <div class="text-xs text-gray-500">Version {{ context_building.version }}</div>
       </div>
+      {% if context_agent_response %}
+        <div class="mt-4 rounded border border-green-200 bg-green-50 p-4">
+          <div class="text-sm font-semibold text-green-950">Context Agent response for approval</div>
+          <div class="prose prose-sm mt-2 max-w-none text-gray-800">
+            {{ context_agent_response | safe }}
+          </div>
+        </div>
+      {% endif %}
 
       {% set pending_questions = context_building.questions | selectattr('status', 'equalto', 'pending') | list %}
       {% set deferred_questions = context_building.questions | selectattr('status', 'equalto', 'deferred') | list %}
@@ -287,6 +315,83 @@
       </form>
     </div>
   {% endif %}
+  </section>
+
+  <section id="workflow-tab-planning" data-workflow-tab-panel="planning" class="hidden space-y-6">
+  <div id="security-context-panel" class="bg-white rounded-lg shadow p-4"
+    data-security-context-panel
+    data-security-context-state="{% if context.security_context %}{% if context.security_context.analysis.missing_information %}needs-information{% else %}analysis-ready{% endif %}{% else %}not-started{% endif %}">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h2 class="text-xl font-semibold mb-1">Security context</h2>
+        <div class="text-sm text-gray-700">
+          {% if context.security_context %}
+            {% if context.security_context.analysis.missing_information %}
+              Needs more information
+            {% else %}
+              Analysis ready
+            {% endif %}
+          {% else %}
+            Not available yet
+          {% endif %}
+        </div>
+      </div>
+      {% if context.security_context_version %}
+        <div class="text-xs text-gray-500">Version {{ context.security_context_version }}</div>
+      {% endif %}
+    </div>
+
+    {% if context.security_context %}
+      {% set security_context = context.security_context %}
+      <div class="mt-4 grid gap-4 md:grid-cols-2">
+        <div class="rounded border border-gray-200 p-3">
+          <div class="text-sm font-semibold text-gray-900">Company profile</div>
+          <dl class="mt-2 space-y-1 text-sm text-gray-700">
+            <div><dt class="inline font-medium">Sector:</dt> <dd class="inline">{{ security_context.profile.sector or 'Unknown' }}</dd></div>
+            <div><dt class="inline font-medium">Countries:</dt> <dd class="inline">{{ security_context.profile.operating_countries | join(', ') if security_context.profile.operating_countries else 'Unknown' }}</dd></div>
+            <div><dt class="inline font-medium">Region:</dt> <dd class="inline">{{ security_context.profile.region or 'Unknown' }}</dd></div>
+          </dl>
+        </div>
+        <div class="rounded border border-gray-200 p-3">
+          <div class="text-sm font-semibold text-gray-900">Information assets</div>
+          <dl class="mt-2 space-y-1 text-sm text-gray-700">
+            <div><dt class="inline font-medium">Critical:</dt> <dd class="inline">{{ security_context.information_assets.critical_assets | join(', ') if security_context.information_assets.critical_assets else 'Unknown' }}</dd></div>
+            <div><dt class="inline font-medium">Data:</dt> <dd class="inline">{{ security_context.information_assets.data_categories | join(', ') if security_context.information_assets.data_categories else 'Unknown' }}</dd></div>
+            <div><dt class="inline font-medium">Dependencies:</dt> <dd class="inline">{{ security_context.information_assets.third_party_dependencies | join(', ') if security_context.information_assets.third_party_dependencies else 'Unknown' }}</dd></div>
+          </dl>
+        </div>
+        <div class="rounded border border-gray-200 p-3">
+          <div class="text-sm font-semibold text-gray-900">Compliance hints</div>
+          <dl class="mt-2 space-y-1 text-sm text-gray-700">
+            <div><dt class="inline font-medium">Jurisdictions:</dt> <dd class="inline">{{ security_context.compliance.jurisdictions | join(', ') if security_context.compliance.jurisdictions else 'Unknown' }}</dd></div>
+            <div><dt class="inline font-medium">References:</dt> <dd class="inline">{{ security_context.compliance.regulatory_hints | join(', ') if security_context.compliance.regulatory_hints else 'Unknown' }}</dd></div>
+            <div><dt class="inline font-medium">Methods:</dt> <dd class="inline">{{ security_context.compliance.methodologies | join(', ') if security_context.compliance.methodologies else 'Unknown' }}</dd></div>
+          </dl>
+        </div>
+        <div class="rounded border border-gray-200 p-3">
+          <div class="text-sm font-semibold text-gray-900">Retrieval hints</div>
+          <dl class="mt-2 space-y-1 text-sm text-gray-700">
+            <div><dt class="inline font-medium">Collections:</dt> <dd class="inline">{{ security_context.retrieval_hints.collection_families | join(', ') if security_context.retrieval_hints.collection_families else 'Unknown' }}</dd></div>
+            <div><dt class="inline font-medium">Confidence:</dt> <dd class="inline">{{ security_context.analysis.confidence }}</dd></div>
+          </dl>
+        </div>
+      </div>
+      {% if security_context.analysis.missing_information %}
+        <div class="mt-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          <div class="font-semibold">Missing information</div>
+          <ul class="mt-2 list-disc pl-5">
+            {% for item in security_context.analysis.missing_information %}
+              <li>{{ item }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endif %}
+    {% else %}
+      <div class="mt-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+        Structured security analysis is not available for this context yet.
+      </div>
+    {% endif %}
+  </div>
 
   {% if context.context_intelligence_plan %}
     {% set context_plan = context.context_intelligence_plan %}
@@ -417,7 +522,9 @@
       </form>
     </div>
   {% endif %}
+  </section>
 
+  <section id="workflow-tab-final-context" data-workflow-tab-panel="final-context" class="hidden space-y-6">
   {% if context.context_task_results and context.context_task_results.status == 'completed' %}
     <div id="final-context-panel" class="bg-white rounded-lg shadow p-4 mb-6">
       <div class="flex flex-wrap items-start justify-between gap-3">
@@ -470,10 +577,14 @@
                         </div>
                         <div class="text-xs text-gray-500">{{ item.status }}</div>
                       </div>
-                      <div class="mt-2 whitespace-pre-line text-gray-700">{{ item.content }}</div>
+                      <div class="prose prose-sm mt-2 max-w-none text-gray-700" data-selectable-final-context>
+                        {{ item.rendered_content | safe }}
+                      </div>
                       <form method="post" action="{{ url_for('main.mark_final_context_sections_for_improvement_route', context_id=context._id) }}" class="mt-3" data-final-context-point-review-form>
                         <input type="hidden" name="section_id" value="{{ section_id }}">
                         <input type="hidden" name="comment_scope" value="{{ item.title }}">
+                        <input type="hidden" name="selected_excerpt" data-selected-excerpt-input>
+                        <div class="hidden rounded border border-blue-200 bg-white p-2 text-xs text-blue-900" data-selected-excerpt-preview></div>
                         <textarea name="comment" rows="2" placeholder="Comment for improving this plan point"
                           class="w-full border rounded p-2 text-xs focus:outline-none focus:ring focus:border-blue-300"></textarea>
                         <button type="submit" class="mt-2 bg-white border border-blue-600 text-blue-700 px-3 py-1 rounded text-xs hover:bg-blue-50">
@@ -484,7 +595,9 @@
                   {% endfor %}
                 </div>
               {% else %}
-                <div class="mt-2 whitespace-pre-line text-gray-700">{{ section.content }}</div>
+                <div class="prose prose-sm mt-2 max-w-none text-gray-700" data-selectable-final-context>
+                  {{ section.rendered_content | safe }}
+                </div>
               {% endif %}
               {% if section.comments %}
                 <div class="mt-3 rounded bg-amber-50 p-2 text-xs text-amber-900">
@@ -495,6 +608,8 @@
               {% endif %}
               <form method="post" action="{{ url_for('main.mark_final_context_sections_for_improvement_route', context_id=context._id) }}" class="mt-3">
                 <input type="hidden" name="section_id" value="{{ section_id }}">
+                <input type="hidden" name="selected_excerpt" data-selected-excerpt-input>
+                <div class="hidden rounded border border-blue-200 bg-white p-2 text-xs text-blue-900" data-selected-excerpt-preview></div>
                 <textarea name="comment" rows="2" placeholder="Comment for improving this section"
                   class="w-full border rounded p-2 text-xs focus:outline-none focus:ring focus:border-blue-300"></textarea>
                 <button type="submit" class="mt-2 bg-white border border-blue-600 text-blue-700 px-3 py-1 rounded text-xs hover:bg-blue-50">
@@ -571,95 +686,10 @@
       {% endif %}
     </div>
   {% endif %}
+  </section>
 
-  <div class="bg-white rounded-lg shadow p-4">
-    <h2 class="text-xl font-semibold mb-2">Add more context</h2>
-    <form method="post" action="{{ url_for('main.continue_context', context_id=context._id) }}">
-      <textarea name="prompt" placeholder="Add more information or questions..." rows="4"
-        class="w-full border rounded p-2 text-sm focus:outline-none focus:ring focus:border-blue-300 mb-4"></textarea>
-      <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
-        Add
-      </button>
-    </form>
-  </div>
-
-  <div id="security-context-panel" class="bg-white rounded-lg shadow p-4 mt-6"
-    data-security-context-panel
-    data-security-context-state="{% if context.security_context %}{% if context.security_context.analysis.missing_information %}needs-information{% else %}analysis-ready{% endif %}{% else %}not-started{% endif %}">
-    <div class="flex flex-wrap items-start justify-between gap-3">
-      <div>
-        <h2 class="text-xl font-semibold mb-1">Security context</h2>
-        <div class="text-sm text-gray-700">
-          {% if context.security_context %}
-            {% if context.security_context.analysis.missing_information %}
-              Needs more information
-            {% else %}
-              Analysis ready
-            {% endif %}
-          {% else %}
-            Not available yet
-          {% endif %}
-        </div>
-      </div>
-      {% if context.security_context_version %}
-        <div class="text-xs text-gray-500">Version {{ context.security_context_version }}</div>
-      {% endif %}
-    </div>
-
-    {% if context.security_context %}
-      {% set security_context = context.security_context %}
-      <div class="mt-4 grid gap-4 md:grid-cols-2">
-        <div class="rounded border border-gray-200 p-3">
-          <div class="text-sm font-semibold text-gray-900">Company profile</div>
-          <dl class="mt-2 space-y-1 text-sm text-gray-700">
-            <div><dt class="inline font-medium">Sector:</dt> <dd class="inline">{{ security_context.profile.sector or 'Unknown' }}</dd></div>
-            <div><dt class="inline font-medium">Countries:</dt> <dd class="inline">{{ security_context.profile.operating_countries | join(', ') if security_context.profile.operating_countries else 'Unknown' }}</dd></div>
-            <div><dt class="inline font-medium">Region:</dt> <dd class="inline">{{ security_context.profile.region or 'Unknown' }}</dd></div>
-          </dl>
-        </div>
-        <div class="rounded border border-gray-200 p-3">
-          <div class="text-sm font-semibold text-gray-900">Information assets</div>
-          <dl class="mt-2 space-y-1 text-sm text-gray-700">
-            <div><dt class="inline font-medium">Critical:</dt> <dd class="inline">{{ security_context.information_assets.critical_assets | join(', ') if security_context.information_assets.critical_assets else 'Unknown' }}</dd></div>
-            <div><dt class="inline font-medium">Data:</dt> <dd class="inline">{{ security_context.information_assets.data_categories | join(', ') if security_context.information_assets.data_categories else 'Unknown' }}</dd></div>
-            <div><dt class="inline font-medium">Dependencies:</dt> <dd class="inline">{{ security_context.information_assets.third_party_dependencies | join(', ') if security_context.information_assets.third_party_dependencies else 'Unknown' }}</dd></div>
-          </dl>
-        </div>
-        <div class="rounded border border-gray-200 p-3">
-          <div class="text-sm font-semibold text-gray-900">Compliance hints</div>
-          <dl class="mt-2 space-y-1 text-sm text-gray-700">
-            <div><dt class="inline font-medium">Jurisdictions:</dt> <dd class="inline">{{ security_context.compliance.jurisdictions | join(', ') if security_context.compliance.jurisdictions else 'Unknown' }}</dd></div>
-            <div><dt class="inline font-medium">References:</dt> <dd class="inline">{{ security_context.compliance.regulatory_hints | join(', ') if security_context.compliance.regulatory_hints else 'Unknown' }}</dd></div>
-            <div><dt class="inline font-medium">Methods:</dt> <dd class="inline">{{ security_context.compliance.methodologies | join(', ') if security_context.compliance.methodologies else 'Unknown' }}</dd></div>
-          </dl>
-        </div>
-        <div class="rounded border border-gray-200 p-3">
-          <div class="text-sm font-semibold text-gray-900">Retrieval hints</div>
-          <dl class="mt-2 space-y-1 text-sm text-gray-700">
-            <div><dt class="inline font-medium">Collections:</dt> <dd class="inline">{{ security_context.retrieval_hints.collection_families | join(', ') if security_context.retrieval_hints.collection_families else 'Unknown' }}</dd></div>
-            <div><dt class="inline font-medium">Confidence:</dt> <dd class="inline">{{ security_context.analysis.confidence }}</dd></div>
-          </dl>
-        </div>
-      </div>
-
-      {% if security_context.analysis.missing_information %}
-        <div class="mt-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-          <div class="font-semibold">Missing information</div>
-          <ul class="mt-2 list-disc pl-5">
-            {% for item in security_context.analysis.missing_information %}
-              <li>{{ item }}</li>
-            {% endfor %}
-          </ul>
-        </div>
-      {% endif %}
-    {% else %}
-      <div class="mt-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-        Structured security analysis is not available for this context yet.
-      </div>
-    {% endif %}
-  </div>
-
-  <div id="system-readiness-panel" class="bg-white rounded-lg shadow p-4 mt-6">
+  <section id="workflow-tab-policy" data-workflow-tab-panel="policy" class="hidden space-y-6">
+  <div id="system-readiness-panel" class="bg-white rounded-lg shadow p-4">
     <h2 class="text-xl font-semibold mb-2">Generate policies</h2>
     {% if not runtime_ready %}
       <div class="mb-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
@@ -778,8 +808,62 @@
       </button>
     </form>
   </div>
+  </section>
 </div>
 {% endblock %}
 {% block scripts %}
   <script src="{{ url_for('static', filename='js/system-status.js') }}"></script>
+  <script>
+    (function () {
+      function activateWorkflowTab(tabName) {
+        document.querySelectorAll("[data-workflow-tab-panel]").forEach(function (panel) {
+          panel.classList.toggle("hidden", panel.dataset.workflowTabPanel !== tabName);
+        });
+        document.querySelectorAll("[data-workflow-tab-trigger]").forEach(function (trigger) {
+          var active = trigger.dataset.workflowTabTrigger === tabName;
+          trigger.classList.toggle("bg-blue-50", active);
+          trigger.setAttribute("aria-selected", active ? "true" : "false");
+        });
+      }
+
+      var currentTrigger = document.querySelector("[data-workflow-tab-trigger][aria-current='step']");
+      var defaultTab = currentTrigger ? currentTrigger.dataset.workflowTabTrigger : "intake";
+      var hashPanel = window.location.hash
+        ? document.querySelector(window.location.hash + "[data-workflow-tab-panel]")
+        : null;
+      activateWorkflowTab(hashPanel ? hashPanel.dataset.workflowTabPanel : defaultTab);
+
+      document.querySelectorAll("[data-workflow-tab-trigger]").forEach(function (trigger) {
+        trigger.addEventListener("click", function () {
+          activateWorkflowTab(trigger.dataset.workflowTabTrigger);
+        });
+      });
+
+      document.addEventListener("selectionchange", function () {
+        var selection = window.getSelection();
+        var selectedText = selection ? selection.toString().trim() : "";
+        if (!selectedText) {
+          return;
+        }
+        var anchor = selection.anchorNode && selection.anchorNode.nodeType === Node.TEXT_NODE
+          ? selection.anchorNode.parentElement
+          : selection.anchorNode;
+        var selectable = anchor && anchor.closest ? anchor.closest("[data-selectable-final-context]") : null;
+        if (!selectable) {
+          return;
+        }
+        var container = selectable.closest("[data-final-context-point], [data-final-context-section]");
+        if (!container) {
+          return;
+        }
+        container.querySelectorAll("[data-selected-excerpt-input]").forEach(function (input) {
+          input.value = selectedText;
+        });
+        container.querySelectorAll("[data-selected-excerpt-preview]").forEach(function (preview) {
+          preview.textContent = "Selected text: " + selectedText;
+          preview.classList.remove("hidden");
+        });
+      });
+    })();
+  </script>
 {% endblock %}

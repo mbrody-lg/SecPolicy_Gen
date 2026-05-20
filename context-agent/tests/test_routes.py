@@ -1576,8 +1576,11 @@ def test_context_detail_phase_navigation_shows_policy_ready_next_action(client, 
     assert response.status_code == 200
     assert b"Context workflow" in response.data
     assert b"Follow the process left to right" in response.data
+    assert b"Operational status" in response.data
     assert b'data-workflow-step="context-intake"' in response.data
     assert b'data-workflow-step="validated"' in response.data
+    assert b'data-workflow-tab-panel="policy"' in response.data
+    assert b'data-workflow-tab-trigger="final-context"' in response.data
     assert b"Context: ready" in response.data
     assert b"Policy: idle" in response.data
     assert b"Final context" in response.data
@@ -1962,12 +1965,15 @@ def test_context_detail_renders_final_context_review_and_lessons(client, monkeyp
     assert b"RAG: ready" in response.data
     assert b"Policy: idle" in response.data
     assert b"aria-current=\"step\"" in response.data
+    assert b'data-workflow-tab-panel="final-context"' in response.data
     assert b"Sections" in response.data
     assert b"Accepted" in response.data
     assert b"Needs improvement" in response.data
     assert b"Plan point 1" in response.data
     assert b'data-final-context-point="information_assets"' in response.data
     assert b"data-final-context-point-review-form" in response.data
+    assert b"data-selectable-final-context" in response.data
+    assert b"data-selected-excerpt-input" in response.data
     assert b"Mark this point for improvement" in response.data
     assert b"Context lessons" in response.data
     assert b"Pending review: 1. Approved for export: 0." in response.data
@@ -2000,6 +2006,32 @@ def test_final_context_plan_point_comment_is_scoped(client):
     assert comments[-1]["comment"] == (
         "[Information assets] Add more detail about clinical records ownership."
     )
+
+
+def test_final_context_selected_excerpt_is_preserved_in_comment(client):
+    context_id = str(ObjectId())
+    _insert_context_executed_for_final_synthesis(context_id)
+    client.post(
+        f"/context/{context_id}/final-context/synthesize",
+        headers={"Accept": "application/json"},
+    )
+
+    response = client.post(
+        f"/context/{context_id}/final-context/sections/improve",
+        data={
+            "section_id": "task_findings",
+            "comment_scope": "Information assets",
+            "selected_excerpt": "Patient records are the primary asset.",
+            "comment": "Explain ownership and storage location.",
+        },
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 200
+    context = routes_module.mongo.db.contexts.find_one({"_id": ObjectId(context_id)})
+    comment = context["final_context"]["sections"]["task_findings"]["comments"][-1]["comment"]
+    assert comment.startswith("[Information assets] Selected text: Patient records are the primary asset.")
+    assert "Comment: Explain ownership and storage location." in comment
 
 
 def test_trigger_policy_generation_blocks_unapproved_context_plan_json(client, monkeypatch):

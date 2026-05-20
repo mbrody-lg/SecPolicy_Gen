@@ -426,6 +426,21 @@ def context_detail(context_id):
                 item["rendered_answer"] = render_markdown(item["answer"])
             else:
                 item["rendered_answer"] = item.get("answer", "")
+        context_agent_response = next(
+            (
+                item.get("rendered_answer")
+                for item in reversed(interactions)
+                if item.get("origin") == "agent" and item.get("answer")
+            ),
+            "",
+        )
+        final_sections = ((context.get("final_context") or {}).get("sections") or {})
+        for section in final_sections.values():
+            if isinstance(section, dict):
+                section["rendered_content"] = render_markdown(section.get("content") or "")
+                for item in section.get("items") or []:
+                    if isinstance(item, dict):
+                        item["rendered_content"] = render_markdown(item.get("content") or "")
 
     except (InvalidId, TypeError, Exception):
         return abort(400, "Invalid identifier.")
@@ -438,6 +453,7 @@ def context_detail(context_id):
         latest_pipeline_job=find_latest_pipeline_job(str(context_id)),
         latest_context_plan_job=find_latest_pipeline_job(str(context_id), command="execute_context_plan"),
         developer_diagnostics_enabled=_developer_diagnostics_enabled(),
+        context_agent_response=context_agent_response,
     )
 
 
@@ -807,6 +823,9 @@ def mark_final_context_sections_for_improvement_route(context_id):
         section_id = request.form.get("section_id")
         comment = request.form.get("comment")
         comment_scope = (request.form.get("comment_scope") or "").strip()
+        selected_excerpt = (request.form.get("selected_excerpt") or "").strip()
+        if selected_excerpt:
+            comment = f"Selected text: {selected_excerpt}\n\nComment: {comment or 'Improve the selected text.'}"
         if comment_scope and comment:
             comment = f"[{comment_scope}] {comment}"
         comments_by_section = {section_id: comment} if section_id else {}
