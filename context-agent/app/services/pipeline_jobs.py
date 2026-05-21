@@ -88,6 +88,7 @@ def append_pipeline_event(
     status: str,
     stage: str,
     error: dict | None = None,
+    progress: dict | None = None,
 ) -> dict:
     """Persist one append-only pipeline event with bounded operational fields."""
     now = datetime.now(timezone.utc)
@@ -110,6 +111,9 @@ def append_pipeline_event(
     safe_error = _sanitize_pipeline_error(error)
     if safe_error:
         event["error"] = safe_error
+    safe_progress = _sanitize_pipeline_progress(progress)
+    if safe_progress:
+        event["progress"] = safe_progress
     _pipeline_events_collection().insert_one(event)
     return event
 
@@ -134,6 +138,7 @@ def create_pipeline_job(
         "current_stage": "queued",
         "created_at": now,
         "updated_at": now,
+        "progress": _initial_pipeline_progress(),
         "ownership": {
             "owner_service": "context-agent",
             "source_of_truth": True,
@@ -191,6 +196,20 @@ def get_pipeline_job(job_id: str) -> dict | None:
     return _serialize_pipeline_document(job)
 
 
+def list_pipeline_events(job_id: str, *, limit: int = 50) -> list[dict]:
+    """Return recent bounded events for one pipeline job."""
+    safe_limit = min(max(int(limit or 50), 1), 100)
+    return [
+        _serialize_pipeline_document(event)
+        for event in (
+            _pipeline_events_collection()
+            .find({"job_id": job_id})
+            .sort("created_at", -1)
+            .limit(safe_limit)
+        )
+    ]
+
+
 def update_pipeline_job_state(
     *,
     job_id: str,
@@ -243,6 +262,117 @@ def update_pipeline_job_state(
         else None,
     )
     return get_pipeline_job(job_id)
+
+
+def update_pipeline_job_progress(
+    *,
+    job_id: str,
+    stage: str,
+    current: int,
+    total: int,
+    current_task_id: str | None = None,
+    current_task_title: str | None = None,
+    completed_task_ids: list[str] | None = None,
+    last_message: str | None = None,
+    status: str | None = None,
+    event_type: str = "job_progress_updated",
+) -> dict | None:
+    """Persist bounded execution progress without changing the job lifecycle."""
+    existing = _pipeline_jobs_collection().find_one({"job_id": job_id})
+    if not existing:
+        return None
+    resolved_status = status or existing.get("status") or "running"
+    if resolved_status not in PIPELINE_JOB_STATUSES:
+        raise ValueError(f"Unsupported pipeline job status: {resolved_status}")
+
+    now = datetime.now(timezone.utc)
+    progress = _sanitize_pipeline_progress(
+        {
+            "current": current,
+            "total": total,
+            "percent": _progress_percent(current, total),
+            "current_task_id": current_task_id,
+            "current_task_title": current_task_title,
+            "completed_task_ids": completed_task_ids or [],
+            "last_message": last_message,
+        }
+    )
+    set_fields = {
+        "status": resolved_status,
+        "current_stage": stage,
+        "updated_at": now,
+        "progress": progress,
+    }
+    if resolved_status != "queued" and not existing.get("started_at"):
+        set_fields["started_at"] = now
+
+    _pipeline_jobs_collection().update_one({"job_id": job_id}, {"$set": set_fields})
+    append_pipeline_event(
+        job_id=job_id,
+        context_id=existing["context_id"],
+        correlation_id=existing["correlation_id"],
+        event_type=event_type,
+        status=resolved_status,
+        stage=stage,
+        progress=progress,
+    )
+    record_pipeline_job_transition(status=resolved_status, stage=stage)
+    return get_pipeline_job(job_id)
+
+
+def _initial_pipeline_progress() -> dict:
+    return {
+        "current": 0,
+        "total": 0,
+        "percent": 0,
+        "current_task_id": None,
+        "current_task_title": None,
+        "completed_task_ids": [],
+        "last_message": "Queued.",
+    }
+
+
+def _sanitize_pipeline_progress(progress: dict | None) -> dict | None:
+    """Return a bounded public progress block for long-running operations."""
+    if not isinstance(progress, dict):
+        return None
+    total = _safe_non_negative_int(progress.get("total"))
+    current = min(_safe_non_negative_int(progress.get("current")), total) if total else 0
+    completed_task_ids = progress.get("completed_task_ids")
+    if not isinstance(completed_task_ids, list):
+        completed_task_ids = []
+    safe_progress = {
+        "current": current,
+        "total": total,
+        "percent": _progress_percent(current, total),
+        "current_task_id": _bounded_optional_text(progress.get("current_task_id"), 80),
+        "current_task_title": _bounded_optional_text(progress.get("current_task_title"), 160),
+        "completed_task_ids": [
+            _bounded_optional_text(item, 80)
+            for item in completed_task_ids
+            if _bounded_optional_text(item, 80)
+        ][:50],
+        "last_message": _bounded_optional_text(progress.get("last_message"), 240),
+    }
+    return safe_progress
+
+
+def _safe_non_negative_int(value) -> int:
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _progress_percent(current: int, total: int) -> int:
+    if total <= 0:
+        return 0
+    return min(100, round((max(current, 0) / total) * 100))
+
+
+def _bounded_optional_text(value, limit: int) -> str | None:
+    text = str(value or "").strip()
+    return text[:limit] if text else None
 
 
 def _pipeline_duration_seconds(existing: dict, completed_at: datetime) -> float | None:

@@ -94,7 +94,10 @@ def _run_context_plan_job(app, job_id: str, job: dict) -> dict | None:
     headers = {CORRELATION_ID_HEADER: job["correlation_id"]}
     with app.test_request_context("/", headers=headers):
         app.preprocess_request()
-        result = logic.execute_context_plan(job["context_id"])
+        result = logic.execute_context_plan(
+            job["context_id"],
+            on_task_progress=_context_plan_progress_callback(job_id),
+        )
 
     if result.get("success"):
         return pipeline_jobs.update_pipeline_job_state(
@@ -120,6 +123,25 @@ def _run_context_plan_job(app, job_id: str, job: dict) -> dict | None:
             "status_code": result.get("status_code"),
         },
     )
+
+
+def _context_plan_progress_callback(job_id: str):
+    """Return a callback that mirrors context plan task progress to the job."""
+    def _callback(progress: dict) -> None:
+        pipeline_jobs.update_pipeline_job_progress(
+            job_id=job_id,
+            status="context_task_running",
+            stage=progress.get("stage", "context_plan_execution"),
+            current=progress.get("current", 0),
+            total=progress.get("total", 0),
+            current_task_id=progress.get("current_task_id"),
+            current_task_title=progress.get("current_task_title"),
+            completed_task_ids=progress.get("completed_task_ids") or [],
+            last_message=progress.get("last_message"),
+            event_type=progress.get("event_type", "context_task_progress"),
+        )
+
+    return _callback
 
 
 def _result_refs(result: dict) -> dict:

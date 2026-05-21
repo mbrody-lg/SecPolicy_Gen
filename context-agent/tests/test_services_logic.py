@@ -718,8 +718,12 @@ def test_execute_context_plan_embeds_task_results_without_refined_prompt(monkeyp
         "run_structured_with_agent",
         lambda prompt, **kwargs: captured_prompts.append((prompt, kwargs)) or structured_response,
     )
+    progress_events = []
 
-    result = logic.execute_context_plan(str(context_id))
+    result = logic.execute_context_plan(
+        str(context_id),
+        on_task_progress=lambda progress: progress_events.append(progress),
+    )
 
     context = fake_db.contexts.docs[0]
     assert result["success"] is True
@@ -737,6 +741,20 @@ def test_execute_context_plan_embeds_task_results_without_refined_prompt(monkeyp
     assert {kwargs["schema_name"] for _prompt, kwargs in captured_prompts} == {
         "context_agent_task_result"
     }
+    assert [event["event_type"] for event in progress_events] == [
+        "context_plan_started",
+        "context_task_started",
+        "context_task_completed",
+        "context_task_started",
+        "context_task_completed",
+        "context_plan_completed",
+    ]
+    assert progress_events[-1]["current"] == 2
+    assert progress_events[-1]["total"] == 2
+    assert progress_events[-1]["completed_task_ids"] == [
+        "company_profile",
+        "information_assets",
+    ]
 
 
 def test_execute_context_plan_persists_safe_task_failure(monkeypatch):
@@ -780,7 +798,12 @@ def test_execute_context_plan_persists_safe_task_failure(monkeypatch):
 
     monkeypatch.setattr(logic, "run_structured_with_agent", failing_agent)
 
-    result = logic.execute_context_plan(str(context_id))
+    progress_events = []
+
+    result = logic.execute_context_plan(
+        str(context_id),
+        on_task_progress=lambda progress: progress_events.append(progress),
+    )
 
     context = fake_db.contexts.docs[0]
     assert result["success"] is False
@@ -791,6 +814,12 @@ def test_execute_context_plan_persists_safe_task_failure(monkeypatch):
     assert context["context_task_results"]["tasks"][0]["error"]["error_code"] == (
         "context_task_execution_failed"
     )
+    assert [event["event_type"] for event in progress_events] == [
+        "context_plan_started",
+        "context_task_started",
+        "context_task_failed",
+    ]
+    assert progress_events[-1]["last_message"] == "Failed Company profile and operating model."
 
 
 def _completed_context_task_results():
