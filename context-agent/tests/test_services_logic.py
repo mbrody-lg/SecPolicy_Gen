@@ -423,6 +423,36 @@ def test_context_plan_revision_returns_active_revision():
     assert revision["context_snapshot_hash"] == plan["review"]["context_snapshot_hash"]
 
 
+def test_run_structured_with_agent_falls_back_to_text_agent(monkeypatch):
+    captured = {}
+
+    class FakeAgent:
+        def create(self, context_id=None):
+            captured["created_context_id"] = context_id
+
+        def run(self, prompt, context_id):
+            captured["prompt"] = prompt
+            captured["run_context_id"] = context_id
+            return "plain task result"
+
+    monkeypatch.setattr(logic, "create_agent_from_config", lambda config_path: FakeAgent())
+
+    result = logic.run_structured_with_agent(
+        "Task prompt",
+        schema_name="context_agent_task_result",
+        json_schema={"type": "object"},
+        context_id="ctx-1",
+    )
+
+    assert captured == {
+        "created_context_id": "ctx-1",
+        "prompt": "Task prompt",
+        "run_context_id": "ctx-1",
+    }
+    assert result["raw_text"] == "plain task result"
+    assert result["findings"] == ["plain task result"]
+
+
 def test_execute_context_plan_requires_approved_revision(monkeypatch):
     context_id = ObjectId()
     fake_db = FakeDB(
@@ -441,7 +471,7 @@ def test_execute_context_plan_requires_approved_revision(monkeypatch):
     monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
     monkeypatch.setattr(
         logic,
-        "run_with_agent",
+        "run_structured_with_agent",
         lambda *args, **kwargs: pytest.fail("draft plans must not execute"),
     )
 
@@ -489,10 +519,27 @@ def test_execute_context_plan_embeds_task_results_without_refined_prompt(monkeyp
     )
     monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
     captured_prompts = []
+    structured_response = {
+        "task_id": "company_profile",
+        "status": "completed",
+        "findings": ["task result"],
+        "assumptions": [],
+        "missing_details": [],
+        "risks": [],
+        "policy_implications": ["Use this finding in the policy scope."],
+        "rag_retrieval_hints": {
+            "collection_families": ["controls"],
+            "jurisdictions": ["Spain"],
+            "sectors": ["Healthcare"],
+            "methodologies": ["ISO 27001"],
+            "query_terms": ["patient records access control"],
+        },
+    }
+
     monkeypatch.setattr(
         logic,
-        "run_with_agent",
-        lambda prompt, context_id, model_version=None: captured_prompts.append(prompt) or "task result",
+        "run_structured_with_agent",
+        lambda prompt, **kwargs: captured_prompts.append((prompt, kwargs)) or structured_response,
     )
 
     result = logic.execute_context_plan(str(context_id))
@@ -505,8 +552,14 @@ def test_execute_context_plan_embeds_task_results_without_refined_prompt(monkeyp
     assert context["context_task_results"]["status"] == "completed"
     assert context["context_task_results"]["plan_revision_id"] == "plan-rev-1"
     assert len(context["context_task_results"]["tasks"]) == 2
+    assert context["context_task_results"]["tasks"][0]["structured_result"] == structured_response
+    assert "Findings:" in context["context_task_results"]["tasks"][0]["result"]
+    assert "RAG retrieval hints:" in context["context_task_results"]["tasks"][0]["result"]
     assert "refined_prompt" not in result
-    assert all("must not be used" not in prompt for prompt in captured_prompts)
+    assert all("must not be used" not in prompt for prompt, _kwargs in captured_prompts)
+    assert {kwargs["schema_name"] for _prompt, kwargs in captured_prompts} == {
+        "context_agent_task_result"
+    }
 
 
 def test_execute_context_plan_persists_safe_task_failure(monkeypatch):
@@ -548,7 +601,7 @@ def test_execute_context_plan_persists_safe_task_failure(monkeypatch):
     def failing_agent(*args, **kwargs):
         raise RuntimeError("secret raw provider failure")
 
-    monkeypatch.setattr(logic, "run_with_agent", failing_agent)
+    monkeypatch.setattr(logic, "run_structured_with_agent", failing_agent)
 
     result = logic.execute_context_plan(str(context_id))
 

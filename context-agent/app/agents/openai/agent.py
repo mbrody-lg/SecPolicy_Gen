@@ -9,6 +9,7 @@ from app.agents.base import Agent
 from app.agents.openai.client import OpenAIClient
 from app.agents.openai.roles.optimiser import PromptResponseOptimiser
 from app.agents.openai.roles.proactive import ProactiveGoalCreator
+from app.agents.openai.structured import create_structured_chat_completion
 
 class OpenAIAgent(Agent):
     """Concrete agent that uses OpenAI Assistants and role processors."""
@@ -117,3 +118,31 @@ class OpenAIAgent(Agent):
             )
 
         return result
+
+    def run_structured(
+        self,
+        prompt: str,
+        *,
+        schema_name: str,
+        json_schema: dict,
+        context_id: str = None,
+    ) -> dict:
+        """Run a single structured Context Agent call without Assistant threads."""
+        proactive = ProactiveGoalCreator(
+            model=self.model,
+            instructions=self.role_instructions.get("proactive_goal_creator"),
+        )
+        refined_prompt = proactive.execute(prompt)
+
+        return create_structured_chat_completion(
+            chat=self.client.chat,
+            model=self.model,
+            messages=[
+                {"role": "system", "content": self.instructions},
+                {"role": "user", "content": refined_prompt},
+            ],
+            schema_name=schema_name,
+            json_schema=json_schema,
+            temperature=0.2,
+            max_tokens=15000,
+        )

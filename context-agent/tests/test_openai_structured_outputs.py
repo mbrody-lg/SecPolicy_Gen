@@ -16,14 +16,15 @@ from app.agents.openai.structured import (
 
 class FakeCompletions:
     def __init__(self, payload=None, *, refusal=None, content=None):
-        self.payload = payload or {}
+        self.payloads = list(payload) if isinstance(payload, list) else [payload or {}]
         self.refusal = refusal
         self.content = content
         self.calls = []
 
     def create(self, **kwargs):
         self.calls.append(kwargs)
-        content = self.content if self.content is not None else json.dumps(self.payload)
+        payload = self.payloads[min(len(self.calls) - 1, len(self.payloads) - 1)]
+        content = self.content if self.content is not None else json.dumps(payload)
         message = SimpleNamespace(content=content, refusal=self.refusal)
         return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
@@ -151,6 +152,65 @@ def test_response_optimiser_uses_configured_model_instructions_and_schema(monkey
     }
     assert call["response_format"]["json_schema"]["name"] == "context_agent_optimised_response"
     assert "improved_response" in call["response_format"]["json_schema"]["schema"]["required"]
+
+
+def test_openai_agent_run_structured_uses_assistant_instructions_and_requested_schema(monkeypatch):
+    from app.agents.openai.agent import OpenAIAgent
+
+    completions = FakeCompletions([
+        {
+            "improved_prompt": "Improved task prompt",
+            "workflow_phase": "EXECUTION",
+            "preserved_constraints": ["Do not generate a policy"],
+        },
+        {
+            "task_id": "company_profile",
+            "status": "completed",
+            "findings": ["Healthcare clinic in Spain."],
+            "assumptions": [],
+            "missing_details": [],
+            "risks": ["Patient data exposure."],
+            "policy_implications": ["Access controls must be explicit."],
+            "rag_retrieval_hints": {
+                "collection_families": ["controls"],
+                "jurisdictions": ["Spain"],
+                "sectors": ["Healthcare"],
+                "methodologies": ["ISO 27001"],
+                "query_terms": ["patient records access control"],
+            },
+        },
+    ])
+    install_fake_openai(monkeypatch, completions)
+    agent = OpenAIAgent(
+        name="context-agent",
+        instructions="ASSISTANT CONTEXT INSTRUCTIONS",
+        model="gpt-configured",
+        role_instructions={"proactive_goal_creator": "PROACTIVE INSTRUCTIONS"},
+    )
+
+    result = agent.run_structured(
+        "Execute the company profile task.",
+        schema_name="context_agent_task_result",
+        json_schema={
+            "type": "object",
+            "properties": {"task_id": {"type": "string"}},
+            "required": ["task_id"],
+            "additionalProperties": False,
+        },
+        context_id="ctx-1",
+    )
+
+    assert result["task_id"] == "company_profile"
+    proactive_call, structured_call = completions.calls
+    assert proactive_call["messages"][0]["content"] == "PROACTIVE INSTRUCTIONS"
+    assert structured_call["model"] == "gpt-configured"
+    assert structured_call["messages"] == [
+        {"role": "system", "content": "ASSISTANT CONTEXT INSTRUCTIONS"},
+        {"role": "user", "content": "Improved task prompt"},
+    ]
+    assert structured_call["response_format"]["json_schema"]["name"] == (
+        "context_agent_task_result"
+    )
 
 
 def test_factory_passes_role_instructions_when_backend_accepts_them(monkeypatch, tmp_path):

@@ -21,6 +21,7 @@ from app import (
     get_request_correlation_id,
     mongo,
 )
+from app.context_output_schemas import context_phase_output_schema
 from app.agents.factory import create_agent_from_config
 from app.context_analysis import SECURITY_CONTEXT_VERSION, build_security_context_from_answers
 from app.context_analysis import security_context_to_business_context
@@ -976,16 +977,20 @@ def _execute_context_plan_task(context: dict, task: dict, plan_revision: dict) -
         "completed_at": None,
     }
     try:
-        result = run_with_agent(
+        structured_result = run_structured_with_agent(
             build_context_task_prompt(context, task, plan_revision),
-            str(context["_id"]),
+            schema_name="context_agent_task_result",
+            json_schema=context_phase_output_schema("context_task_result"),
+            context_id=str(context["_id"]),
             model_version=context.get("version", "0.1.0"),
         )
+        result = _context_task_result_text(structured_result)
         completed_at = datetime.now(timezone.utc).isoformat()
         return {
             **base_result,
             "status": "completed",
             "result": str(result or "").strip(),
+            "structured_result": structured_result,
             "completed_at": completed_at,
         }
     except Exception:
@@ -1581,6 +1586,74 @@ def run_with_agent(prompt: str, context_id: str = None, model_version: str = Non
     agent = create_agent_from_config(_agent_config_path())
     agent.create(context_id=context_id)  # pass context_id when persistence is needed
     return agent.run(prompt, context_id)
+
+
+def run_structured_with_agent(
+    prompt: str,
+    *,
+    schema_name: str,
+    json_schema: dict,
+    context_id: str = None,
+    model_version: str = None,
+) -> dict:
+    """Execute the configured agent using a structured schema when supported."""
+    _ = model_version
+    agent = create_agent_from_config(_agent_config_path())
+    if hasattr(agent, "run_structured"):
+        return agent.run_structured(
+            prompt,
+            schema_name=schema_name,
+            json_schema=json_schema,
+            context_id=context_id,
+        )
+
+    agent.create(context_id=context_id)
+    raw_text = agent.run(prompt, context_id)
+    return {
+        "task_id": "unknown",
+        "status": "completed",
+        "findings": [str(raw_text or "").strip()],
+        "assumptions": [],
+        "missing_details": [],
+        "risks": [],
+        "policy_implications": [],
+        "rag_retrieval_hints": {
+            "collection_families": [],
+            "jurisdictions": [],
+            "sectors": [],
+            "methodologies": [],
+            "query_terms": [],
+        },
+        "raw_text": str(raw_text or "").strip(),
+    }
+
+
+def _context_task_result_text(structured_result: dict) -> str:
+    """Render a structured context task result into current UI text."""
+    if not isinstance(structured_result, dict):
+        return ""
+    if structured_result.get("raw_text"):
+        return str(structured_result["raw_text"]).strip()
+
+    sections = [
+        ("Findings", structured_result.get("findings")),
+        ("Assumptions", structured_result.get("assumptions")),
+        ("Missing details", structured_result.get("missing_details")),
+        ("Risks", structured_result.get("risks")),
+        ("Policy implications", structured_result.get("policy_implications")),
+    ]
+    lines = []
+    for title, values in sections:
+        if not values:
+            continue
+        lines.append(f"{title}:")
+        lines.extend(f"- {value}" for value in values if str(value).strip())
+    hints = structured_result.get("rag_retrieval_hints") or {}
+    query_terms = hints.get("query_terms") if isinstance(hints, dict) else []
+    if query_terms:
+        lines.append("RAG retrieval hints:")
+        lines.extend(f"- {term}" for term in query_terms if str(term).strip())
+    return "\n".join(lines).strip()
 
 
 def _result_error(error: str, details: str = "", status_code: int = 500) -> dict:
