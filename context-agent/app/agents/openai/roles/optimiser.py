@@ -65,6 +65,7 @@ class PromptResponseOptimiser(OpenAIClient):
             ],
             schema_name="context_agent_optimised_response",
             json_schema=OPTIMISED_RESPONSE_SCHEMA,
+            phase="context_response_optimisation",
             temperature=0.2,
             max_tokens=15000,
         )
