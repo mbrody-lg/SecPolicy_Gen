@@ -9,20 +9,38 @@ from app.agents.openai import client as client_module
 from app.agents.openai.roles.optimiser import PromptResponseOptimiser
 from app.agents.openai.roles.proactive import ProactiveGoalCreator
 from app.agents.openai.structured import (
+    ProviderCallError,
+    ProviderConnectivityError,
+    ProviderIncompleteError,
+    ProviderRateLimitError,
+    ProviderRefusalError,
+    ProviderSchemaMismatchError,
+    ProviderTimeoutError,
     StructuredOutputError,
     create_structured_chat_completion,
 )
 
 
+class FakeRateLimitError(Exception):
+    status_code = 429
+
+
 class FakeCompletions:
-    def __init__(self, payload=None, *, refusal=None, content=None):
+    def __init__(self, payload=None, *, refusal=None, content=None, error=None, response=None):
         self.payloads = list(payload) if isinstance(payload, list) else [payload or {}]
         self.refusal = refusal
         self.content = content
+        self.error = error
+        self.response = response
         self.calls = []
 
     def create(self, **kwargs):
         self.calls.append(kwargs)
+        if self.error:
+            raise self.error
+        if self.response is not None:
+            return self.response
+        content = self.content if self.content is not None else json.dumps(self.payload)
         payload = self.payloads[min(len(self.calls) - 1, len(self.payloads) - 1)]
         content = self.content if self.content is not None else json.dumps(payload)
         message = SimpleNamespace(content=content, refusal=self.refusal)
@@ -88,7 +106,63 @@ def test_structured_chat_completion_sends_strict_json_schema():
 def test_structured_chat_completion_rejects_refusal():
     completions = FakeCompletions(refusal="not allowed")
 
-    with pytest.raises(StructuredOutputError, match="refused"):
+    with pytest.raises(ProviderRefusalError, match="refused") as exc_info:
+        create_structured_chat_completion(
+            chat=FakeChat(completions),
+            model="gpt-test",
+            messages=[{"role": "user", "content": "hello"}],
+            schema_name="test_schema",
+            phase="context_building",
+            json_schema={
+                "type": "object",
+                "properties": {"answer": {"type": "string"}},
+                "required": ["answer"],
+                "additionalProperties": False,
+            },
+        )
+
+    assert exc_info.value.to_diagnostic() == {
+        "provider": "openai",
+        "api_mode": "chat_completions",
+        "error_type": "provider_refusal",
+        "error_code": "openai_refusal",
+        "safe_message": "OpenAI refused the structured output request.",
+        "status_code": 422,
+        "retryable": False,
+        "phase": "context_building",
+        "schema_name": "test_schema",
+        "model": "gpt-test",
+        "details": {},
+    }
+
+
+def test_structured_chat_completion_rejects_empty_content_as_incomplete():
+    completions = FakeCompletions(content="")
+
+    with pytest.raises(ProviderIncompleteError) as exc_info:
+        create_structured_chat_completion(
+            chat=FakeChat(completions),
+            model="gpt-test",
+            messages=[{"role": "user", "content": "hello"}],
+            schema_name="test_schema",
+            phase="planning",
+            json_schema={
+                "type": "object",
+                "properties": {"answer": {"type": "string"}},
+                "required": ["answer"],
+                "additionalProperties": False,
+            },
+        )
+
+    assert exc_info.value.retryable is True
+    assert exc_info.value.to_diagnostic()["error_code"] == "openai_incomplete_response"
+    assert exc_info.value.to_diagnostic()["status_code"] == 502
+
+
+def test_structured_chat_completion_rejects_missing_message_as_incomplete():
+    completions = FakeCompletions(response=SimpleNamespace(choices=[]))
+
+    with pytest.raises(ProviderIncompleteError) as exc_info:
         create_structured_chat_completion(
             chat=FakeChat(completions),
             model="gpt-test",
@@ -101,6 +175,111 @@ def test_structured_chat_completion_rejects_refusal():
                 "additionalProperties": False,
             },
         )
+
+    diagnostic = exc_info.value.to_diagnostic()
+    assert diagnostic["error_code"] == "openai_incomplete_response"
+    assert diagnostic["model"] == "gpt-test"
+
+
+def test_structured_chat_completion_rejects_invalid_json_as_schema_mismatch():
+    completions = FakeCompletions(content="not-json")
+
+    with pytest.raises(ProviderSchemaMismatchError) as exc_info:
+        create_structured_chat_completion(
+            chat=FakeChat(completions),
+            model="gpt-test",
+            messages=[{"role": "user", "content": "hello"}],
+            schema_name="test_schema",
+            phase="task_execution",
+            json_schema={
+                "type": "object",
+                "properties": {"answer": {"type": "string"}},
+                "required": ["answer"],
+                "additionalProperties": False,
+            },
+        )
+
+    assert exc_info.value.to_diagnostic()["phase"] == "task_execution"
+    assert exc_info.value.to_diagnostic()["error_code"] == "openai_schema_mismatch"
+
+
+def test_structured_chat_completion_maps_timeout_to_bounded_error():
+    completions = FakeCompletions(error=TimeoutError("raw timeout detail"))
+
+    with pytest.raises(ProviderTimeoutError) as exc_info:
+        create_structured_chat_completion(
+            chat=FakeChat(completions),
+            model="gpt-test",
+            messages=[{"role": "user", "content": "hello"}],
+            schema_name="test_schema",
+            phase="final_context",
+            json_schema={
+                "type": "object",
+                "properties": {"answer": {"type": "string"}},
+                "required": ["answer"],
+                "additionalProperties": False,
+            },
+        )
+
+    diagnostic = exc_info.value.to_diagnostic()
+    assert diagnostic["retryable"] is True
+    assert diagnostic["status_code"] == 504
+    assert diagnostic["error_code"] == "openai_timeout"
+    assert diagnostic["safe_message"] == "OpenAI structured output request timed out."
+    assert "raw timeout detail" not in str(diagnostic)
+
+
+def test_structured_chat_completion_maps_rate_limit_to_bounded_error():
+    completions = FakeCompletions(error=FakeRateLimitError("raw provider rate limit"))
+
+    with pytest.raises(ProviderRateLimitError) as exc_info:
+        create_structured_chat_completion(
+            chat=FakeChat(completions),
+            model="gpt-test",
+            messages=[{"role": "user", "content": "hello"}],
+            schema_name="test_schema",
+            json_schema={
+                "type": "object",
+                "properties": {"answer": {"type": "string"}},
+                "required": ["answer"],
+                "additionalProperties": False,
+            },
+        )
+
+    diagnostic = exc_info.value.to_diagnostic()
+    assert diagnostic["retryable"] is True
+    assert diagnostic["status_code"] == 429
+    assert diagnostic["error_code"] == "openai_rate_limit"
+    assert "raw provider rate limit" not in str(diagnostic)
+
+
+def test_structured_chat_completion_maps_connectivity_to_safe_diagnostic():
+    completions = FakeCompletions(error=RuntimeError("raw provider host detail"))
+
+    with pytest.raises(ProviderConnectivityError) as exc_info:
+        create_structured_chat_completion(
+            chat=FakeChat(completions),
+            model="gpt-test",
+            messages=[{"role": "user", "content": "hello"}],
+            schema_name="test_schema",
+            json_schema={
+                "type": "object",
+                "properties": {"answer": {"type": "string"}},
+                "required": ["answer"],
+                "additionalProperties": False,
+            },
+        )
+
+    diagnostic = exc_info.value.to_diagnostic()
+    assert diagnostic["error_code"] == "openai_connectivity_error"
+    assert diagnostic["status_code"] == 502
+    assert diagnostic["details"] == {"exception_class": "RuntimeError"}
+    assert "raw provider host detail" not in str(diagnostic)
+
+
+def test_structured_output_error_name_remains_backward_compatible():
+    assert StructuredOutputError is ProviderCallError
+    assert issubclass(ProviderRefusalError, ProviderCallError)
 
 
 def test_proactive_goal_creator_uses_configured_model_instructions_and_schema(monkeypatch):
