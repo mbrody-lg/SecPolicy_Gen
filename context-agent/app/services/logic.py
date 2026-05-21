@@ -1621,6 +1621,98 @@ def business_context_from_context_record(context: dict) -> dict:
     return security_context_to_business_context(security_context)
 
 
+def policy_handoff_context_from_context_record(context: dict) -> dict:
+    """Return structured Context Agent handoff data for Policy Agent/RAG."""
+    security_context = context.get("security_context")
+    if not isinstance(security_context, dict):
+        security_context = build_context_security_context(context)
+    final_context = context.get("final_context") if isinstance(context.get("final_context"), dict) else {}
+    sections = final_context.get("sections") if isinstance(final_context.get("sections"), dict) else {}
+    task_items = (
+        sections.get("task_findings", {}).get("items", [])
+        if isinstance(sections.get("task_findings"), dict)
+        else []
+    )
+    structured_findings = [
+        _policy_handoff_task_item(item)
+        for item in task_items
+        if isinstance(item, dict)
+    ]
+    return {
+        "version": FINAL_CONTEXT_VERSION,
+        "source": "context-agent",
+        "security_context_version": security_context.get("version"),
+        "final_context_status": final_context.get("status"),
+        "plan_revision_id": final_context.get("plan_revision_id"),
+        "context_snapshot_hash": final_context.get("context_snapshot_hash"),
+        "business_context": business_context_from_context_record(context),
+        "final_context_sections": {
+            section_id: {
+                "status": section.get("status"),
+                "content": str(section.get("content") or "").strip(),
+            }
+            for section_id, section in sections.items()
+            if isinstance(section, dict)
+        },
+        "structured_findings": structured_findings,
+        "retrieval_hints": _merge_retrieval_hints(
+            security_context.get("retrieval_hints", {}),
+            [
+                item.get("rag_retrieval_hints", {})
+                for item in structured_findings
+                if isinstance(item.get("rag_retrieval_hints"), dict)
+            ],
+        ),
+        "assumptions": _string_list(
+            security_context.get("analysis", {}).get("assumptions", [])
+        ),
+        "unresolved_gaps": _string_list(
+            security_context.get("analysis", {}).get("missing_information", [])
+        ),
+    }
+
+
+def _policy_handoff_task_item(item: dict) -> dict:
+    return {
+        "task_id": item.get("item_id"),
+        "title": item.get("title"),
+        "status": item.get("status"),
+        "findings": _string_list(item.get("findings")),
+        "assumptions": _string_list(item.get("assumptions")),
+        "missing_details": _string_list(item.get("missing_details")),
+        "risks": _string_list(item.get("risks")),
+        "policy_implications": _string_list(item.get("policy_implications")),
+        "rag_retrieval_hints": (
+            item.get("rag_retrieval_hints")
+            if isinstance(item.get("rag_retrieval_hints"), dict)
+            else {}
+        ),
+    }
+
+
+def _merge_retrieval_hints(base_hints: dict, task_hints: list[dict]) -> dict:
+    fields = {
+        "collection_families",
+        "jurisdictions",
+        "sectors",
+        "methodologies",
+        "query_terms",
+        "data_types",
+    }
+    merged = {field: [] for field in fields}
+    for field in fields:
+        if isinstance(base_hints, dict):
+            source_field = "collection_families" if field == "collection_families" else field
+            merged[field].extend(_string_list(base_hints.get(source_field)))
+    for hints in task_hints:
+        for field in fields:
+            merged[field].extend(_string_list(hints.get(field)))
+    return {
+        field: list(dict.fromkeys(values))
+        for field, values in merged.items()
+    }
+
+
 def run_with_agent(prompt: str, context_id: str = None, model_version: str = None) -> str:
     """
     Execute the configured agent using the initial prompt.
@@ -1948,6 +2040,7 @@ def get_context_and_prompt(context_id: str) -> dict:
         "language": context.get("language", "en"),
         "model_version": str(context.get("version", "0.1.0")),
         "business_context": business_context_from_context_record(context),
+        "policy_handoff_context": policy_handoff_context_from_context_record(context),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "correlation_id": correlation_id,
     }

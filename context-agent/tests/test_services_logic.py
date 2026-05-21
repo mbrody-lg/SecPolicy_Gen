@@ -772,6 +772,59 @@ def test_build_final_context_expands_structured_task_result_fields():
     assert "RAG retrieval hints:" in final_context["sections"]["task_findings"]["content"]
 
 
+def test_get_context_and_prompt_includes_structured_policy_handoff(monkeypatch):
+    context_id = ObjectId()
+    security_context = logic.build_context_security_context({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "data_categories": "health_data",
+        "methodology": "ISO 27001",
+        "need": "Build a security plan",
+    })
+    context = {
+        "_id": context_id,
+        "status": "context_ready_for_policy",
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "data_categories": "health_data",
+        "methodology": "ISO 27001",
+        "need": "Build a security plan",
+        "language": "en",
+        "version": "1.0",
+        "security_context": security_context,
+        "context_intelligence_plan": _approved_context_plan(),
+        "context_task_results": _completed_structured_context_task_results(),
+    }
+    context["final_context"] = logic.build_final_context(
+        context,
+        security_context=security_context,
+        plan_revision=logic.context_plan_revision(context["context_intelligence_plan"]),
+    )
+    context["refined_prompt"] = logic.render_final_context_prompt(context["final_context"])
+    fake_db = FakeDB(contexts=[context], interactions=[])
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    payload = logic.get_context_and_prompt(str(context_id))
+
+    handoff = payload["policy_handoff_context"]
+    assert payload["business_context"]["sector"] == "Healthcare"
+    assert handoff["business_context"]["sector"] == "Healthcare"
+    assert handoff["plan_revision_id"] == "plan-rev-1"
+    assert handoff["structured_findings"][0]["findings"] == [
+        "The company operates a healthcare clinic in Spain."
+    ]
+    assert handoff["structured_findings"][0]["policy_implications"] == [
+        "Access review responsibilities must be explicit."
+    ]
+    assert handoff["retrieval_hints"]["collection_families"][:1] == ["legal_norms"]
+    assert "risk_methodologies" in handoff["retrieval_hints"]["collection_families"]
+    assert "controls" in handoff["retrieval_hints"]["collection_families"]
+    assert "health_data" in handoff["retrieval_hints"]["data_types"]
+    assert "healthcare access review" in handoff["retrieval_hints"]["query_terms"]
+
+
 def test_synthesize_final_context_rejects_missing_security_context_information(monkeypatch):
     context_id = ObjectId()
     security_context = logic.build_context_security_context({
