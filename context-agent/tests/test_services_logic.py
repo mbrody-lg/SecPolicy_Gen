@@ -453,6 +453,183 @@ def test_run_structured_with_agent_falls_back_to_text_agent(monkeypatch):
     assert result["findings"] == ["plain task result"]
 
 
+def test_run_context_planning_review_uses_planning_schema(monkeypatch):
+    captured = {}
+
+    def fake_structured(
+        prompt,
+        *,
+        schema_name,
+        json_schema,
+        context_id=None,
+        model_version=None,
+        fallback_phase=None,
+    ):
+        captured.update({
+            "prompt": prompt,
+            "schema_name": schema_name,
+            "json_schema": json_schema,
+            "context_id": context_id,
+            "model_version": model_version,
+            "fallback_phase": fallback_phase,
+        })
+        return {
+            "plan_summary": "Review the analysis plan before execution.",
+            "tasks": [
+                {
+                    "id": "company_profile",
+                    "order": 1,
+                    "title": "Company profile",
+                    "objective": "Clarify the operating model.",
+                    "dependencies": [],
+                    "expected_output": "Confirmed operating model.",
+                }
+            ],
+            "missing_context_questions": [
+                {
+                    "answer_field": "critical_assets",
+                    "question": "Which assets are critical?",
+                    "rationale": "Policy scope depends on critical assets.",
+                }
+            ],
+            "approval_recommendation": "add_context",
+        }
+
+    monkeypatch.setattr(logic, "run_structured_with_agent", fake_structured)
+
+    result = logic.run_context_planning_review(
+        "Plan this context",
+        context_id="ctx-1",
+        model_version="0.1.0",
+    )
+
+    assert captured["schema_name"] == "context_agent_planning_review"
+    assert captured["fallback_phase"] == "context_planning"
+    assert captured["json_schema"]["required"] == [
+        "plan_summary",
+        "tasks",
+        "missing_context_questions",
+        "approval_recommendation",
+    ]
+    assert result["structured_review"]["approval_recommendation"] == "add_context"
+    assert "Context planning review" in result["text"]
+    assert "Which assets are critical?" in result["text"]
+
+
+def test_run_structured_with_agent_planning_fallback(monkeypatch):
+    class FakeAgent:
+        def create(self, context_id=None):
+            pass
+
+        def run(self, prompt, context_id):
+            return "Plain planning review"
+
+    monkeypatch.setattr(logic, "create_agent_from_config", lambda config_path: FakeAgent())
+
+    result = logic.run_structured_with_agent(
+        "Planning prompt",
+        schema_name="context_agent_planning_review",
+        json_schema={"type": "object"},
+        context_id="ctx-1",
+        fallback_phase="context_planning",
+    )
+
+    assert result["plan_summary"] == "Plain planning review"
+    assert result["tasks"] == []
+    assert result["missing_context_questions"] == []
+    assert result["approval_recommendation"] == "review_required"
+
+
+def test_run_context_building_review_uses_context_building_schema(monkeypatch):
+    captured = {}
+
+    def fake_structured(
+        prompt,
+        *,
+        schema_name,
+        json_schema,
+        context_id=None,
+        model_version=None,
+        fallback_phase=None,
+    ):
+        captured.update({
+            "prompt": prompt,
+            "schema_name": schema_name,
+            "json_schema": json_schema,
+            "context_id": context_id,
+            "model_version": model_version,
+            "fallback_phase": fallback_phase,
+        })
+        return {
+            "summary": "Context update reviewed.",
+            "explicit_facts": [
+                {
+                    "field_path": "critical_assets",
+                    "value": "Patient data",
+                    "source": "user_input",
+                }
+            ],
+            "assumptions": ["Access reviews are monthly."],
+            "missing_information": [],
+            "follow_up_questions": [
+                {
+                    "id": "q_retention",
+                    "answer_field": "data_retention",
+                    "question": "How long is patient data retained?",
+                    "rationale": "Retention affects policy obligations.",
+                }
+            ],
+            "security_domains": ["data_protection"],
+            "rag_retrieval_hints": {
+                "collection_families": [],
+                "jurisdictions": [],
+                "sectors": [],
+                "methodologies": [],
+                "query_terms": ["patient data retention"],
+            },
+            "next_action": "ask_follow_up",
+        }
+
+    monkeypatch.setattr(logic, "run_structured_with_agent", fake_structured)
+
+    result = logic.run_context_building_review(
+        "Update this context",
+        context_id="ctx-1",
+        model_version="0.1.0",
+    )
+
+    assert captured["schema_name"] == "context_agent_context_building_review"
+    assert captured["fallback_phase"] == "context_building"
+    assert "follow_up_questions" in captured["json_schema"]["properties"]
+    assert result["structured_review"]["next_action"] == "ask_follow_up"
+    assert "Context building review" in result["text"]
+    assert "How long is patient data retained?" in result["text"]
+
+
+def test_run_structured_with_agent_context_building_fallback(monkeypatch):
+    class FakeAgent:
+        def create(self, context_id=None):
+            pass
+
+        def run(self, prompt, context_id):
+            return "Plain context-building review"
+
+    monkeypatch.setattr(logic, "create_agent_from_config", lambda config_path: FakeAgent())
+
+    result = logic.run_structured_with_agent(
+        "Context-building prompt",
+        schema_name="context_agent_context_building_review",
+        json_schema={"type": "object"},
+        context_id="ctx-1",
+        fallback_phase="context_building",
+    )
+
+    assert result["summary"] == "Plain context-building review"
+    assert result["explicit_facts"] == []
+    assert result["follow_up_questions"] == []
+    assert result["next_action"] == "review_required"
+
+
 def test_execute_context_plan_requires_approved_revision(monkeypatch):
     context_id = ObjectId()
     fake_db = FakeDB(

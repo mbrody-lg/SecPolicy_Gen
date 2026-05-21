@@ -18,7 +18,7 @@ from app.services.logic import (
     build_context_intelligence_plan,
     context_answer_fields,
     generate_context_plan_prompt,
-    run_with_agent,
+    run_context_planning_review,
     load_questions,
 )
 
@@ -112,7 +112,16 @@ def recreate_context_from_answers(data, *, auto_approve_plan=False):
             "origin": "user"
         })
 
-    full_prompt = run_with_agent(initial_prompt, str(context_id), model_version="0.1.0")
+    planning_review = run_context_planning_review(
+        initial_prompt,
+        str(context_id),
+        model_version="0.1.0",
+    )
+    full_prompt = planning_review["text"]
+    context_plan_with_review = {
+        **context_plan,
+        "provider_review": planning_review["structured_review"],
+    }
     mongo.db.interactions.insert_one({
         "context_id": context_id,
         "question_id": "response_initial",
@@ -127,13 +136,16 @@ def recreate_context_from_answers(data, *, auto_approve_plan=False):
         if context_building["status"] == "needs_information"
         else "awaiting_task_validation"
     )
-    update_payload = {"status": status}
+    update_payload = {
+        "status": status,
+        "context_intelligence_plan": context_plan_with_review,
+    }
     if auto_approve_plan:
         context_record = {
             **data,
             "_id": context_id,
             "security_context": security_context,
-            "context_intelligence_plan": context_plan,
+            "context_intelligence_plan": context_plan_with_review,
         }
         update_payload = {
             "status": "context_plan_approved",

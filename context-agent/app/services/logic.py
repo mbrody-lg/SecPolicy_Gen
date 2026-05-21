@@ -784,6 +784,175 @@ def generate_context_plan_prompt(data: dict, question_config: str | None = None)
     )
 
 
+def _context_planning_review_text(review: dict) -> str:
+    """Render a structured planning review into the existing interaction stream."""
+    if not isinstance(review, dict):
+        return ""
+
+    raw_text = str(review.get("raw_text") or "").strip()
+    tasks = review.get("tasks") if isinstance(review.get("tasks"), list) else []
+    questions = (
+        review.get("missing_context_questions")
+        if isinstance(review.get("missing_context_questions"), list)
+        else []
+    )
+    if raw_text and not tasks and not questions:
+        return raw_text
+
+    lines = [
+        "## Context planning review",
+        "",
+        str(review.get("plan_summary") or "The context-intelligence plan is ready for review.").strip(),
+    ]
+    if tasks:
+        lines.extend(["", "### Planned analysis tasks"])
+        for task in tasks:
+            if not isinstance(task, dict):
+                continue
+            order = task.get("order") or "-"
+            title = str(task.get("title") or task.get("id") or "Untitled task").strip()
+            objective = str(task.get("objective") or "").strip()
+            expected_output = str(task.get("expected_output") or "").strip()
+            lines.append(f"{order}. **{title}**")
+            if objective:
+                lines.append(f"   - Objective: {objective}")
+            if expected_output:
+                lines.append(f"   - Expected output: {expected_output}")
+
+    if questions:
+        lines.extend(["", "### Missing context questions"])
+        for question in questions:
+            if not isinstance(question, dict):
+                continue
+            text = str(question.get("question") or "").strip()
+            rationale = str(question.get("rationale") or "").strip()
+            if text:
+                lines.append(f"- {text}")
+            if rationale:
+                lines.append(f"  Rationale: {rationale}")
+
+    recommendation = str(review.get("approval_recommendation") or "").strip()
+    if recommendation:
+        lines.extend(["", f"Approval recommendation: {recommendation}"])
+
+    return "\n".join(lines).strip()
+
+
+def run_context_planning_review(
+    prompt: str,
+    context_id: str = None,
+    model_version: str = None,
+) -> dict:
+    """Generate a structured planning review for the Context Agent workflow."""
+    structured_review = run_structured_with_agent(
+        prompt,
+        schema_name="context_agent_planning_review",
+        json_schema=context_phase_output_schema("context_planning"),
+        context_id=context_id,
+        model_version=model_version,
+        fallback_phase="context_planning",
+    )
+    return {
+        "structured_review": structured_review,
+        "text": _context_planning_review_text(structured_review),
+    }
+
+
+def _context_building_review_text(review: dict) -> str:
+    """Render a structured context-building review into the interaction stream."""
+    if not isinstance(review, dict):
+        return ""
+
+    raw_text = str(review.get("raw_text") or "").strip()
+    follow_up_questions = (
+        review.get("follow_up_questions")
+        if isinstance(review.get("follow_up_questions"), list)
+        else []
+    )
+    explicit_facts = (
+        review.get("explicit_facts")
+        if isinstance(review.get("explicit_facts"), list)
+        else []
+    )
+    missing_information = (
+        review.get("missing_information")
+        if isinstance(review.get("missing_information"), list)
+        else []
+    )
+    if raw_text and not explicit_facts and not missing_information and not follow_up_questions:
+        return raw_text
+
+    lines = [
+        "## Context building review",
+        "",
+        str(review.get("summary") or "The context has been reviewed.").strip(),
+    ]
+    if explicit_facts:
+        lines.extend(["", "### Confirmed facts"])
+        for fact in explicit_facts:
+            if not isinstance(fact, dict):
+                continue
+            field_path = str(fact.get("field_path") or "fact").strip()
+            value = str(fact.get("value") or "").strip()
+            if value:
+                lines.append(f"- {field_path}: {value}")
+
+    assumptions = _string_list(review.get("assumptions"))
+    if assumptions:
+        lines.extend(["", "### Assumptions"])
+        lines.extend(f"- {assumption}" for assumption in assumptions)
+
+    if missing_information:
+        lines.extend(["", "### Missing information"])
+        for item in missing_information:
+            if not isinstance(item, dict):
+                continue
+            question = str(item.get("question") or "").strip()
+            rationale = str(item.get("rationale") or "").strip()
+            if question:
+                lines.append(f"- {question}")
+            if rationale:
+                lines.append(f"  Rationale: {rationale}")
+
+    if follow_up_questions:
+        lines.extend(["", "### Follow-up questions"])
+        for question in follow_up_questions:
+            if not isinstance(question, dict):
+                continue
+            text = str(question.get("question") or "").strip()
+            rationale = str(question.get("rationale") or "").strip()
+            if text:
+                lines.append(f"- {text}")
+            if rationale:
+                lines.append(f"  Rationale: {rationale}")
+
+    next_action = str(review.get("next_action") or "").strip()
+    if next_action:
+        lines.extend(["", f"Next action: {next_action}"])
+
+    return "\n".join(lines).strip()
+
+
+def run_context_building_review(
+    prompt: str,
+    context_id: str = None,
+    model_version: str = None,
+) -> dict:
+    """Generate a structured review for Intake / Context Building updates."""
+    structured_review = run_structured_with_agent(
+        prompt,
+        schema_name="context_agent_context_building_review",
+        json_schema=context_phase_output_schema("context_building"),
+        context_id=context_id,
+        model_version=model_version,
+        fallback_phase="context_building",
+    )
+    return {
+        "structured_review": structured_review,
+        "text": _context_building_review_text(structured_review),
+    }
+
+
 def generate_context_update_prompt(context: dict, additional_context: str) -> str:
     """Build the prompt used when Intake adds more context after creation."""
     updated_context = {**context, "need": additional_context or context.get("need", "")}
@@ -1731,6 +1900,7 @@ def run_structured_with_agent(
     json_schema: dict,
     context_id: str = None,
     model_version: str = None,
+    fallback_phase: str = "context_task_result",
 ) -> dict:
     """Execute the configured agent using a structured schema when supported."""
     _ = model_version
@@ -1745,10 +1915,38 @@ def run_structured_with_agent(
 
     agent.create(context_id=context_id)
     raw_text = agent.run(prompt, context_id)
+    raw_text = str(raw_text or "").strip()
+    if fallback_phase == "context_planning":
+        return {
+            "plan_summary": raw_text or "The context-intelligence plan requires review.",
+            "tasks": [],
+            "missing_context_questions": [],
+            "approval_recommendation": "review_required",
+            "raw_text": raw_text,
+        }
+    if fallback_phase == "context_building":
+        return {
+            "summary": raw_text or "The context update requires review.",
+            "explicit_facts": [],
+            "assumptions": [],
+            "missing_information": [],
+            "follow_up_questions": [],
+            "security_domains": [],
+            "rag_retrieval_hints": {
+                "collection_families": [],
+                "jurisdictions": [],
+                "sectors": [],
+                "methodologies": [],
+                "query_terms": [],
+            },
+            "next_action": "review_required",
+            "raw_text": raw_text,
+        }
+
     return {
         "task_id": "unknown",
         "status": "completed",
-        "findings": [str(raw_text or "").strip()],
+        "findings": [raw_text] if raw_text else [],
         "assumptions": [],
         "missing_details": [],
         "risks": [],
@@ -1760,7 +1958,7 @@ def run_structured_with_agent(
             "methodologies": [],
             "query_terms": [],
         },
-        "raw_text": str(raw_text or "").strip(),
+        "raw_text": raw_text,
     }
 
 
