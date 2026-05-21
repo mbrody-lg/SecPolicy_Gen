@@ -453,6 +453,183 @@ def test_run_structured_with_agent_falls_back_to_text_agent(monkeypatch):
     assert result["findings"] == ["plain task result"]
 
 
+def test_run_context_planning_review_uses_planning_schema(monkeypatch):
+    captured = {}
+
+    def fake_structured(
+        prompt,
+        *,
+        schema_name,
+        json_schema,
+        context_id=None,
+        model_version=None,
+        fallback_phase=None,
+    ):
+        captured.update({
+            "prompt": prompt,
+            "schema_name": schema_name,
+            "json_schema": json_schema,
+            "context_id": context_id,
+            "model_version": model_version,
+            "fallback_phase": fallback_phase,
+        })
+        return {
+            "plan_summary": "Review the analysis plan before execution.",
+            "tasks": [
+                {
+                    "id": "company_profile",
+                    "order": 1,
+                    "title": "Company profile",
+                    "objective": "Clarify the operating model.",
+                    "dependencies": [],
+                    "expected_output": "Confirmed operating model.",
+                }
+            ],
+            "missing_context_questions": [
+                {
+                    "answer_field": "critical_assets",
+                    "question": "Which assets are critical?",
+                    "rationale": "Policy scope depends on critical assets.",
+                }
+            ],
+            "approval_recommendation": "add_context",
+        }
+
+    monkeypatch.setattr(logic, "run_structured_with_agent", fake_structured)
+
+    result = logic.run_context_planning_review(
+        "Plan this context",
+        context_id="ctx-1",
+        model_version="0.1.0",
+    )
+
+    assert captured["schema_name"] == "context_agent_planning_review"
+    assert captured["fallback_phase"] == "context_planning"
+    assert captured["json_schema"]["required"] == [
+        "plan_summary",
+        "tasks",
+        "missing_context_questions",
+        "approval_recommendation",
+    ]
+    assert result["structured_review"]["approval_recommendation"] == "add_context"
+    assert "Context planning review" in result["text"]
+    assert "Which assets are critical?" in result["text"]
+
+
+def test_run_structured_with_agent_planning_fallback(monkeypatch):
+    class FakeAgent:
+        def create(self, context_id=None):
+            pass
+
+        def run(self, prompt, context_id):
+            return "Plain planning review"
+
+    monkeypatch.setattr(logic, "create_agent_from_config", lambda config_path: FakeAgent())
+
+    result = logic.run_structured_with_agent(
+        "Planning prompt",
+        schema_name="context_agent_planning_review",
+        json_schema={"type": "object"},
+        context_id="ctx-1",
+        fallback_phase="context_planning",
+    )
+
+    assert result["plan_summary"] == "Plain planning review"
+    assert result["tasks"] == []
+    assert result["missing_context_questions"] == []
+    assert result["approval_recommendation"] == "review_required"
+
+
+def test_run_context_building_review_uses_context_building_schema(monkeypatch):
+    captured = {}
+
+    def fake_structured(
+        prompt,
+        *,
+        schema_name,
+        json_schema,
+        context_id=None,
+        model_version=None,
+        fallback_phase=None,
+    ):
+        captured.update({
+            "prompt": prompt,
+            "schema_name": schema_name,
+            "json_schema": json_schema,
+            "context_id": context_id,
+            "model_version": model_version,
+            "fallback_phase": fallback_phase,
+        })
+        return {
+            "summary": "Context update reviewed.",
+            "explicit_facts": [
+                {
+                    "field_path": "critical_assets",
+                    "value": "Patient data",
+                    "source": "user_input",
+                }
+            ],
+            "assumptions": ["Access reviews are monthly."],
+            "missing_information": [],
+            "follow_up_questions": [
+                {
+                    "id": "q_retention",
+                    "answer_field": "data_retention",
+                    "question": "How long is patient data retained?",
+                    "rationale": "Retention affects policy obligations.",
+                }
+            ],
+            "security_domains": ["data_protection"],
+            "rag_retrieval_hints": {
+                "collection_families": [],
+                "jurisdictions": [],
+                "sectors": [],
+                "methodologies": [],
+                "query_terms": ["patient data retention"],
+            },
+            "next_action": "ask_follow_up",
+        }
+
+    monkeypatch.setattr(logic, "run_structured_with_agent", fake_structured)
+
+    result = logic.run_context_building_review(
+        "Update this context",
+        context_id="ctx-1",
+        model_version="0.1.0",
+    )
+
+    assert captured["schema_name"] == "context_agent_context_building_review"
+    assert captured["fallback_phase"] == "context_building"
+    assert "follow_up_questions" in captured["json_schema"]["properties"]
+    assert result["structured_review"]["next_action"] == "ask_follow_up"
+    assert "Context building review" in result["text"]
+    assert "How long is patient data retained?" in result["text"]
+
+
+def test_run_structured_with_agent_context_building_fallback(monkeypatch):
+    class FakeAgent:
+        def create(self, context_id=None):
+            pass
+
+        def run(self, prompt, context_id):
+            return "Plain context-building review"
+
+    monkeypatch.setattr(logic, "create_agent_from_config", lambda config_path: FakeAgent())
+
+    result = logic.run_structured_with_agent(
+        "Context-building prompt",
+        schema_name="context_agent_context_building_review",
+        json_schema={"type": "object"},
+        context_id="ctx-1",
+        fallback_phase="context_building",
+    )
+
+    assert result["summary"] == "Plain context-building review"
+    assert result["explicit_facts"] == []
+    assert result["follow_up_questions"] == []
+    assert result["next_action"] == "review_required"
+
+
 def test_execute_context_plan_requires_approved_revision(monkeypatch):
     context_id = ObjectId()
     fake_db = FakeDB(
@@ -639,6 +816,27 @@ def _completed_context_task_results():
     }
 
 
+def _completed_structured_context_task_results():
+    task_results = _completed_context_task_results()
+    task_results["tasks"][0]["structured_result"] = {
+        "task_id": "company_profile",
+        "status": "completed",
+        "findings": ["The company operates a healthcare clinic in Spain."],
+        "assumptions": ["The clinic handles outpatient care."],
+        "missing_details": ["No named security owner was provided."],
+        "risks": ["Patient data access could be over-permissive."],
+        "policy_implications": ["Access review responsibilities must be explicit."],
+        "rag_retrieval_hints": {
+            "collection_families": ["controls"],
+            "jurisdictions": ["Spain"],
+            "sectors": ["Healthcare"],
+            "methodologies": ["ISO 27001"],
+            "query_terms": ["healthcare access review"],
+        },
+    }
+    return task_results
+
+
 def _approved_context_plan():
     return logic.approve_context_intelligence_plan({
         "country": "Spain",
@@ -718,6 +916,90 @@ def test_synthesize_final_context_persists_final_context_and_refined_prompt(monk
     assert "Patient records" in context["refined_prompt"]
     payload = logic.get_context_and_prompt(str(context_id))
     assert payload["refined_prompt"] == context["refined_prompt"]
+
+
+def test_build_final_context_expands_structured_task_result_fields():
+    security_context = logic.build_context_security_context({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "data_categories": "health_data",
+        "need": "Build a security plan",
+    })
+    context = {
+        "security_context": security_context,
+        "context_task_results": _completed_structured_context_task_results(),
+    }
+    plan_revision = logic.context_plan_revision(_approved_context_plan())
+
+    final_context = logic.build_final_context(
+        context,
+        security_context=security_context,
+        plan_revision=plan_revision,
+    )
+
+    item = final_context["sections"]["task_findings"]["items"][0]
+    assert item["findings"] == ["The company operates a healthcare clinic in Spain."]
+    assert item["risks"] == ["Patient data access could be over-permissive."]
+    assert item["policy_implications"] == [
+        "Access review responsibilities must be explicit."
+    ]
+    assert item["rag_retrieval_hints"]["query_terms"] == ["healthcare access review"]
+    assert "Findings:" in item["content"]
+    assert "RAG retrieval hints:" in final_context["sections"]["task_findings"]["content"]
+
+
+def test_get_context_and_prompt_includes_structured_policy_handoff(monkeypatch):
+    context_id = ObjectId()
+    security_context = logic.build_context_security_context({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "data_categories": "health_data",
+        "methodology": "ISO 27001",
+        "need": "Build a security plan",
+    })
+    context = {
+        "_id": context_id,
+        "status": "context_ready_for_policy",
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "data_categories": "health_data",
+        "methodology": "ISO 27001",
+        "need": "Build a security plan",
+        "language": "en",
+        "version": "1.0",
+        "security_context": security_context,
+        "context_intelligence_plan": _approved_context_plan(),
+        "context_task_results": _completed_structured_context_task_results(),
+    }
+    context["final_context"] = logic.build_final_context(
+        context,
+        security_context=security_context,
+        plan_revision=logic.context_plan_revision(context["context_intelligence_plan"]),
+    )
+    context["refined_prompt"] = logic.render_final_context_prompt(context["final_context"])
+    fake_db = FakeDB(contexts=[context], interactions=[])
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    payload = logic.get_context_and_prompt(str(context_id))
+
+    handoff = payload["policy_handoff_context"]
+    assert payload["business_context"]["sector"] == "Healthcare"
+    assert handoff["business_context"]["sector"] == "Healthcare"
+    assert handoff["plan_revision_id"] == "plan-rev-1"
+    assert handoff["structured_findings"][0]["findings"] == [
+        "The company operates a healthcare clinic in Spain."
+    ]
+    assert handoff["structured_findings"][0]["policy_implications"] == [
+        "Access review responsibilities must be explicit."
+    ]
+    assert handoff["retrieval_hints"]["collection_families"][:1] == ["legal_norms"]
+    assert "risk_methodologies" in handoff["retrieval_hints"]["collection_families"]
+    assert "controls" in handoff["retrieval_hints"]["collection_families"]
+    assert "health_data" in handoff["retrieval_hints"]["data_types"]
+    assert "healthcare access review" in handoff["retrieval_hints"]["query_terms"]
 
 
 def test_synthesize_final_context_rejects_missing_security_context_information(monkeypatch):
