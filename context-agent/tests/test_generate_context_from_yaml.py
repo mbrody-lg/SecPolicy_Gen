@@ -4,8 +4,16 @@ import generate_context_from_yaml as importer
 def test_recreate_context_from_answers_creates_reviewable_plan(monkeypatch):
     monkeypatch.setattr(
         importer,
-        "run_with_agent",
-        lambda prompt, context_id, model_version=None: "Review this context plan.",
+        "run_context_planning_review",
+        lambda prompt, context_id, model_version=None: {
+            "text": "Review this context plan.",
+            "structured_review": {
+                "plan_summary": "Review this context plan.",
+                "tasks": [],
+                "missing_context_questions": [],
+                "approval_recommendation": "review_required",
+            },
+        },
     )
 
     importer.mongo.db.contexts.delete_many({})
@@ -25,6 +33,7 @@ def test_recreate_context_from_answers_creates_reviewable_plan(monkeypatch):
     assert context["security_context"]["profile"]["sector"] == "Healthcare"
     assert context["context_building"]["status"] == "sufficient"
     assert context["context_intelligence_plan"]["status"] == "draft"
+    assert context["context_intelligence_plan"]["provider_review"]["plan_summary"] == "Review this context plan."
     assert context["context_intelligence_plan"]["tasks"][0]["id"] == "company_profile"
     assert "refined_prompt" not in context
 
@@ -38,8 +47,16 @@ def test_recreate_context_from_answers_creates_reviewable_plan(monkeypatch):
 def test_recreate_context_from_answers_can_auto_approve_plan(monkeypatch):
     monkeypatch.setattr(
         importer,
-        "run_with_agent",
-        lambda prompt, context_id, model_version=None: "Review this context plan.",
+        "run_context_planning_review",
+        lambda prompt, context_id, model_version=None: {
+            "text": "Review this context plan.",
+            "structured_review": {
+                "plan_summary": "Review this context plan.",
+                "tasks": [],
+                "missing_context_questions": [],
+                "approval_recommendation": "review_required",
+            },
+        },
     )
 
     importer.mongo.db.contexts.delete_many({})
@@ -68,6 +85,7 @@ def test_recreate_context_from_answers_can_auto_approve_plan(monkeypatch):
     assert plan["review"]["approved_by"] == "fixture-import"
     assert plan["review"]["approval_source"] == "generate_context_from_yaml"
     assert plan["approved_revision_id"] == "plan-rev-1"
+    assert plan["provider_review"]["plan_summary"] == "Review this context plan."
     assert {task["status"] for task in plan["tasks"]} == {"approved"}
 
 

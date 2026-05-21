@@ -237,8 +237,16 @@ def test_create_route_persists_security_context(client, monkeypatch):
     captured_prompts = []
     monkeypatch.setattr(
         routes_module,
-        "run_with_agent",
-        lambda prompt, context_id, model_version=None: captured_prompts.append(prompt) or "Reviewable context plan",
+        "run_context_planning_review",
+        lambda prompt, context_id, model_version=None: captured_prompts.append(prompt) or {
+            "text": "Reviewable context plan",
+            "structured_review": {
+                "plan_summary": "Reviewable context plan",
+                "tasks": [],
+                "missing_context_questions": [],
+                "approval_recommendation": "review_required",
+            },
+        },
     )
 
     response = client.post(
@@ -261,7 +269,8 @@ def test_create_route_persists_security_context(client, monkeypatch):
     )
 
     assert response.status_code == 302
-    context = routes_module.mongo.db.contexts.find_one({"country": "Init05Land"})
+    context_id = response.headers["Location"].rsplit("/", 1)[-1]
+    context = routes_module.mongo.db.contexts.find_one({"_id": ObjectId(context_id)})
     assert context["status"] == "awaiting_task_validation"
     assert context["security_context_version"] == routes_module.SECURITY_CONTEXT_VERSION
     assert context["security_context"]["profile"]["sector"] == "Healthcare"
@@ -283,6 +292,7 @@ def test_create_route_persists_security_context(client, monkeypatch):
     assert context["context_intelligence_plan"]["status"] == "draft"
     assert context["context_intelligence_plan"]["tasks"][0]["id"] == "company_profile"
     assert context["context_intelligence_plan"]["tasks"][-1]["id"] == "final_synthesis"
+    assert context["context_intelligence_plan"]["provider_review"]["plan_summary"] == "Reviewable context plan"
     assert "Produce a reviewable analysis plan" in captured_prompts[0]
     assert "Company profile and operating model" in captured_prompts[0]
 
@@ -290,8 +300,16 @@ def test_create_route_persists_security_context(client, monkeypatch):
 def test_create_route_persists_context_building_questions_when_context_is_incomplete(client, monkeypatch):
     monkeypatch.setattr(
         routes_module,
-        "run_with_agent",
-        lambda prompt, context_id, model_version=None: "Reviewable context plan",
+        "run_context_planning_review",
+        lambda prompt, context_id, model_version=None: {
+            "text": "Reviewable context plan",
+            "structured_review": {
+                "plan_summary": "Reviewable context plan",
+                "tasks": [],
+                "missing_context_questions": [],
+                "approval_recommendation": "review_required",
+            },
+        },
     )
 
     response = client.post(

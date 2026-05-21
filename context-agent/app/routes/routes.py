@@ -32,6 +32,7 @@ from app.services.logic import (
     export_context_lessons,
     mark_final_context_sections_for_improvement,
     regenerate_final_context_sections,
+    run_context_planning_review,
     run_with_agent,
     load_questions,
     render_markdown,
@@ -329,14 +330,29 @@ def create():
         initial_prompt = generate_context_plan_prompt(data)
 
         created_at = datetime.now(timezone.utc)
+        context_id = ObjectId()
 
-        inserted = mongo.db.contexts.insert_one({
+        # Send prompt to the agent to generate the structured planning review.
+        planning_review = run_context_planning_review(
+            initial_prompt,
+            str(context_id),
+            model_version="0.1.0",
+        )
+        full_prompt = planning_review["text"]
+        context_plan_with_review = {
+            **context_plan,
+            "provider_review": planning_review["structured_review"],
+        }
+        stored_context_plan = context_plan_with_review if full_prompt and full_prompt.strip() else context_plan
+
+        mongo.db.contexts.insert_one({
             **data,
+            "_id": context_id,
             "version": 1,
             "security_context_version": SECURITY_CONTEXT_VERSION,
             "security_context": security_context,
             "context_building": context_building,
-            "context_intelligence_plan": context_plan,
+            "context_intelligence_plan": stored_context_plan,
             "status": (
                 "context_building_needs_input"
                 if context_building["status"] == "needs_information"
@@ -344,8 +360,6 @@ def create():
             ),
             "created_at": created_at
         })
-
-        context_id = inserted.inserted_id
 
         # Store questions and answers as separate agent/user interactions
         questions = load_questions()
@@ -366,13 +380,6 @@ def create():
                 "timestamp": created_at,
                 "origin": "user"
             })
-
-        # Send prompt to the agent to generate refined context
-        full_prompt = run_with_agent(
-            initial_prompt,
-            str(context_id),
-            model_version="0.1.0",
-        )
 
         if not full_prompt or not full_prompt.strip():
             flash("An initial response could not be generated. Please try again.", "warning")
