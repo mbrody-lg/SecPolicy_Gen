@@ -130,8 +130,20 @@ def test_run_pipeline_job_dispatches_execute_context_plan_command(app, monkeypat
         correlation_id="corr-1",
     )
     captured = {}
-    def fake_execute_context_plan(context_id):
+    def fake_execute_context_plan(context_id, on_task_progress=None):
         captured["context_id"] = context_id
+        captured["has_progress_callback"] = callable(on_task_progress)
+        if on_task_progress:
+            on_task_progress({
+                "event_type": "context_task_completed",
+                "stage": "context_plan_execution",
+                "current": 1,
+                "total": 2,
+                "current_task_id": "company_profile",
+                "current_task_title": "Company profile",
+                "completed_task_ids": ["company_profile"],
+                "last_message": "Completed Company profile.",
+            })
         return {
             "success": True,
             "stage": "context_plan_execution",
@@ -154,6 +166,7 @@ def test_run_pipeline_job_dispatches_execute_context_plan_command(app, monkeypat
     updated = pipeline_worker.run_pipeline_job(app=app, job_id=job["job_id"])
 
     assert captured["context_id"] == "ctx-1"
+    assert captured["has_progress_callback"] is True
     assert updated["status"] == "completed"
     assert updated["current_stage"] == "context_plan_completed"
     assert updated["result_refs"] == {
@@ -165,8 +178,11 @@ def test_run_pipeline_job_dispatches_execute_context_plan_command(app, monkeypat
         "queued",
         "running",
         "context_task_running",
+        "context_task_running",
         "completed",
     ]
+    assert fake_db.pipeline_events.docs[-2]["event_type"] == "context_task_completed"
+    assert fake_db.pipeline_events.docs[-2]["progress"]["current"] == 1
 
 
 def test_run_pipeline_job_persists_safe_context_plan_failure(app, monkeypatch):
@@ -180,7 +196,7 @@ def test_run_pipeline_job_persists_safe_context_plan_failure(app, monkeypatch):
     monkeypatch.setattr(
         pipeline_worker.logic,
         "execute_context_plan",
-        lambda context_id: {
+        lambda context_id, on_task_progress=None: {
             "success": False,
             "stage": "context_plan_execution",
             "error_type": "workflow_error",

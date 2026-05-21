@@ -45,6 +45,7 @@ from app.services.pipeline_jobs import (
     find_active_pipeline_job,
     find_latest_pipeline_job,
     get_pipeline_job,
+    list_pipeline_events,
 )
 from app.services.pipeline_worker import start_pipeline_job_worker
 
@@ -1119,6 +1120,7 @@ def _public_pipeline_job(job: dict) -> dict:
         "started_at",
         "completed_at",
         "result_refs",
+        "progress",
     }
     allowed_error_fields = {
         "failed_stage",
@@ -1132,6 +1134,21 @@ def _public_pipeline_job(job: dict) -> dict:
         for key in allowed_top_level
         if key in job and job[key] is not None
     }
+    if isinstance(public.get("progress"), dict):
+        allowed_progress_fields = {
+            "current",
+            "total",
+            "percent",
+            "current_task_id",
+            "current_task_title",
+            "completed_task_ids",
+            "last_message",
+        }
+        public["progress"] = {
+            key: public["progress"][key]
+            for key in allowed_progress_fields
+            if key in public["progress"]
+        }
     last_error = job.get("last_error")
     if isinstance(last_error, dict):
         public["last_error"] = {
@@ -1142,6 +1159,55 @@ def _public_pipeline_job(job: dict) -> dict:
     diagnostic_url = _diagnostic_url_for_job(public)
     if diagnostic_url:
         public["diagnostic_url"] = diagnostic_url
+    return public
+
+
+def _public_pipeline_event(event: dict) -> dict:
+    """Return the public allowlisted pipeline event view."""
+    allowed_top_level = {
+        "job_id",
+        "correlation_id",
+        "event_type",
+        "status",
+        "stage",
+        "created_at",
+        "progress",
+        "error",
+    }
+    public = {
+        key: event[key]
+        for key in allowed_top_level
+        if key in event and event[key] is not None
+    }
+    if isinstance(public.get("progress"), dict):
+        allowed_progress_fields = {
+            "current",
+            "total",
+            "percent",
+            "current_task_id",
+            "current_task_title",
+            "completed_task_ids",
+            "last_message",
+        }
+        public["progress"] = {
+            key: public["progress"][key]
+            for key in allowed_progress_fields
+            if key in public["progress"]
+        }
+    if isinstance(public.get("error"), dict):
+        allowed_error_fields = {
+            "failed_stage",
+            "error_type",
+            "error_code",
+            "safe_message",
+            "retryable",
+            "status_code",
+        }
+        public["error"] = {
+            key: public["error"][key]
+            for key in allowed_error_fields
+            if key in public["error"]
+        }
     return public
 
 
@@ -1160,10 +1226,31 @@ def get_pipeline_job_status(job_id):
     return jsonify({"success": True, "job": _public_pipeline_job(job)}), 200
 
 
+@main.route("/pipeline/jobs/<job_id>/events", methods=["GET"])
+def get_pipeline_job_events(job_id):
+    """Return bounded recent events for a pipeline job."""
+    job = get_pipeline_job(job_id)
+    if not job:
+        return jsonify({
+            "success": False,
+            "error_type": "validation_error",
+            "error_code": "pipeline_job_not_found",
+            "message": "Pipeline job not found.",
+            "details": {"job_id": job_id},
+        }), 404
+    events = list_pipeline_events(job_id)
+    return jsonify({
+        "success": True,
+        "job_id": job_id,
+        "events": [_public_pipeline_event(event) for event in events],
+    }), 200
+
+
 @main.route("/context/<context_id>/pipeline/jobs/active", methods=["GET"])
 def get_active_pipeline_job_status(context_id):
     """Return the active pipeline job for a context when one exists."""
-    job = find_active_pipeline_job(context_id)
+    command = request.args.get("command", "generate_policy")
+    job = find_active_pipeline_job(context_id, command=command)
     if not job:
         return jsonify({
             "success": False,

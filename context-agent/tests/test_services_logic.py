@@ -718,8 +718,12 @@ def test_execute_context_plan_embeds_task_results_without_refined_prompt(monkeyp
         "run_structured_with_agent",
         lambda prompt, **kwargs: captured_prompts.append((prompt, kwargs)) or structured_response,
     )
+    progress_events = []
 
-    result = logic.execute_context_plan(str(context_id))
+    result = logic.execute_context_plan(
+        str(context_id),
+        on_task_progress=lambda progress: progress_events.append(progress),
+    )
 
     context = fake_db.contexts.docs[0]
     assert result["success"] is True
@@ -737,6 +741,20 @@ def test_execute_context_plan_embeds_task_results_without_refined_prompt(monkeyp
     assert {kwargs["schema_name"] for _prompt, kwargs in captured_prompts} == {
         "context_agent_task_result"
     }
+    assert [event["event_type"] for event in progress_events] == [
+        "context_plan_started",
+        "context_task_started",
+        "context_task_completed",
+        "context_task_started",
+        "context_task_completed",
+        "context_plan_completed",
+    ]
+    assert progress_events[-1]["current"] == 2
+    assert progress_events[-1]["total"] == 2
+    assert progress_events[-1]["completed_task_ids"] == [
+        "company_profile",
+        "information_assets",
+    ]
 
 
 def test_execute_context_plan_persists_safe_task_failure(monkeypatch):
@@ -780,7 +798,12 @@ def test_execute_context_plan_persists_safe_task_failure(monkeypatch):
 
     monkeypatch.setattr(logic, "run_structured_with_agent", failing_agent)
 
-    result = logic.execute_context_plan(str(context_id))
+    progress_events = []
+
+    result = logic.execute_context_plan(
+        str(context_id),
+        on_task_progress=lambda progress: progress_events.append(progress),
+    )
 
     context = fake_db.contexts.docs[0]
     assert result["success"] is False
@@ -791,6 +814,12 @@ def test_execute_context_plan_persists_safe_task_failure(monkeypatch):
     assert context["context_task_results"]["tasks"][0]["error"]["error_code"] == (
         "context_task_execution_failed"
     )
+    assert [event["event_type"] for event in progress_events] == [
+        "context_plan_started",
+        "context_task_started",
+        "context_task_failed",
+    ]
+    assert progress_events[-1]["last_message"] == "Failed Company profile and operating model."
 
 
 def _completed_context_task_results():
@@ -947,6 +976,46 @@ def test_build_final_context_expands_structured_task_result_fields():
     assert item["rag_retrieval_hints"]["query_terms"] == ["healthcare access review"]
     assert "Findings:" in item["content"]
     assert "RAG retrieval hints:" in final_context["sections"]["task_findings"]["content"]
+    assert "Collections: controls" in final_context["sections"]["task_findings"]["content"]
+    assert "Jurisdictions: Spain" in final_context["sections"]["task_findings"]["content"]
+    assert "Sectors: Healthcare" in final_context["sections"]["task_findings"]["content"]
+    assert "Methodologies: ISO 27001" in final_context["sections"]["task_findings"]["content"]
+    assert "Query terms: healthcare access review" in final_context["sections"]["task_findings"]["content"]
+
+
+def test_build_final_context_keeps_tasks_without_text_results():
+    security_context = logic.build_context_security_context({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "data_categories": "health_data",
+        "need": "Build a security plan",
+    })
+    task_results = _completed_context_task_results()
+    task_results["tasks"].append({
+        "task_id": "governance_model",
+        "title": "Governance model",
+        "status": "completed",
+        "result": "",
+    })
+    context = {
+        "security_context": security_context,
+        "context_task_results": task_results,
+    }
+
+    final_context = logic.build_final_context(
+        context,
+        security_context=security_context,
+        plan_revision=logic.context_plan_revision(_approved_context_plan()),
+    )
+
+    task_items = final_context["sections"]["task_findings"]["items"]
+    assert [item["item_id"] for item in task_items] == [
+        "company_profile",
+        "information_assets",
+        "governance_model",
+    ]
+    assert task_items[-1]["content"] == "No detailed task response was returned."
 
 
 def test_get_context_and_prompt_includes_structured_policy_handoff(monkeypatch):

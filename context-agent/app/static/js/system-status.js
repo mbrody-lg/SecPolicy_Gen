@@ -84,6 +84,10 @@
     return status === "completed" || status === "failed" || status === "cancelled";
   }
 
+  function isTerminalContextPlanStatus(status) {
+    return status === "completed" || status === "context_task_completed" || status === "failed" || status === "cancelled";
+  }
+
   function setPipelinePanelVisible(visible) {
     var panel = byId("pipeline-job-panel");
     if (panel) {
@@ -156,6 +160,107 @@
       .catch(function () {
         setText("pipeline-job-status", "unreachable");
       });
+  }
+
+  function setContextPlanButtonRunning(running) {
+    document.querySelectorAll("[data-context-plan-execute-button]").forEach(function (button) {
+      button.disabled = running;
+      button.textContent = running ? "Executing..." : "Execute approved plan";
+      button.className = running
+        ? "bg-gray-400 cursor-not-allowed text-white px-4 py-2 rounded"
+        : "bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded";
+    });
+  }
+
+  function renderContextPlanJob(job) {
+    if (!job) {
+      return;
+    }
+    var panel = byId("context-plan-execution-panel");
+    if (panel) {
+      panel.dataset.contextPlanJobId = isTerminalContextPlanStatus(job.status) ? "" : job.job_id;
+      panel.dataset.contextPlanActive = isTerminalContextPlanStatus(job.status) ? "0" : "1";
+    }
+    var progress = job.progress || {};
+    var current = Number.isFinite(Number(progress.current)) ? Number(progress.current) : 0;
+    var total = Number.isFinite(Number(progress.total)) ? Number(progress.total) : 0;
+    var percent = Number.isFinite(Number(progress.percent)) ? Number(progress.percent) : 0;
+    setText("context-plan-job-status", job.status || "unknown");
+    setText("context-plan-job-stage", job.current_stage || "unknown");
+    setText("context-plan-progress", current + " / " + total);
+    setText("context-plan-current-task", progress.current_task_title || progress.current_task_id || "idle");
+    setText("context-plan-last-message", progress.last_message || "");
+    var progressBar = byId("context-plan-progress-bar");
+    if (progressBar) {
+      progressBar.style.width = Math.max(0, Math.min(100, percent)) + "%";
+    }
+    setContextPlanButtonRunning(!isTerminalContextPlanStatus(job.status));
+    if (isTerminalContextPlanStatus(job.status) && job.status === "completed") {
+      window.setTimeout(function () {
+        window.location.reload();
+      }, 800);
+    }
+  }
+
+  function pollContextPlanJob(jobId) {
+    if (!jobId) {
+      return;
+    }
+    fetch("/pipeline/jobs/" + encodeURIComponent(jobId), { headers: { Accept: "application/json" } })
+      .then(function (response) {
+        return response.json();
+      })
+      .then(function (payload) {
+        if (!payload.success || !payload.job) {
+          return;
+        }
+        renderContextPlanJob(payload.job);
+        if (!isTerminalContextPlanStatus(payload.job.status)) {
+          window.setTimeout(function () {
+            pollContextPlanJob(payload.job.job_id);
+          }, 2000);
+        }
+      })
+      .catch(function () {
+        setText("context-plan-job-status", "unreachable");
+      });
+  }
+
+  function bindContextPlanExecutionForms() {
+    document.querySelectorAll("[data-context-plan-execute-form]").forEach(function (form) {
+      form.addEventListener("submit", function (event) {
+        event.preventDefault();
+        setContextPlanButtonRunning(true);
+        setText("context-plan-job-status", "starting");
+        setText("context-plan-last-message", "Starting context plan execution.");
+        fetch(form.action, {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+          },
+        })
+          .then(function (response) {
+            return response.json();
+          })
+          .then(function (payload) {
+            if (payload.job) {
+              renderContextPlanJob(payload.job);
+              pollContextPlanJob(payload.job.job_id);
+            } else if (payload.message) {
+              setText("context-plan-job-status", "blocked");
+              setText("context-plan-job-stage", payload.error_code || "request");
+              setText("context-plan-last-message", payload.message);
+              setContextPlanButtonRunning(false);
+            }
+          })
+          .catch(function () {
+            setText("context-plan-job-status", "unreachable");
+            setText("context-plan-last-message", "Context plan execution could not be started.");
+            setContextPlanButtonRunning(false);
+          });
+      });
+    });
   }
 
   function bindGenerateForms() {
@@ -266,7 +371,12 @@
     }
     bindRefreshForms();
     bindGenerateForms();
+    bindContextPlanExecutionForms();
     loadStatus();
+    var contextPlanPanel = byId("context-plan-execution-panel");
+    if (contextPlanPanel && contextPlanPanel.dataset.contextPlanJobId) {
+      pollContextPlanJob(contextPlanPanel.dataset.contextPlanJobId);
+    }
     var panel = byId("pipeline-job-panel");
     if (panel && panel.dataset.activeJobId) {
       pollPipelineJob(panel.dataset.activeJobId);

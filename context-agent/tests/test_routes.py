@@ -712,6 +712,53 @@ def test_trigger_context_plan_execution_starts_job(client, monkeypatch):
     assert ("info", "Context plan execution started. Current stage: queued.") in flashes
 
 
+def test_trigger_context_plan_execution_returns_json_job_payload(client, monkeypatch):
+    context_id = str(ObjectId())
+    _insert_policy_ready_context(context_id)
+    monkeypatch.setattr(
+        routes_module,
+        "find_active_pipeline_job",
+        lambda current_context_id, command="generate_policy": None,
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "create_pipeline_job",
+        lambda **kwargs: {
+            "job_id": "job-context-plan",
+            "context_id": kwargs["context_id"],
+            "correlation_id": "corr-1",
+            "command": kwargs["command"],
+            "status": "queued",
+            "current_stage": "queued",
+            "progress": {
+                "current": 0,
+                "total": 0,
+                "percent": 0,
+                "current_task_id": None,
+                "current_task_title": None,
+                "completed_task_ids": [],
+                "last_message": "Queued.",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "start_pipeline_job_worker",
+        lambda job: {"started": True, "job_id": job["job_id"]},
+    )
+
+    response = client.post(
+        f"/context/{context_id}/context-plan/execute",
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 202
+    payload = response.get_json()
+    assert payload["job"]["command"] == "execute_context_plan"
+    assert payload["job"]["status"] == "queued"
+    assert payload["job"]["progress"]["last_message"] == "Queued."
+
+
 def test_trigger_context_plan_execution_blocks_unapproved_plan_json(client, monkeypatch):
     context_id = str(ObjectId())
     routes_module.mongo.db.contexts.insert_one({
@@ -883,6 +930,73 @@ def test_context_detail_renders_context_plan_execution_panel(client, monkeypatch
     assert response.status_code == 200
     assert b"Context plan execution" in response.data
     assert b"Execute approved plan" in response.data
+
+
+def test_context_detail_renders_context_plan_progress(client, monkeypatch):
+    context_id = ObjectId()
+    plan = routes_module.approve_context_intelligence_plan({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "need": "Build a security plan",
+        "context_intelligence_plan": routes_module.build_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "need": "Build a security plan",
+        }),
+    })
+    monkeypatch.setattr(
+        routes_module.mongo,
+        "db",
+        FakeDB(
+            contexts=[
+                {
+                    "_id": context_id,
+                    "status": "context_plan_executing",
+                    "context_intelligence_plan": plan,
+                    "context_task_results": {
+                        "status": "running",
+                        "tasks": [{"task_id": "company_profile", "status": "completed"}],
+                    },
+                }
+            ],
+            interactions=[],
+            pipeline_jobs=[
+                {
+                    "job_id": "job-context-plan",
+                    "context_id": str(context_id),
+                    "correlation_id": "corr-1",
+                    "command": "execute_context_plan",
+                    "status": "context_task_running",
+                    "current_stage": "context_plan_execution",
+                    "progress": {
+                        "current": 1,
+                        "total": 8,
+                        "percent": 13,
+                        "current_task_id": "information_assets",
+                        "current_task_title": "Information assets and data exposure",
+                        "completed_task_ids": ["company_profile"],
+                        "last_message": "Running Information assets and data exposure.",
+                    },
+                }
+            ],
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
+
+    response = client.get(f"/context/{context_id}")
+
+    assert response.status_code == 200
+    assert b'data-context-plan-job-id="job-context-plan"' in response.data
+    assert b"1\n                /\n                8" in response.data
+    assert b"Information assets and data exposure" in response.data
+    assert b"Running Information assets and data exposure." in response.data
 
 
 def test_security_context_route_returns_persisted_context(client):
@@ -1683,6 +1797,39 @@ def test_context_detail_phase_navigation_shows_policy_ready_next_action(client, 
     assert b"Generate and validate the policy." in response.data
 
 
+def test_context_detail_final_context_tab_shows_completed_task_results_before_synthesis(client, monkeypatch):
+    context_id = str(ObjectId())
+    _insert_context_executed_for_final_synthesis(context_id)
+    routes_module.mongo.db.contexts.update_one(
+        {"_id": ObjectId(context_id)},
+        {
+            "$push": {
+                "context_task_results.tasks": {
+                    "task_id": "governance_model",
+                    "title": "Governance model",
+                    "status": "completed",
+                    "result": "The IT manager owns day-to-day security decisions.",
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
+
+    response = client.get(f"/context/{context_id}")
+
+    assert response.status_code == 200
+    assert b"Execution results ready for synthesis" in response.data
+    assert b'data-final-context-pending-task="information_assets"' in response.data
+    assert b'data-final-context-pending-task="governance_model"' in response.data
+    assert b"Patient records are the primary asset." in response.data
+    assert b"The IT manager owns day-to-day security decisions." in response.data
+    assert b"Synthesize final context" in response.data
+
+
 def test_trigger_policy_generation_redirects_after_starting_job(client, monkeypatch):
     context_id = str(ObjectId())
     _insert_policy_ready_context(context_id)
@@ -2360,6 +2507,16 @@ def test_get_pipeline_job_status_returns_public_job(client, monkeypatch):
             "command": "generate_policy",
             "status": "failed",
             "current_stage": "policy_generation",
+            "progress": {
+                "current": 99,
+                "total": 100,
+                "percent": 99,
+                "current_task_id": "safe-task",
+                "current_task_title": "Safe task",
+                "completed_task_ids": ["safe-task"],
+                "last_message": "Safe progress.",
+                "raw_internal": "must not leak",
+            },
             "last_error": {
                 "error_code": "policy_agent_timeout",
                 "safe_message": "Policy generation timed out.",
@@ -2378,16 +2535,90 @@ def test_get_pipeline_job_status_returns_public_job(client, monkeypatch):
         "error_code": "policy_agent_timeout",
         "safe_message": "Policy generation timed out.",
     }
+    assert payload["job"]["progress"]["last_message"] == "Safe progress."
+    assert "raw_internal" not in payload["job"]["progress"]
     assert payload["job"]["diagnostic_url"] == "/diagnostics/corr-1"
 
 
+def test_get_pipeline_job_events_returns_bounded_events(client, monkeypatch):
+    monkeypatch.setattr(
+        routes_module,
+        "get_pipeline_job",
+        lambda job_id: {"job_id": job_id, "context_id": "ctx-1"},
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "list_pipeline_events",
+        lambda job_id: [
+            {
+                "job_id": job_id,
+                "correlation_id": "corr-1",
+                "event_type": "context_task_completed",
+                "status": "context_task_running",
+                "stage": "context_plan_execution",
+                "progress": {
+                    "current": 1,
+                    "total": 2,
+                    "percent": 50,
+                    "last_message": "Completed company profile.",
+                    "raw_internal": "must not leak",
+                },
+                "error": {
+                    "error_code": "safe_error",
+                    "safe_message": "Safe message.",
+                    "raw_exception": "must not leak",
+                },
+                "raw_payload": "must not leak",
+            }
+        ],
+    )
+
+    response = client.get("/pipeline/jobs/job-1/events")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert payload["events"][0]["progress"]["last_message"] == "Completed company profile."
+    assert "raw_internal" not in payload["events"][0]["progress"]
+    assert payload["events"][0]["error"] == {
+        "error_code": "safe_error",
+        "safe_message": "Safe message.",
+    }
+    assert "raw_payload" not in payload["events"][0]
+
+
 def test_get_active_pipeline_job_status_returns_404_when_missing(client, monkeypatch):
-    monkeypatch.setattr(routes_module, "find_active_pipeline_job", lambda context_id: None)
+    monkeypatch.setattr(routes_module, "find_active_pipeline_job", lambda context_id, command="generate_policy": None)
 
     response = client.get("/context/ctx-1/pipeline/jobs/active")
 
     assert response.status_code == 404
     assert response.get_json()["error_code"] == "active_pipeline_job_not_found"
+
+
+def test_get_active_pipeline_job_status_accepts_command_query(client, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        routes_module,
+        "find_active_pipeline_job",
+        lambda context_id, command="generate_policy": captured.update({
+            "context_id": context_id,
+            "command": command,
+        }) or {
+            "job_id": "job-context-plan",
+            "context_id": context_id,
+            "correlation_id": "corr-1",
+            "command": command,
+            "status": "context_task_running",
+            "current_stage": "context_plan_execution",
+        },
+    )
+
+    response = client.get("/context/ctx-1/pipeline/jobs/active?command=execute_context_plan")
+
+    assert response.status_code == 200
+    assert captured == {"context_id": "ctx-1", "command": "execute_context_plan"}
+    assert response.get_json()["job"]["command"] == "execute_context_plan"
 
 
 def test_context_system_refresh_redirects_back_to_context(client, monkeypatch):

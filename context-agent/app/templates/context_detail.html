@@ -511,7 +511,11 @@
   <section id="workflow-tab-execution" data-workplace-panel="context" data-workflow-tab-panel="execution" class="space-y-6">
     {% set context_plan_job = latest_context_plan_job %}
     {% set context_plan_active = context_plan_job and context_plan_job.status in ['queued', 'running', 'context_task_running'] %}
-    <div id="context-plan-execution-panel" class="bg-white rounded-lg shadow p-4 mb-6">
+    {% set context_plan_progress = context_plan_job.progress if context_plan_job and context_plan_job.progress else {} %}
+    <div id="context-plan-execution-panel"
+      class="bg-white rounded-lg shadow p-4 mb-6"
+      data-context-plan-job-id="{{ context_plan_job.job_id if context_plan_active else '' }}"
+      data-context-plan-active="{% if context_plan_active %}1{% else %}0{% endif %}">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 class="text-xl font-semibold mb-1">Context plan execution</h2>
@@ -519,7 +523,7 @@
             Task calls and task responses that feed the final context.
           </div>
         </div>
-        <div class="rounded-full border px-3 py-1 text-xs {% if context.context_task_results and context.context_task_results.status == 'completed' %}border-green-300 bg-green-50 text-green-800{% elif context_plan_active %}border-blue-300 bg-blue-50 text-blue-800{% else %}border-gray-300 bg-gray-50 text-gray-700{% endif %}">
+        <div id="context-plan-job-status" class="rounded-full border px-3 py-1 text-xs {% if context.context_task_results and context.context_task_results.status == 'completed' %}border-green-300 bg-green-50 text-green-800{% elif context_plan_active %}border-blue-300 bg-blue-50 text-blue-800{% else %}border-gray-300 bg-gray-50 text-gray-700{% endif %}">
           {{ context.context_task_results.status if context.context_task_results else context_plan_job.status if context_plan_job else 'not started' }}
         </div>
       </div>
@@ -531,7 +535,30 @@
           {% if context_plan_job.correlation_id %}
             <div class="mt-1 break-all">Correlation: {{ context_plan_job.correlation_id }}</div>
           {% endif %}
-          <div class="mt-1">Stage: {{ context_plan_job.current_stage or context_plan_job.status }}</div>
+          <div class="mt-1">Stage: <span id="context-plan-job-stage">{{ context_plan_job.current_stage or context_plan_job.status }}</span></div>
+          <div class="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <div class="font-semibold">Progress</div>
+              <div id="context-plan-progress" class="mt-1">
+                {{ context_plan_progress.current if context_plan_progress.current is not none else (context.context_task_results.tasks | length if context.context_task_results and context.context_task_results.tasks else 0) }}
+                /
+                {{ context_plan_progress.total if context_plan_progress.total else (context.context_intelligence_plan.tasks | length if context.context_intelligence_plan and context.context_intelligence_plan.tasks else 0) }}
+              </div>
+            </div>
+            <div>
+              <div class="font-semibold">Current task</div>
+              <div id="context-plan-current-task" class="mt-1">{{ context_plan_progress.current_task_title or 'idle' }}</div>
+            </div>
+            <div class="sm:col-span-2">
+              <div class="font-semibold">Last update</div>
+              <div id="context-plan-last-message" class="mt-1">{{ context_plan_progress.last_message or 'No execution update yet.' }}</div>
+            </div>
+          </div>
+          <div class="mt-3 h-2 overflow-hidden rounded bg-blue-100">
+            <div id="context-plan-progress-bar"
+              class="h-full bg-blue-600 transition-all"
+              style="width: {{ context_plan_progress.percent if context_plan_progress.percent is not none else 0 }}%"></div>
+          </div>
         </div>
       {% endif %}
 
@@ -568,8 +595,12 @@
       {% endif %}
 
       {% if context.context_intelligence_plan and context.context_intelligence_plan.status == 'approved' %}
-        <form method="post" action="{{ url_for('main.trigger_context_plan_execution', context_id=context._id) }}" class="mt-4">
+        <form method="post"
+          action="{{ url_for('main.trigger_context_plan_execution', context_id=context._id) }}"
+          class="mt-4"
+          data-context-plan-execute-form>
           <button type="submit"
+            data-context-plan-execute-button
             class="{% if context_plan_active %}bg-gray-400 cursor-not-allowed{% else %}bg-blue-600 hover:bg-blue-700{% endif %} text-white px-4 py-2 rounded"
             {% if context_plan_active %}disabled{% endif %}>
             Execute approved plan
@@ -633,7 +664,7 @@
                         <div class="text-xs text-gray-500">{{ item.status }}</div>
                       </div>
                       <div class="prose prose-sm mt-2 max-w-none text-gray-700" data-selectable-final-context>
-                        {{ item.rendered_content | safe }}
+                        {{ item.rendered_content | safe if item.rendered_content else item.content or 'No detailed content has been stored for this plan point.' }}
                       </div>
                       <form method="post" action="{{ url_for('main.mark_final_context_sections_for_improvement_route', context_id=context._id) }}" class="mt-3" data-final-context-point-review-form>
                         <input type="hidden" name="section_id" value="{{ section_id }}">
@@ -733,6 +764,32 @@
           </div>
         {% endif %}
       {% else %}
+        {% if context.context_task_results and context.context_task_results.tasks %}
+          <div class="mt-4 rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950">
+            <div class="font-semibold">Execution results ready for synthesis</div>
+            <div class="mt-1">
+              Review the completed plan task responses below, then synthesize the final context to make it available for policy generation.
+            </div>
+          </div>
+          <div class="mt-4 space-y-3">
+            {% for task in context.context_task_results.tasks %}
+              <article class="rounded border border-gray-200 bg-gray-50 p-4" data-final-context-pending-task="{{ task.task_id }}">
+                <div class="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <div class="text-xs font-semibold uppercase text-gray-500">Plan point {{ loop.index }}</div>
+                    <h3 class="text-sm font-semibold text-gray-900">{{ task.title or task.task_id }}</h3>
+                  </div>
+                  <div class="rounded-full border px-2 py-0.5 text-xs {% if task.status == 'completed' %}border-green-300 bg-green-50 text-green-800{% elif task.status == 'failed' %}border-red-300 bg-red-50 text-red-800{% else %}border-gray-300 bg-gray-50 text-gray-700{% endif %}">
+                    {{ task.status or 'unknown' }}
+                  </div>
+                </div>
+                <div class="prose prose-sm mt-3 max-w-none text-gray-700" data-selectable-final-context>
+                  {{ task.rendered_result | safe if task.rendered_result else task.result or 'No detailed task response has been stored.' }}
+                </div>
+              </article>
+            {% endfor %}
+          </div>
+        {% endif %}
         <form method="post" action="{{ url_for('main.trigger_final_context_synthesis', context_id=context._id) }}" class="mt-4">
           <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
             Synthesize final context

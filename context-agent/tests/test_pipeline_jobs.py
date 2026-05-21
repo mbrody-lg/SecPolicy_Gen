@@ -24,6 +24,12 @@ class FakeCollection:
                 return doc
         return None
 
+    def find(self, query):
+        return FakeCursor(
+            doc for doc in self.docs
+            if all(doc.get(key) == value for key, value in query.items())
+        )
+
     def insert_one(self, document):
         self.docs.append(document)
         return SimpleNamespace(inserted_id=document.get("_id"))
@@ -35,6 +41,22 @@ class FakeCollection:
         for key, value in update.get("$set", {}).items():
             target[key] = value
         return SimpleNamespace(matched_count=1, modified_count=1)
+
+
+class FakeCursor:
+    def __init__(self, docs):
+        self.docs = list(docs)
+
+    def sort(self, key, direction):
+        self.docs.sort(key=lambda doc: doc.get(key), reverse=direction == -1)
+        return self
+
+    def limit(self, limit):
+        self.docs = self.docs[:limit]
+        return self
+
+    def __iter__(self):
+        return iter(self.docs)
 
 
 class FakeDB:
@@ -64,6 +86,15 @@ def test_create_pipeline_job_persists_job_and_initial_event(monkeypatch):
     assert job["command"] == "generate_policy"
     assert job["status"] == "queued"
     assert job["current_stage"] == "queued"
+    assert job["progress"] == {
+        "current": 0,
+        "total": 0,
+        "percent": 0,
+        "current_task_id": None,
+        "current_task_title": None,
+        "completed_task_ids": [],
+        "last_message": "Queued.",
+    }
     assert job["ownership"]["source_of_truth"] is True
     assert len(fake_db.pipeline_jobs.docs) == 1
     assert len(fake_db.pipeline_events.docs) == 1
@@ -96,6 +127,77 @@ def test_create_pipeline_job_accepts_execute_context_plan_command(monkeypatch):
 
     assert job["command"] == "execute_context_plan"
     assert fake_db.pipeline_events.docs[0]["status"] == "queued"
+
+
+def test_update_pipeline_job_progress_persists_public_progress_event_and_metrics(monkeypatch):
+    fake_db = FakeDB(
+        pipeline_jobs_docs=[
+            {
+                "job_id": "job-1",
+                "context_id": "ctx-1",
+                "correlation_id": "corr-1",
+                "command": "execute_context_plan",
+                "status": "context_task_running",
+                "current_stage": "context_plan_execution",
+                "created_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(timezone.utc),
+            }
+        ]
+    )
+    captured_metrics = []
+    monkeypatch.setattr(pipeline_jobs.mongo, "db", fake_db, raising=False)
+    monkeypatch.setattr(
+        pipeline_jobs,
+        "record_pipeline_job_transition",
+        lambda **kwargs: captured_metrics.append(kwargs),
+    )
+
+    job = pipeline_jobs.update_pipeline_job_progress(
+        job_id="job-1",
+        status="context_task_running",
+        stage="context_plan_execution",
+        current=2,
+        total=8,
+        current_task_id="identity_access",
+        current_task_title="Identity, access, and device posture",
+        completed_task_ids=["company_profile", "information_assets"],
+        last_message="Completed task 2 of 8.",
+        event_type="context_task_completed",
+    )
+
+    assert job["progress"] == {
+        "current": 2,
+        "total": 8,
+        "percent": 25,
+        "current_task_id": "identity_access",
+        "current_task_title": "Identity, access, and device posture",
+        "completed_task_ids": ["company_profile", "information_assets"],
+        "last_message": "Completed task 2 of 8.",
+    }
+    assert job["updated_at"]
+    event = fake_db.pipeline_events.docs[0]
+    assert event["event_type"] == "context_task_completed"
+    assert event["progress"]["percent"] == 25
+    assert captured_metrics[-1] == {
+        "status": "context_task_running",
+        "stage": "context_plan_execution",
+    }
+
+
+def test_list_pipeline_events_returns_recent_events(monkeypatch):
+    now = datetime.now(timezone.utc)
+    fake_db = FakeDB(
+        pipeline_events_docs=[
+            {"job_id": "job-1", "event_type": "old", "created_at": now - timedelta(seconds=2)},
+            {"job_id": "job-2", "event_type": "other", "created_at": now - timedelta(seconds=1)},
+            {"job_id": "job-1", "event_type": "new", "created_at": now},
+        ]
+    )
+    monkeypatch.setattr(pipeline_jobs.mongo, "db", fake_db, raising=False)
+
+    events = pipeline_jobs.list_pipeline_events("job-1", limit=2)
+
+    assert [event["event_type"] for event in events] == ["new", "old"]
 
 
 def test_find_active_pipeline_job_ignores_terminal_jobs(monkeypatch):

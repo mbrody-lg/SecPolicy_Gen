@@ -40,7 +40,6 @@ class FakeCompletions:
             raise self.error
         if self.response is not None:
             return self.response
-        content = self.content if self.content is not None else json.dumps(self.payload)
         payload = self.payloads[min(len(self.calls) - 1, len(self.payloads) - 1)]
         content = self.content if self.content is not None else json.dumps(payload)
         message = SimpleNamespace(content=content, refusal=self.refusal)
