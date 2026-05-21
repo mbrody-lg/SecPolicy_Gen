@@ -1349,7 +1349,7 @@ def build_final_context(
             "order": index + 1,
             "title": task.get("title") or f"Context task {index + 1}",
             "status": task.get("status") or "unknown",
-            "content": task.get("result") or "",
+            "content": task.get("result") or "No detailed task response was returned.",
             "findings": task.get("findings", []),
             "assumptions": task.get("assumptions", []),
             "missing_details": task.get("missing_details", []),
@@ -1358,7 +1358,7 @@ def build_final_context(
             "rag_retrieval_hints": task.get("rag_retrieval_hints", {}),
         }
         for index, task in enumerate(tasks)
-        if task.get("result")
+        if task.get("task_id") or task.get("title") or task.get("result")
     ]
     synthesized_at = datetime.now(timezone.utc).isoformat()
     return {
@@ -1381,9 +1381,10 @@ def build_final_context(
             "task_findings": {
                 "status": "accepted",
                 "content": "\n\n".join(
-                    f"{task['title']}:\n{task['result']}"
+                    f"{task['title'] or task['task_id'] or 'Context task'}:\n"
+                    f"{task.get('result') or 'No detailed task response was returned.'}"
                     for task in tasks
-                    if task.get("result")
+                    if task.get("task_id") or task.get("title") or task.get("result")
                 ),
                 "items": task_items,
             },
@@ -2018,8 +2019,6 @@ def _context_task_result_text(structured_result: dict) -> str:
     """Render a structured context task result into current UI text."""
     if not isinstance(structured_result, dict):
         return ""
-    if structured_result.get("raw_text"):
-        return str(structured_result["raw_text"]).strip()
 
     sections = [
         ("Findings", structured_result.get("findings")),
@@ -2035,11 +2034,35 @@ def _context_task_result_text(structured_result: dict) -> str:
         lines.append(f"{title}:")
         lines.extend(f"- {value}" for value in values if str(value).strip())
     hints = structured_result.get("rag_retrieval_hints") or {}
-    query_terms = hints.get("query_terms") if isinstance(hints, dict) else []
-    if query_terms:
+    hint_lines = _context_task_retrieval_hint_lines(hints)
+    if hint_lines:
         lines.append("RAG retrieval hints:")
-        lines.extend(f"- {term}" for term in query_terms if str(term).strip())
+        lines.extend(hint_lines)
+    raw_text = str(structured_result.get("raw_text") or "").strip()
+    if raw_text and not lines:
+        lines.append(raw_text)
+    elif raw_text:
+        lines.extend(["Raw response:", raw_text])
     return "\n".join(lines).strip()
+
+
+def _context_task_retrieval_hint_lines(hints: dict) -> list[str]:
+    """Render all retrieval hint dimensions, not only query terms."""
+    if not isinstance(hints, dict):
+        return []
+    labels = [
+        ("collection_families", "Collections"),
+        ("jurisdictions", "Jurisdictions"),
+        ("sectors", "Sectors"),
+        ("methodologies", "Methodologies"),
+        ("query_terms", "Query terms"),
+    ]
+    lines = []
+    for key, label in labels:
+        values = _string_list(hints.get(key))
+        if values:
+            lines.append(f"- {label}: {', '.join(values)}")
+    return lines
 
 
 def _result_error(error: str, details: str = "", status_code: int = 500) -> dict:

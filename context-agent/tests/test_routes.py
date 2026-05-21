@@ -1797,6 +1797,39 @@ def test_context_detail_phase_navigation_shows_policy_ready_next_action(client, 
     assert b"Generate and validate the policy." in response.data
 
 
+def test_context_detail_final_context_tab_shows_completed_task_results_before_synthesis(client, monkeypatch):
+    context_id = str(ObjectId())
+    _insert_context_executed_for_final_synthesis(context_id)
+    routes_module.mongo.db.contexts.update_one(
+        {"_id": ObjectId(context_id)},
+        {
+            "$push": {
+                "context_task_results.tasks": {
+                    "task_id": "governance_model",
+                    "title": "Governance model",
+                    "status": "completed",
+                    "result": "The IT manager owns day-to-day security decisions.",
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(
+        routes_module,
+        "get_system_status",
+        lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
+    )
+
+    response = client.get(f"/context/{context_id}")
+
+    assert response.status_code == 200
+    assert b"Execution results ready for synthesis" in response.data
+    assert b'data-final-context-pending-task="information_assets"' in response.data
+    assert b'data-final-context-pending-task="governance_model"' in response.data
+    assert b"Patient records are the primary asset." in response.data
+    assert b"The IT manager owns day-to-day security decisions." in response.data
+    assert b"Synthesize final context" in response.data
+
+
 def test_trigger_policy_generation_redirects_after_starting_job(client, monkeypatch):
     context_id = str(ObjectId())
     _insert_policy_ready_context(context_id)
