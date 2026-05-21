@@ -32,8 +32,8 @@ from app.services.logic import (
     export_context_lessons,
     mark_final_context_sections_for_improvement,
     regenerate_final_context_sections,
+    run_context_building_review,
     run_context_planning_review,
-    run_with_agent,
     load_questions,
     render_markdown,
     synthesize_final_context,
@@ -673,11 +673,12 @@ def continue_context(context_id):
 
     # 2. Execute agent with a phase-specific context-update prompt
     context_update_prompt = generate_context_update_prompt(context, new_prompt)
-    response = run_with_agent(
+    context_building_review = run_context_building_review(
         context_update_prompt,
         context_id,
         model_version=context.get("version", "0.1.0"),
     )
+    response = context_building_review["text"]
 
     # 3. If no valid response exists, keep context pending and skip response save
     if not response or not response.strip():
@@ -711,6 +712,10 @@ def continue_context(context_id):
         security_context=security_context,
         existing=context.get("context_building"),
     )
+    context_building = {
+        **context_building,
+        "provider_review": context_building_review["structured_review"],
+    }
     context_plan = build_context_intelligence_plan(
         updated_context_data,
         existing_plan=context.get("context_intelligence_plan"),

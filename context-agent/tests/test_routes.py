@@ -436,12 +436,36 @@ def test_continue_context_uses_context_update_prompt(client, monkeypatch):
     captured = {}
     monkeypatch.setattr(
         routes_module,
-        "run_with_agent",
+        "run_context_building_review",
         lambda prompt, context_id, model_version=None: captured.update({
             "prompt": prompt,
             "context_id": context_id,
             "model_version": model_version,
-        }) or "Updated context assessment.",
+        }) or {
+            "text": "Updated context assessment.",
+            "structured_review": {
+                "summary": "Updated context assessment.",
+                "explicit_facts": [
+                    {
+                        "field_path": "third_party_dependencies",
+                        "value": "outsourced laboratory access",
+                        "source": "user_input",
+                    }
+                ],
+                "assumptions": [],
+                "missing_information": [],
+                "follow_up_questions": [],
+                "security_domains": ["access_control"],
+                "rag_retrieval_hints": {
+                    "collection_families": [],
+                    "jurisdictions": [],
+                    "sectors": [],
+                    "methodologies": [],
+                    "query_terms": ["outsourced laboratory access"],
+                },
+                "next_action": "review_plan",
+            },
+        },
     )
 
     response = client.post(
@@ -455,6 +479,9 @@ def test_continue_context_uses_context_update_prompt(client, monkeypatch):
     assert "outsourced laboratory access" in captured["prompt"]
     assert "Patient records" in captured["prompt"]
     assert captured["model_version"] == "0.1.0"
+    context = routes_module.mongo.db.contexts.find_one({"_id": context_id})
+    assert context["context_building"]["provider_review"]["summary"] == "Updated context assessment."
+    assert context["context_building"]["provider_review"]["security_domains"] == ["access_control"]
 
 
 def test_context_building_question_can_be_deferred(client):
