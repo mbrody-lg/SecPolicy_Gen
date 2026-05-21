@@ -7,8 +7,16 @@ from bson import ObjectId
 def test_security_context_create_to_policy_payload_contract(client, monkeypatch):
     monkeypatch.setattr(
         routes_module,
-        "run_with_agent",
-        lambda prompt, context_id, model_version=None: "Refined healthcare context",
+        "run_context_planning_review",
+        lambda prompt, context_id, model_version=None: {
+            "text": "Refined healthcare context",
+            "structured_review": {
+                "plan_summary": "Refined healthcare context",
+                "tasks": [],
+                "missing_context_questions": [],
+                "approval_recommendation": "review_required",
+            },
+        },
     )
 
     response = client.post(

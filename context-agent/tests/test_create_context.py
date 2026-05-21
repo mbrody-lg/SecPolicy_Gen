@@ -14,8 +14,16 @@ def client():
 def test_create_context(client, monkeypatch):
     monkeypatch.setattr(
         routes_module,
-        "run_with_agent",
-        lambda prompt, context_id, model_version=None: "Refined context from test",
+        "run_context_planning_review",
+        lambda prompt, context_id, model_version=None: {
+            "text": "Refined context from test",
+            "structured_review": {
+                "plan_summary": "Refined context from test",
+                "tasks": [],
+                "missing_context_questions": [],
+                "approval_recommendation": "review_required",
+            },
+        },
     )
 
     # Test data
