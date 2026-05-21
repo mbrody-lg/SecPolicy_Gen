@@ -21,6 +21,7 @@ from app import (
     get_request_correlation_id,
     mongo,
 )
+from app.context_output_schemas import context_phase_output_schema
 from app.agents.factory import create_agent_from_config
 from app.context_analysis import SECURITY_CONTEXT_VERSION, build_security_context_from_answers
 from app.context_analysis import security_context_to_business_context
@@ -783,6 +784,175 @@ def generate_context_plan_prompt(data: dict, question_config: str | None = None)
     )
 
 
+def _context_planning_review_text(review: dict) -> str:
+    """Render a structured planning review into the existing interaction stream."""
+    if not isinstance(review, dict):
+        return ""
+
+    raw_text = str(review.get("raw_text") or "").strip()
+    tasks = review.get("tasks") if isinstance(review.get("tasks"), list) else []
+    questions = (
+        review.get("missing_context_questions")
+        if isinstance(review.get("missing_context_questions"), list)
+        else []
+    )
+    if raw_text and not tasks and not questions:
+        return raw_text
+
+    lines = [
+        "## Context planning review",
+        "",
+        str(review.get("plan_summary") or "The context-intelligence plan is ready for review.").strip(),
+    ]
+    if tasks:
+        lines.extend(["", "### Planned analysis tasks"])
+        for task in tasks:
+            if not isinstance(task, dict):
+                continue
+            order = task.get("order") or "-"
+            title = str(task.get("title") or task.get("id") or "Untitled task").strip()
+            objective = str(task.get("objective") or "").strip()
+            expected_output = str(task.get("expected_output") or "").strip()
+            lines.append(f"{order}. **{title}**")
+            if objective:
+                lines.append(f"   - Objective: {objective}")
+            if expected_output:
+                lines.append(f"   - Expected output: {expected_output}")
+
+    if questions:
+        lines.extend(["", "### Missing context questions"])
+        for question in questions:
+            if not isinstance(question, dict):
+                continue
+            text = str(question.get("question") or "").strip()
+            rationale = str(question.get("rationale") or "").strip()
+            if text:
+                lines.append(f"- {text}")
+            if rationale:
+                lines.append(f"  Rationale: {rationale}")
+
+    recommendation = str(review.get("approval_recommendation") or "").strip()
+    if recommendation:
+        lines.extend(["", f"Approval recommendation: {recommendation}"])
+
+    return "\n".join(lines).strip()
+
+
+def run_context_planning_review(
+    prompt: str,
+    context_id: str = None,
+    model_version: str = None,
+) -> dict:
+    """Generate a structured planning review for the Context Agent workflow."""
+    structured_review = run_structured_with_agent(
+        prompt,
+        schema_name="context_agent_planning_review",
+        json_schema=context_phase_output_schema("context_planning"),
+        context_id=context_id,
+        model_version=model_version,
+        fallback_phase="context_planning",
+    )
+    return {
+        "structured_review": structured_review,
+        "text": _context_planning_review_text(structured_review),
+    }
+
+
+def _context_building_review_text(review: dict) -> str:
+    """Render a structured context-building review into the interaction stream."""
+    if not isinstance(review, dict):
+        return ""
+
+    raw_text = str(review.get("raw_text") or "").strip()
+    follow_up_questions = (
+        review.get("follow_up_questions")
+        if isinstance(review.get("follow_up_questions"), list)
+        else []
+    )
+    explicit_facts = (
+        review.get("explicit_facts")
+        if isinstance(review.get("explicit_facts"), list)
+        else []
+    )
+    missing_information = (
+        review.get("missing_information")
+        if isinstance(review.get("missing_information"), list)
+        else []
+    )
+    if raw_text and not explicit_facts and not missing_information and not follow_up_questions:
+        return raw_text
+
+    lines = [
+        "## Context building review",
+        "",
+        str(review.get("summary") or "The context has been reviewed.").strip(),
+    ]
+    if explicit_facts:
+        lines.extend(["", "### Confirmed facts"])
+        for fact in explicit_facts:
+            if not isinstance(fact, dict):
+                continue
+            field_path = str(fact.get("field_path") or "fact").strip()
+            value = str(fact.get("value") or "").strip()
+            if value:
+                lines.append(f"- {field_path}: {value}")
+
+    assumptions = _string_list(review.get("assumptions"))
+    if assumptions:
+        lines.extend(["", "### Assumptions"])
+        lines.extend(f"- {assumption}" for assumption in assumptions)
+
+    if missing_information:
+        lines.extend(["", "### Missing information"])
+        for item in missing_information:
+            if not isinstance(item, dict):
+                continue
+            question = str(item.get("question") or "").strip()
+            rationale = str(item.get("rationale") or "").strip()
+            if question:
+                lines.append(f"- {question}")
+            if rationale:
+                lines.append(f"  Rationale: {rationale}")
+
+    if follow_up_questions:
+        lines.extend(["", "### Follow-up questions"])
+        for question in follow_up_questions:
+            if not isinstance(question, dict):
+                continue
+            text = str(question.get("question") or "").strip()
+            rationale = str(question.get("rationale") or "").strip()
+            if text:
+                lines.append(f"- {text}")
+            if rationale:
+                lines.append(f"  Rationale: {rationale}")
+
+    next_action = str(review.get("next_action") or "").strip()
+    if next_action:
+        lines.extend(["", f"Next action: {next_action}"])
+
+    return "\n".join(lines).strip()
+
+
+def run_context_building_review(
+    prompt: str,
+    context_id: str = None,
+    model_version: str = None,
+) -> dict:
+    """Generate a structured review for Intake / Context Building updates."""
+    structured_review = run_structured_with_agent(
+        prompt,
+        schema_name="context_agent_context_building_review",
+        json_schema=context_phase_output_schema("context_building"),
+        context_id=context_id,
+        model_version=model_version,
+        fallback_phase="context_building",
+    )
+    return {
+        "structured_review": structured_review,
+        "text": _context_building_review_text(structured_review),
+    }
+
+
 def generate_context_update_prompt(context: dict, additional_context: str) -> str:
     """Build the prompt used when Intake adds more context after creation."""
     updated_context = {**context, "need": additional_context or context.get("need", "")}
@@ -976,16 +1146,20 @@ def _execute_context_plan_task(context: dict, task: dict, plan_revision: dict) -
         "completed_at": None,
     }
     try:
-        result = run_with_agent(
+        structured_result = run_structured_with_agent(
             build_context_task_prompt(context, task, plan_revision),
-            str(context["_id"]),
+            schema_name="context_agent_task_result",
+            json_schema=context_phase_output_schema("context_task_result"),
+            context_id=str(context["_id"]),
             model_version=context.get("version", "0.1.0"),
         )
+        result = _context_task_result_text(structured_result)
         completed_at = datetime.now(timezone.utc).isoformat()
         return {
             **base_result,
             "status": "completed",
             "result": str(result or "").strip(),
+            "structured_result": structured_result,
             "completed_at": completed_at,
         }
     except Exception:
@@ -1113,12 +1287,7 @@ def build_final_context(
         if isinstance(task, dict)
     ]
     tasks = [
-        {
-            "task_id": task.get("task_id"),
-            "title": task.get("title"),
-            "status": task.get("status"),
-            "result": str(task.get("result") or "").strip(),
-        }
+        _final_context_task_from_result(task)
         for task in task_results.get("tasks", [])
         if isinstance(task, dict)
     ]
@@ -1129,6 +1298,12 @@ def build_final_context(
             "title": task.get("title") or f"Context task {index + 1}",
             "status": task.get("status") or "unknown",
             "content": task.get("result") or "",
+            "findings": task.get("findings", []),
+            "assumptions": task.get("assumptions", []),
+            "missing_details": task.get("missing_details", []),
+            "risks": task.get("risks", []),
+            "policy_implications": task.get("policy_implications", []),
+            "rag_retrieval_hints": task.get("rag_retrieval_hints", {}),
         }
         for index, task in enumerate(tasks)
         if task.get("result")
@@ -1154,7 +1329,7 @@ def build_final_context(
             "task_findings": {
                 "status": "accepted",
                 "content": "\n\n".join(
-                    f"{task['title']}: {task['result']}"
+                    f"{task['title']}:\n{task['result']}"
                     for task in tasks
                     if task.get("result")
                 ),
@@ -1166,6 +1341,49 @@ def build_final_context(
             },
         },
     }
+
+
+def _final_context_task_from_result(task: dict) -> dict:
+    """Normalize persisted task results for final-context synthesis."""
+    structured_result = task.get("structured_result")
+    if isinstance(structured_result, dict):
+        rendered_result = _context_task_result_text(structured_result)
+        return {
+            "task_id": task.get("task_id"),
+            "title": task.get("title"),
+            "status": task.get("status"),
+            "result": rendered_result or str(task.get("result") or "").strip(),
+            "findings": _string_list(structured_result.get("findings")),
+            "assumptions": _string_list(structured_result.get("assumptions")),
+            "missing_details": _string_list(structured_result.get("missing_details")),
+            "risks": _string_list(structured_result.get("risks")),
+            "policy_implications": _string_list(structured_result.get("policy_implications")),
+            "rag_retrieval_hints": (
+                structured_result.get("rag_retrieval_hints")
+                if isinstance(structured_result.get("rag_retrieval_hints"), dict)
+                else {}
+            ),
+        }
+
+    return {
+        "task_id": task.get("task_id"),
+        "title": task.get("title"),
+        "status": task.get("status"),
+        "result": str(task.get("result") or "").strip(),
+        "findings": [],
+        "assumptions": [],
+        "missing_details": [],
+        "risks": [],
+        "policy_implications": [],
+        "rag_retrieval_hints": {},
+    }
+
+
+def _string_list(values) -> list[str]:
+    """Return only non-empty string values from provider payload fields."""
+    if not isinstance(values, list):
+        return []
+    return [str(value).strip() for value in values if str(value).strip()]
 
 
 def render_final_context_prompt(final_context: dict) -> str:
@@ -1572,6 +1790,98 @@ def business_context_from_context_record(context: dict) -> dict:
     return security_context_to_business_context(security_context)
 
 
+def policy_handoff_context_from_context_record(context: dict) -> dict:
+    """Return structured Context Agent handoff data for Policy Agent/RAG."""
+    security_context = context.get("security_context")
+    if not isinstance(security_context, dict):
+        security_context = build_context_security_context(context)
+    final_context = context.get("final_context") if isinstance(context.get("final_context"), dict) else {}
+    sections = final_context.get("sections") if isinstance(final_context.get("sections"), dict) else {}
+    task_items = (
+        sections.get("task_findings", {}).get("items", [])
+        if isinstance(sections.get("task_findings"), dict)
+        else []
+    )
+    structured_findings = [
+        _policy_handoff_task_item(item)
+        for item in task_items
+        if isinstance(item, dict)
+    ]
+    return {
+        "version": FINAL_CONTEXT_VERSION,
+        "source": "context-agent",
+        "security_context_version": security_context.get("version"),
+        "final_context_status": final_context.get("status"),
+        "plan_revision_id": final_context.get("plan_revision_id"),
+        "context_snapshot_hash": final_context.get("context_snapshot_hash"),
+        "business_context": business_context_from_context_record(context),
+        "final_context_sections": {
+            section_id: {
+                "status": section.get("status"),
+                "content": str(section.get("content") or "").strip(),
+            }
+            for section_id, section in sections.items()
+            if isinstance(section, dict)
+        },
+        "structured_findings": structured_findings,
+        "retrieval_hints": _merge_retrieval_hints(
+            security_context.get("retrieval_hints", {}),
+            [
+                item.get("rag_retrieval_hints", {})
+                for item in structured_findings
+                if isinstance(item.get("rag_retrieval_hints"), dict)
+            ],
+        ),
+        "assumptions": _string_list(
+            security_context.get("analysis", {}).get("assumptions", [])
+        ),
+        "unresolved_gaps": _string_list(
+            security_context.get("analysis", {}).get("missing_information", [])
+        ),
+    }
+
+
+def _policy_handoff_task_item(item: dict) -> dict:
+    return {
+        "task_id": item.get("item_id"),
+        "title": item.get("title"),
+        "status": item.get("status"),
+        "findings": _string_list(item.get("findings")),
+        "assumptions": _string_list(item.get("assumptions")),
+        "missing_details": _string_list(item.get("missing_details")),
+        "risks": _string_list(item.get("risks")),
+        "policy_implications": _string_list(item.get("policy_implications")),
+        "rag_retrieval_hints": (
+            item.get("rag_retrieval_hints")
+            if isinstance(item.get("rag_retrieval_hints"), dict)
+            else {}
+        ),
+    }
+
+
+def _merge_retrieval_hints(base_hints: dict, task_hints: list[dict]) -> dict:
+    fields = {
+        "collection_families",
+        "jurisdictions",
+        "sectors",
+        "methodologies",
+        "query_terms",
+        "data_types",
+    }
+    merged = {field: [] for field in fields}
+    for field in fields:
+        if isinstance(base_hints, dict):
+            source_field = "collection_families" if field == "collection_families" else field
+            merged[field].extend(_string_list(base_hints.get(source_field)))
+    for hints in task_hints:
+        for field in fields:
+            merged[field].extend(_string_list(hints.get(field)))
+    return {
+        field: list(dict.fromkeys(values))
+        for field, values in merged.items()
+    }
+
+
 def run_with_agent(prompt: str, context_id: str = None, model_version: str = None) -> str:
     """
     Execute the configured agent using the initial prompt.
@@ -1581,6 +1891,103 @@ def run_with_agent(prompt: str, context_id: str = None, model_version: str = Non
     agent = create_agent_from_config(_agent_config_path())
     agent.create(context_id=context_id)  # pass context_id when persistence is needed
     return agent.run(prompt, context_id)
+
+
+def run_structured_with_agent(
+    prompt: str,
+    *,
+    schema_name: str,
+    json_schema: dict,
+    context_id: str = None,
+    model_version: str = None,
+    fallback_phase: str = "context_task_result",
+) -> dict:
+    """Execute the configured agent using a structured schema when supported."""
+    _ = model_version
+    agent = create_agent_from_config(_agent_config_path())
+    if hasattr(agent, "run_structured"):
+        return agent.run_structured(
+            prompt,
+            schema_name=schema_name,
+            json_schema=json_schema,
+            context_id=context_id,
+        )
+
+    agent.create(context_id=context_id)
+    raw_text = agent.run(prompt, context_id)
+    raw_text = str(raw_text or "").strip()
+    if fallback_phase == "context_planning":
+        return {
+            "plan_summary": raw_text or "The context-intelligence plan requires review.",
+            "tasks": [],
+            "missing_context_questions": [],
+            "approval_recommendation": "review_required",
+            "raw_text": raw_text,
+        }
+    if fallback_phase == "context_building":
+        return {
+            "summary": raw_text or "The context update requires review.",
+            "explicit_facts": [],
+            "assumptions": [],
+            "missing_information": [],
+            "follow_up_questions": [],
+            "security_domains": [],
+            "rag_retrieval_hints": {
+                "collection_families": [],
+                "jurisdictions": [],
+                "sectors": [],
+                "methodologies": [],
+                "query_terms": [],
+            },
+            "next_action": "review_required",
+            "raw_text": raw_text,
+        }
+
+    return {
+        "task_id": "unknown",
+        "status": "completed",
+        "findings": [raw_text] if raw_text else [],
+        "assumptions": [],
+        "missing_details": [],
+        "risks": [],
+        "policy_implications": [],
+        "rag_retrieval_hints": {
+            "collection_families": [],
+            "jurisdictions": [],
+            "sectors": [],
+            "methodologies": [],
+            "query_terms": [],
+        },
+        "raw_text": raw_text,
+    }
+
+
+def _context_task_result_text(structured_result: dict) -> str:
+    """Render a structured context task result into current UI text."""
+    if not isinstance(structured_result, dict):
+        return ""
+    if structured_result.get("raw_text"):
+        return str(structured_result["raw_text"]).strip()
+
+    sections = [
+        ("Findings", structured_result.get("findings")),
+        ("Assumptions", structured_result.get("assumptions")),
+        ("Missing details", structured_result.get("missing_details")),
+        ("Risks", structured_result.get("risks")),
+        ("Policy implications", structured_result.get("policy_implications")),
+    ]
+    lines = []
+    for title, values in sections:
+        if not values:
+            continue
+        lines.append(f"{title}:")
+        lines.extend(f"- {value}" for value in values if str(value).strip())
+    hints = structured_result.get("rag_retrieval_hints") or {}
+    query_terms = hints.get("query_terms") if isinstance(hints, dict) else []
+    if query_terms:
+        lines.append("RAG retrieval hints:")
+        lines.extend(f"- {term}" for term in query_terms if str(term).strip())
+    return "\n".join(lines).strip()
 
 
 def _result_error(error: str, details: str = "", status_code: int = 500) -> dict:
@@ -1831,6 +2238,7 @@ def get_context_and_prompt(context_id: str) -> dict:
         "language": context.get("language", "en"),
         "model_version": str(context.get("version", "0.1.0")),
         "business_context": business_context_from_context_record(context),
+        "policy_handoff_context": policy_handoff_context_from_context_record(context),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "correlation_id": correlation_id,
     }
