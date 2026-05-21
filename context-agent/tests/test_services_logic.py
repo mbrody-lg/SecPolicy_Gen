@@ -639,6 +639,27 @@ def _completed_context_task_results():
     }
 
 
+def _completed_structured_context_task_results():
+    task_results = _completed_context_task_results()
+    task_results["tasks"][0]["structured_result"] = {
+        "task_id": "company_profile",
+        "status": "completed",
+        "findings": ["The company operates a healthcare clinic in Spain."],
+        "assumptions": ["The clinic handles outpatient care."],
+        "missing_details": ["No named security owner was provided."],
+        "risks": ["Patient data access could be over-permissive."],
+        "policy_implications": ["Access review responsibilities must be explicit."],
+        "rag_retrieval_hints": {
+            "collection_families": ["controls"],
+            "jurisdictions": ["Spain"],
+            "sectors": ["Healthcare"],
+            "methodologies": ["ISO 27001"],
+            "query_terms": ["healthcare access review"],
+        },
+    }
+    return task_results
+
+
 def _approved_context_plan():
     return logic.approve_context_intelligence_plan({
         "country": "Spain",
@@ -718,6 +739,37 @@ def test_synthesize_final_context_persists_final_context_and_refined_prompt(monk
     assert "Patient records" in context["refined_prompt"]
     payload = logic.get_context_and_prompt(str(context_id))
     assert payload["refined_prompt"] == context["refined_prompt"]
+
+
+def test_build_final_context_expands_structured_task_result_fields():
+    security_context = logic.build_context_security_context({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "data_categories": "health_data",
+        "need": "Build a security plan",
+    })
+    context = {
+        "security_context": security_context,
+        "context_task_results": _completed_structured_context_task_results(),
+    }
+    plan_revision = logic.context_plan_revision(_approved_context_plan())
+
+    final_context = logic.build_final_context(
+        context,
+        security_context=security_context,
+        plan_revision=plan_revision,
+    )
+
+    item = final_context["sections"]["task_findings"]["items"][0]
+    assert item["findings"] == ["The company operates a healthcare clinic in Spain."]
+    assert item["risks"] == ["Patient data access could be over-permissive."]
+    assert item["policy_implications"] == [
+        "Access review responsibilities must be explicit."
+    ]
+    assert item["rag_retrieval_hints"]["query_terms"] == ["healthcare access review"]
+    assert "Findings:" in item["content"]
+    assert "RAG retrieval hints:" in final_context["sections"]["task_findings"]["content"]
 
 
 def test_synthesize_final_context_rejects_missing_security_context_information(monkeypatch):

@@ -1118,12 +1118,7 @@ def build_final_context(
         if isinstance(task, dict)
     ]
     tasks = [
-        {
-            "task_id": task.get("task_id"),
-            "title": task.get("title"),
-            "status": task.get("status"),
-            "result": str(task.get("result") or "").strip(),
-        }
+        _final_context_task_from_result(task)
         for task in task_results.get("tasks", [])
         if isinstance(task, dict)
     ]
@@ -1134,6 +1129,12 @@ def build_final_context(
             "title": task.get("title") or f"Context task {index + 1}",
             "status": task.get("status") or "unknown",
             "content": task.get("result") or "",
+            "findings": task.get("findings", []),
+            "assumptions": task.get("assumptions", []),
+            "missing_details": task.get("missing_details", []),
+            "risks": task.get("risks", []),
+            "policy_implications": task.get("policy_implications", []),
+            "rag_retrieval_hints": task.get("rag_retrieval_hints", {}),
         }
         for index, task in enumerate(tasks)
         if task.get("result")
@@ -1159,7 +1160,7 @@ def build_final_context(
             "task_findings": {
                 "status": "accepted",
                 "content": "\n\n".join(
-                    f"{task['title']}: {task['result']}"
+                    f"{task['title']}:\n{task['result']}"
                     for task in tasks
                     if task.get("result")
                 ),
@@ -1171,6 +1172,49 @@ def build_final_context(
             },
         },
     }
+
+
+def _final_context_task_from_result(task: dict) -> dict:
+    """Normalize persisted task results for final-context synthesis."""
+    structured_result = task.get("structured_result")
+    if isinstance(structured_result, dict):
+        rendered_result = _context_task_result_text(structured_result)
+        return {
+            "task_id": task.get("task_id"),
+            "title": task.get("title"),
+            "status": task.get("status"),
+            "result": rendered_result or str(task.get("result") or "").strip(),
+            "findings": _string_list(structured_result.get("findings")),
+            "assumptions": _string_list(structured_result.get("assumptions")),
+            "missing_details": _string_list(structured_result.get("missing_details")),
+            "risks": _string_list(structured_result.get("risks")),
+            "policy_implications": _string_list(structured_result.get("policy_implications")),
+            "rag_retrieval_hints": (
+                structured_result.get("rag_retrieval_hints")
+                if isinstance(structured_result.get("rag_retrieval_hints"), dict)
+                else {}
+            ),
+        }
+
+    return {
+        "task_id": task.get("task_id"),
+        "title": task.get("title"),
+        "status": task.get("status"),
+        "result": str(task.get("result") or "").strip(),
+        "findings": [],
+        "assumptions": [],
+        "missing_details": [],
+        "risks": [],
+        "policy_implications": [],
+        "rag_retrieval_hints": {},
+    }
+
+
+def _string_list(values) -> list[str]:
+    """Return only non-empty string values from provider payload fields."""
+    if not isinstance(values, list):
+        return []
+    return [str(value).strip() for value in values if str(value).strip()]
 
 
 def render_final_context_prompt(final_context: dict) -> str:
