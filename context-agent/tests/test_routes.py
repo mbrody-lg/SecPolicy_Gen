@@ -2050,6 +2050,31 @@ def test_trigger_final_context_synthesis_persists_policy_ready_context_json(clie
     assert "Patient records are the primary asset." in task_findings["items"][0]["content"]
 
 
+def test_trigger_final_context_synthesis_escapes_json_response(client):
+    context_id = str(ObjectId())
+    _insert_context_executed_for_final_synthesis(context_id)
+    routes_module.mongo.db.contexts.update_one(
+        {"_id": ObjectId(context_id)},
+        {
+            "$set": {
+                "context_task_results.tasks.0.result": "<script>alert(1)</script>",
+            }
+        },
+    )
+
+    response = client.post(
+        f"/context/{context_id}/final-context/synthesize",
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 200
+    assert b"<script>alert(1)</script>" not in response.data
+    assert (
+        response.get_json()["final_context"]["sections"]["task_findings"]["items"][0]["content"]
+        == "&lt;script&gt;alert(1)&lt;/script&gt;"
+    )
+
+
 def test_mark_final_context_section_for_improvement_json(client):
     context_id = str(ObjectId())
     _insert_context_executed_for_final_synthesis(context_id)
@@ -2072,6 +2097,28 @@ def test_mark_final_context_section_for_improvement_json(client):
     assert context["status"] == "final_context_needs_improvement"
     assert context["final_context"]["context_ready_for_policy"] is False
     assert context["final_context"]["sections"]["security_scope"]["status"] == "needs_improvement"
+
+
+def test_mark_final_context_section_for_improvement_escapes_json_response(client):
+    context_id = str(ObjectId())
+    _insert_context_executed_for_final_synthesis(context_id)
+    client.post(
+        f"/context/{context_id}/final-context/synthesize",
+        headers={"Accept": "application/json"},
+    )
+
+    response = client.post(
+        f"/context/{context_id}/final-context/sections/improve",
+        json={"comments": {"security_scope": "<script>alert(1)</script>"}},
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 200
+    assert b"<script>alert(1)</script>" not in response.data
+    comment = (
+        response.get_json()["final_context"]["sections"]["security_scope"]["comments"][0]["comment"]
+    )
+    assert comment == "&lt;script&gt;alert(1)&lt;/script&gt;"
 
 
 def test_context_detail_disables_policy_generation_when_final_context_needs_improvement(client, monkeypatch):
@@ -2131,6 +2178,28 @@ def test_regenerate_final_context_sections_records_lesson_candidate_json(client)
     assert context["context_lessons"][0]["status"] == "pending_review"
 
 
+def test_regenerate_final_context_sections_escapes_json_response(client):
+    context_id = str(ObjectId())
+    _insert_context_executed_for_final_synthesis(context_id)
+    client.post(
+        f"/context/{context_id}/final-context/synthesize",
+        headers={"Accept": "application/json"},
+    )
+    client.post(
+        f"/context/{context_id}/final-context/sections/improve",
+        json={"comments": {"security_scope": "<script>alert(1)</script>"}},
+        headers={"Accept": "application/json"},
+    )
+
+    response = client.post(
+        f"/context/{context_id}/final-context/sections/regenerate",
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 200
+    assert b"<script>alert(1)</script>" not in response.data
+
+
 def test_export_context_lessons_returns_only_approved_lessons_json(client):
     context_id = str(ObjectId())
     routes_module.mongo.db.contexts.insert_one({
@@ -2151,6 +2220,31 @@ def test_export_context_lessons_returns_only_approved_lessons_json(client):
     assert payload["success"] is True
     assert payload["count"] == 1
     assert payload["lessons"][0]["lesson_id"] == "lesson-2"
+
+
+def test_export_context_lessons_escapes_json_response(client):
+    context_id = str(ObjectId())
+    routes_module.mongo.db.contexts.insert_one({
+        "_id": ObjectId(context_id),
+        "context_lessons": [
+            {
+                "lesson_id": "lesson-1",
+                "status": "approved_for_export",
+                "statement": "<script>alert(1)</script>",
+            },
+        ],
+    })
+
+    response = client.get(
+        f"/context/{context_id}/context-lessons/export",
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 200
+    assert b"<script>alert(1)</script>" not in response.data
+    assert response.get_json()["lessons"][0]["statement"] == (
+        "&lt;script&gt;alert(1)&lt;/script&gt;"
+    )
 
 
 def test_update_context_lesson_status_marks_lesson_exportable_json(client):
@@ -2174,6 +2268,32 @@ def test_update_context_lesson_status_marks_lesson_exportable_json(client):
     assert payload["lesson"]["status"] == "approved_for_export"
     context = routes_module.mongo.db.contexts.find_one({"_id": ObjectId(context_id)})
     assert context["context_lessons"][0]["status"] == "approved_for_export"
+
+
+def test_update_context_lesson_status_escapes_json_response(client):
+    context_id = str(ObjectId())
+    routes_module.mongo.db.contexts.insert_one({
+        "_id": ObjectId(context_id),
+        "context_lessons": [
+            {
+                "lesson_id": "lesson-1",
+                "status": "pending_review",
+                "statement": "<script>alert(1)</script>",
+            },
+        ],
+    })
+
+    response = client.post(
+        f"/context/{context_id}/context-lessons/lesson-1/status",
+        json={"status": "approved_for_export"},
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 200
+    assert b"<script>alert(1)</script>" not in response.data
+    assert response.get_json()["lesson"]["statement"] == (
+        "&lt;script&gt;alert(1)&lt;/script&gt;"
+    )
 
 
 def test_context_detail_renders_final_context_review_and_lessons(client, monkeypatch):

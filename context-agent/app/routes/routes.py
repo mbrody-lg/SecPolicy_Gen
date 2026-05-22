@@ -6,6 +6,7 @@ import os
 
 from bson import ObjectId
 from flask import Blueprint, current_app, render_template, request, redirect, url_for, abort, flash, jsonify
+from markupsafe import escape
 
 from app import mongo
 from app.metrics import metrics_response
@@ -51,6 +52,26 @@ from app.services.pipeline_worker import start_pipeline_job_worker
 
 main = Blueprint("main", __name__)
 logger = logging.getLogger(__name__)
+
+
+def _jsonify_escaped(payload):
+    """Return JSON with text escaped for safe browser rendering."""
+    return jsonify(_escape_json_payload(payload))
+
+
+def _escape_json_payload(value):
+    if isinstance(value, str):
+        return str(escape(value))
+    if isinstance(value, list):
+        return [_escape_json_payload(item) for item in value]
+    if isinstance(value, tuple):
+        return [_escape_json_payload(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            _escape_json_payload(key): _escape_json_payload(item)
+            for key, item in value.items()
+        }
+    return value
 
 
 def _pipeline_flash_message(result: dict) -> str:
@@ -798,7 +819,7 @@ def trigger_context_plan_execution(context_id):
             "details": {"context_id": context_id},
         }
         if _wants_json_response():
-            return jsonify(payload), blocker["status_code"]
+            return _jsonify_escaped(payload), blocker["status_code"]
         flash(payload["message"], "warning")
         return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-execution"))
 
@@ -811,7 +832,7 @@ def trigger_context_plan_execution(context_id):
             "job": _public_pipeline_job(active_job),
         }
         if _wants_json_response():
-            return jsonify(payload), 202
+            return _jsonify_escaped(payload), 202
         flash("Context plan execution is already running.", "info")
         return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-execution"))
 
@@ -828,7 +849,7 @@ def trigger_context_plan_execution(context_id):
         "job": _public_pipeline_job(job),
     }
     if _wants_json_response():
-        return jsonify(payload), 202
+        return _jsonify_escaped(payload), 202
     flash("Context plan execution started. Current stage: queued.", "info")
     return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-execution"))
 
@@ -838,7 +859,7 @@ def trigger_final_context_synthesis(context_id):
     """Synthesize final context after approved plan execution."""
     result = synthesize_final_context(context_id)
     if _wants_json_response():
-        return jsonify(result), 200 if result.get("success") else result.get("status_code", 500)
+        return _jsonify_escaped(result), 200 if result.get("success") else result.get("status_code", 500)
     if result.get("success"):
         flash("Final context synthesized. Policy generation is now available.", "success")
     else:
@@ -865,7 +886,7 @@ def mark_final_context_sections_for_improvement_route(context_id):
 
     result = mark_final_context_sections_for_improvement(context_id, comments_by_section)
     if _wants_json_response():
-        return jsonify(result), 200 if result.get("success") else result.get("status_code", 500)
+        return _jsonify_escaped(result), 200 if result.get("success") else result.get("status_code", 500)
     if result.get("success"):
         flash("Final context section marked for improvement.", "success")
     else:
@@ -878,7 +899,7 @@ def regenerate_final_context_sections_route(context_id):
     """Regenerate final-context sections marked for improvement."""
     result = regenerate_final_context_sections(context_id)
     if _wants_json_response():
-        return jsonify(result), 200 if result.get("success") else result.get("status_code", 500)
+        return _jsonify_escaped(result), 200 if result.get("success") else result.get("status_code", 500)
     if result.get("success"):
         flash("Final context sections regenerated. Policy generation is available again.", "success")
     else:
@@ -890,7 +911,7 @@ def regenerate_final_context_sections_route(context_id):
 def export_context_lessons_route(context_id):
     """Export reviewed context lessons for explicit future RAG ingestion."""
     result = export_context_lessons(context_id)
-    return jsonify(result), 200 if result.get("success") else result.get("status_code", 500)
+    return _jsonify_escaped(result), 200 if result.get("success") else result.get("status_code", 500)
 
 
 @main.route("/context/<context_id>/context-lessons/<lesson_id>/status", methods=["POST"])
@@ -904,7 +925,7 @@ def update_context_lesson_status_route(context_id, lesson_id):
 
     result = update_context_lesson_status(context_id, lesson_id, status)
     if _wants_json_response():
-        return jsonify(result), 200 if result.get("success") else result.get("status_code", 500)
+        return _jsonify_escaped(result), 200 if result.get("success") else result.get("status_code", 500)
     if result.get("success"):
         flash("Context lesson review status updated.", "success")
     else:
