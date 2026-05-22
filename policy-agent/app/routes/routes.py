@@ -3,6 +3,7 @@
 import logging
 
 from flask import Blueprint, jsonify, request
+from markupsafe import escape
 
 from app.metrics import metrics_response
 from app.observability import log_event
@@ -20,6 +21,26 @@ routes = Blueprint("routes", __name__)
 logger = logging.getLogger(__name__)
 
 
+def _jsonify_escaped(payload):
+    """Return JSON with text escaped for safe browser rendering."""
+    return jsonify(_escape_json_payload(payload))
+
+
+def _escape_json_payload(value):
+    if isinstance(value, str):
+        return str(escape(value))
+    if isinstance(value, list):
+        return [_escape_json_payload(item) for item in value]
+    if isinstance(value, tuple):
+        return [_escape_json_payload(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            _escape_json_payload(key): _escape_json_payload(item)
+            for key, item in value.items()
+        }
+    return value
+
+
 @routes.route("/health", methods=["GET"])
 def health():
     """Return a lightweight liveness signal for the policy-agent service."""
@@ -31,7 +52,7 @@ def ready():
     """Return readiness based on minimal safe dependency and config checks."""
     payload, status_code = get_readiness_status()
     _log_readiness_response(payload, status_code)
-    return jsonify(payload), status_code
+    return _jsonify_escaped(payload), status_code
 
 
 @routes.route("/metrics", methods=["GET"])
@@ -73,7 +94,7 @@ def rag_status():
         rag_status=payload.get("rag", {}).get("status"),
         error_code=None if status_code < 400 else payload.get("rag", {}).get("reason", "rag_not_ready"),
     )
-    return jsonify(payload), status_code
+    return _jsonify_escaped(payload), status_code
 
 
 @routes.route("/rag/refresh", methods=["POST"])
@@ -92,7 +113,7 @@ def rag_refresh():
         refresh_status=payload.get("job", {}).get("status"),
         error_code=payload.get("error_code"),
     )
-    return jsonify(payload), status_code
+    return _jsonify_escaped(payload), status_code
 
 
 @routes.route("/generate_policy", methods=["POST"])

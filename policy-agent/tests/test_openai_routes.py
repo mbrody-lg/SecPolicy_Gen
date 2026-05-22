@@ -129,6 +129,30 @@ def test_rag_status_route_reports_runtime_status(client):
     assert response.get_json()["rag"]["status"] == "requires_refresh"
 
 
+def test_rag_status_route_escapes_reflected_collection_names(client):
+    with patch(
+        "app.routes.routes.get_rag_runtime_status",
+        return_value=(
+            {
+                "status": "not_ready",
+                "service": "policy-agent",
+                "rag": {
+                    "status": "requires_refresh",
+                    "missing_collections": ["<script>alert(1)</script>"],
+                },
+            },
+            503,
+        ),
+    ):
+        response = client.get("/rag/status")
+
+    assert response.status_code == 503
+    assert b"<script>alert(1)</script>" not in response.data
+    assert response.get_json()["rag"]["missing_collections"] == [
+        "&lt;script&gt;alert(1)&lt;/script&gt;"
+    ]
+
+
 def test_rag_refresh_route_runs_controlled_refresh(client):
     with patch(
         "app.routes.routes.refresh_rag_runtime",
@@ -146,6 +170,26 @@ def test_rag_refresh_route_runs_controlled_refresh(client):
 
     assert response.status_code == 202
     assert response.get_json()["job"] == {"id": "job-1", "status": "running"}
+
+
+def test_rag_refresh_route_escapes_reflected_job_metadata(client):
+    with patch(
+        "app.routes.routes.refresh_rag_runtime",
+        return_value=(
+            {
+                "success": True,
+                "stage": "rag_refresh",
+                "message": "<script>alert(1)</script>",
+                "job": {"id": "job-1", "status": "running"},
+            },
+            202,
+        ),
+    ):
+        response = client.post("/rag/refresh")
+
+    assert response.status_code == 202
+    assert b"<script>alert(1)</script>" not in response.data
+    assert response.get_json()["message"] == "&lt;script&gt;alert(1)&lt;/script&gt;"
 
 
 def test_rag_refresh_route_reports_disabled_runtime(client):
