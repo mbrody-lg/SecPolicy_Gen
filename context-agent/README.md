@@ -21,6 +21,7 @@ The Context Agent:
 
 - Docker (recommended)
 - Python 3.11+ (for local development)
+- Node.js 22.13+ and pnpm 11.1.3 (for frontend asset changes)
 - MongoDB running and accessible
 - OpenAI API key
 
@@ -178,6 +179,19 @@ make context-tests
 For the service-specific workflow guidance, see [docs/playbooks/context-agent.md](../docs/playbooks/context-agent.md).
 
 For the cross-service observability workflow, see [docs/playbooks/context-policy-validator-loop.md](../docs/playbooks/context-policy-validator-loop.md).
+
+### Frontend Assets
+
+The Context Agent frontend uses the pnpm version pinned in
+`frontend/package.json`. From `context-agent/frontend/`:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm run build
+```
+
+Commit `pnpm-lock.yaml` when dependencies change. Do not add another Node
+lockfile.
 
 ## Development
 
