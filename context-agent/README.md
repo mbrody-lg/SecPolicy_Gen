@@ -182,12 +182,14 @@ For the cross-service observability workflow, see [docs/playbooks/context-policy
 
 ### Frontend Assets
 
-The Context Agent frontend uses the pnpm version pinned in
-`frontend/package.json`. From `context-agent/frontend/`:
+CI uses the exact pnpm version pinned in `frontend/package.json`. Local
+development accepts a compatible pnpm release from the same major version.
+From the repository root:
 
 ```bash
-pnpm install --frozen-lockfile
-pnpm run build
+make frontend-install
+make frontend-build
+make frontend-check
 ```
 
 Commit `pnpm-lock.yaml` when dependencies change. Do not add another Node

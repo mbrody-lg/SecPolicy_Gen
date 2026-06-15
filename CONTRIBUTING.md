@@ -43,6 +43,11 @@ Be respectful, inclusive, and professional in all interactions.
    make bootstrap-test-env
    make host-fast-tests
    ```
+   For Context Agent frontend dependency or asset changes, also run:
+   ```bash
+   make frontend-check
+   ```
+   `context-agent/frontend/pnpm-lock.yaml` is the only supported Node lockfile.
 
 5. **Commit with clear messages**
    ```bash

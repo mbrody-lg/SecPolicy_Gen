@@ -4,8 +4,11 @@ INFRA_DIR=infrastructure
 DOCKER_COMPOSE_CMD=$(shell scripts/docker_preflight.sh --print-compose 2>/dev/null || printf 'docker-compose')
 COMPOSE=$(DOCKER_COMPOSE_CMD) -f $(INFRA_DIR)/docker-compose.yml --env-file $(INFRA_DIR)/.env
 LINT_PYTHON=$(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi)
+FRONTEND_DIR=context-agent/frontend
+PNPM?=pnpm
+PNPM_COMMAND=$(PNPM) --pm-on-fail=ignore
 
-.PHONY: all docker-preflight up down clean rebuild logs observability-urls shell-context context-tests context-import policy-shell policy-tests policy-vectorize policy-rag-validate policy-rag-backup policy-rag-restore validator-shell validator-tests governance-tests functional-smoke functional-smoke-real functional-smoke-real-full functional-smoke-real-backup critical-path-validation bootstrap-test-env host-fast-tests lint help
+.PHONY: all docker-preflight up down clean rebuild logs observability-urls shell-context context-tests context-import frontend-pnpm-check frontend-install frontend-build frontend-check policy-shell policy-tests policy-vectorize policy-rag-validate policy-rag-backup policy-rag-restore validator-shell validator-tests governance-tests functional-smoke functional-smoke-real functional-smoke-real-full functional-smoke-real-backup critical-path-validation bootstrap-test-env host-fast-tests lint help
 
 ## Verify docker and compose prerequisites
 docker-preflight:
@@ -48,6 +51,33 @@ context-tests:
 ## Run tests for agent-context
 context-import: 
 	docker exec -it context_agent_web python generate_context_from_yaml.py
+
+## Validate the Context Agent frontend package-manager contract
+frontend-pnpm-check:
+	python3 scripts/check_frontend_package_manager.py
+	@expected=$$(python3 scripts/check_frontend_package_manager.py --print-version); \
+	actual=$$($(PNPM_COMMAND) --version); \
+	expected_major=$${expected%%.*}; \
+	actual_major=$${actual%%.*}; \
+	test -n "$$actual" && test "$$actual_major" = "$$expected_major" || { \
+		echo "Expected pnpm major $$expected_major (CI pins $$expected), found $$actual" >&2; \
+		exit 1; \
+	}; \
+	if [ "$$actual" != "$$expected" ]; then \
+		echo "Using compatible local pnpm $$actual; CI pins pnpm $$expected."; \
+	fi
+
+## Install Context Agent frontend dependencies from the locked graph
+frontend-install: frontend-pnpm-check
+	cd $(FRONTEND_DIR) && $(PNPM_COMMAND) install --frozen-lockfile
+
+## Build the tracked Context Agent frontend assets
+frontend-build: frontend-pnpm-check
+	cd $(FRONTEND_DIR) && $(PNPM_COMMAND) run build
+
+## Verify the locked frontend install and generated assets
+frontend-check: frontend-install frontend-build
+	git diff --exit-code -- context-agent/app/static/css/tailwind.css
 
 ## Enter the policy-agent container
 policy-shell: 
@@ -134,6 +164,10 @@ help:
 	@echo "make context-shell 	-> Access context-agent shell"
 	@echo "make context-tests 	-> Run tests inside context-agent"
 	@echo "make context-import 	-> Run sample content import"
+	@echo "make frontend-pnpm-check -> Validate frontend package-manager contract"
+	@echo "make frontend-install -> Install locked Context Agent frontend dependencies"
+	@echo "make frontend-build 	-> Build Context Agent frontend assets"
+	@echo "make frontend-check 	-> Verify locked install and generated frontend assets"
 	@echo "make policy-shell 	-> Access policy-agent shell"
 	@echo "make policy-tests 	-> Run tests inside policy-agent"
 	@echo "make policy-vectorize 	-> Run data vectorization inside policy-agent"

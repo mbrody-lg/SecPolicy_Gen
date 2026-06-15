@@ -1,0 +1,52 @@
+name: Frontend
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "context-agent/frontend/**"
+      - "context-agent/app/static/css/tailwind.css"
+      - "context-agent/README.md"
+      - "README.md"
+      - "docs/**"
+      - "CONTRIBUTING.md"
+      - "Makefile"
+      - ".github/workflows/**"
+      - "scripts/**"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "context-agent/frontend/**"
+      - "context-agent/app/static/css/tailwind.css"
+      - "context-agent/README.md"
+      - "README.md"
+      - "docs/**"
+      - "CONTRIBUTING.md"
+      - "Makefile"
+      - ".github/workflows/**"
+      - "scripts/**"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: context-agent/frontend/package.json
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.13.0"
+          cache: pnpm
+          cache-dependency-path: context-agent/frontend/pnpm-lock.yaml
+
+      - name: Verify frontend
+        run: make frontend-check
