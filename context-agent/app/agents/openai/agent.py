@@ -10,9 +10,64 @@ from app.agents.openai.client import OpenAIClient
 from app.agents.openai.roles.optimiser import PromptResponseOptimiser
 from app.agents.openai.roles.proactive import ProactiveGoalCreator
 from app.agents.openai.structured import (
+    ProviderConnectivityError,
+    ProviderIncompleteError,
     ProviderRequest,
+    ProviderRateLimitError,
+    ProviderTimeoutError,
     create_structured_provider_call,
 )
+
+
+_ASSISTANT_PENDING_STATUSES = {"queued", "in_progress", "cancelling"}
+_ASSISTANT_INCOMPLETE_STATUSES = {"expired", "incomplete", "requires_action"}
+
+
+def _safe_run_detail(value) -> str | None:
+    """Return a bounded run diagnostic value without raw provider text."""
+    if value is None:
+        return None
+    text = str(value)
+    return text[:80] if text else None
+
+
+def _assistant_run_error(run, *, model: str) -> Exception:
+    """Map Assistants run terminal states to bounded provider errors."""
+    status = _safe_run_detail(getattr(run, "status", None)) or "unknown"
+    last_error = getattr(run, "last_error", None)
+    last_error_code = _safe_run_detail(getattr(last_error, "code", None))
+    incomplete_details = getattr(run, "incomplete_details", None)
+    incomplete_reason = _safe_run_detail(getattr(incomplete_details, "reason", None))
+    details = {"run_status": status}
+    if last_error_code:
+        details["last_error_code"] = last_error_code
+    if incomplete_reason:
+        details["incomplete_reason"] = incomplete_reason
+
+    if last_error_code == "rate_limit_exceeded":
+        return ProviderRateLimitError(
+            phase="assistant_run",
+            schema_name="assistant_run",
+            model=model,
+            api_mode="assistants",
+            details=details,
+        )
+    if status in _ASSISTANT_INCOMPLETE_STATUSES:
+        return ProviderIncompleteError(
+            phase="assistant_run",
+            schema_name="assistant_run",
+            model=model,
+            api_mode="assistants",
+            details=details,
+        )
+    return ProviderConnectivityError(
+        phase="assistant_run",
+        schema_name="assistant_run",
+        model=model,
+        api_mode="assistants",
+        details=details,
+    )
+
 
 class OpenAIAgent(Agent):
     """Concrete agent that uses OpenAI Assistants and role processors."""
@@ -85,7 +140,8 @@ class OpenAIAgent(Agent):
             assistant_id=self.assistant_id
         )
 
-        # Wait for completion
+        # Wait for completion with a bounded legacy Assistants polling loop.
+        deadline = time.monotonic() + self.client.timeout_seconds
         while True:
             run = self.client.beta.threads.runs.retrieve(
                 thread_id=thread_id,
@@ -93,8 +149,16 @@ class OpenAIAgent(Agent):
             )
             if run.status == "completed":
                 break
-            if run.status in ("failed", "cancelled"):
-                raise RuntimeError("OpenAI Run failed or cancelled.")
+            if run.status not in _ASSISTANT_PENDING_STATUSES:
+                raise _assistant_run_error(run, model=self.model)
+            if time.monotonic() >= deadline:
+                raise ProviderTimeoutError(
+                    phase="assistant_run",
+                    schema_name="assistant_run",
+                    model=self.model,
+                    api_mode="assistants",
+                    details={"last_status": _safe_run_detail(run.status) or "unknown"},
+                )
             time.sleep(0.5)
 
         # Retrieve assistant response

@@ -21,6 +21,7 @@ from app import (
     get_request_correlation_id,
     mongo,
 )
+from app.agents.openai.structured import ProviderCallError
 from app.context_output_schemas import context_phase_output_schema
 from app.agents.factory import create_agent_from_config
 from app.context_analysis import SECURITY_CONTEXT_VERSION, build_security_context_from_answers
@@ -1078,6 +1079,13 @@ def execute_context_plan(context_id: str, on_task_progress=None) -> dict:
             status_code=409,
         )
 
+    previous_completed_results = context.get("context_task_results")
+    if not (
+        isinstance(previous_completed_results, dict)
+        and previous_completed_results.get("status") == "completed"
+    ):
+        previous_completed_results = None
+
     started_at = datetime.now(timezone.utc).isoformat()
     task_results = {
         "version": CONTEXT_TASK_RESULTS_VERSION,
@@ -1089,10 +1097,15 @@ def execute_context_plan(context_id: str, on_task_progress=None) -> dict:
         "completed_at": None,
         "tasks": [],
     }
-    mongo.db.contexts.update_one(
-        {"_id": context_obj_id},
-        {"$set": {"status": "context_plan_executing", "context_task_results": task_results}},
-    )
+    running_update = {
+        "status": "context_plan_executing",
+        "context_task_results": task_results,
+    }
+    if previous_completed_results:
+        running_update[
+            "previous_completed_context_task_results"
+        ] = previous_completed_results
+    mongo.db.contexts.update_one({"_id": context_obj_id}, {"$set": running_update})
 
     completed_tasks = []
     plan_tasks = list(plan_revision.get("tasks", []))
@@ -1148,9 +1161,17 @@ def execute_context_plan(context_id: str, on_task_progress=None) -> dict:
         if task_result["status"] == "failed":
             task_results["status"] = "failed"
             task_results["completed_at"] = datetime.now(timezone.utc).isoformat()
+            failed_update = {
+                "status": "context_plan_failed",
+                "context_task_results": task_results,
+            }
+            if previous_completed_results:
+                failed_update[
+                    "previous_completed_context_task_results"
+                ] = previous_completed_results
             mongo.db.contexts.update_one(
                 {"_id": context_obj_id},
-                {"$set": {"status": "context_plan_failed", "context_task_results": task_results}},
+                {"$set": failed_update},
             )
             return _context_plan_execution_error(
                 task_result["error"]["error_code"],
@@ -1213,6 +1234,15 @@ def _execute_context_plan_task(context: dict, task: dict, plan_revision: dict) -
             "result": str(result or "").strip(),
             "structured_result": structured_result,
             "completed_at": completed_at,
+        }
+    except ProviderCallError as error:
+        completed_at = datetime.now(timezone.utc).isoformat()
+        return {
+            **base_result,
+            "status": "failed",
+            "result": None,
+            "completed_at": completed_at,
+            "error": error.to_diagnostic(),
         }
     except Exception:
         completed_at = datetime.now(timezone.utc).isoformat()

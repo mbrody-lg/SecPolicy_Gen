@@ -5,6 +5,7 @@ import requests
 from bson import ObjectId
 
 from test_base import *
+from app.agents.openai.structured import ProviderTimeoutError
 from app.services import logic
 
 
@@ -820,6 +821,123 @@ def test_execute_context_plan_persists_safe_task_failure(monkeypatch):
         "context_task_failed",
     ]
     assert progress_events[-1]["last_message"] == "Failed Company profile and operating model."
+
+
+def test_execute_context_plan_persists_safe_provider_failure(monkeypatch):
+    context_id = ObjectId()
+    plan = logic.approve_context_intelligence_plan({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "need": "Build a security plan",
+        "context_intelligence_plan": logic.build_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "need": "Build a security plan",
+        }),
+    })
+    plan["tasks"] = plan["tasks"][:1]
+    plan["revisions"][0]["tasks"] = plan["revisions"][0]["tasks"][:1]
+    fake_db = FakeDB(
+        contexts=[
+            {
+                "_id": context_id,
+                "country": "Spain",
+                "sector": "Healthcare",
+                "critical_assets": "Patient records",
+                "need": "Build a security plan",
+                "security_context": logic.build_context_security_context({
+                    "country": "Spain",
+                    "sector": "Healthcare",
+                    "critical_assets": "Patient records",
+                    "need": "Build a security plan",
+                }),
+                "context_intelligence_plan": plan,
+            }
+        ]
+    )
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    def failing_agent(*args, **kwargs):
+        raise ProviderTimeoutError(
+            phase="context_agent_task_result",
+            schema_name="context_agent_task_result",
+            model="gpt-configured",
+            api_mode="responses",
+            details={"last_status": "in_progress"},
+        )
+
+    monkeypatch.setattr(logic, "run_structured_with_agent", failing_agent)
+
+    result = logic.execute_context_plan(str(context_id))
+
+    task_error = fake_db.contexts.docs[0]["context_task_results"]["tasks"][0]["error"]
+    assert result["success"] is False
+    assert result["error_code"] == "openai_timeout"
+    assert task_error["error_code"] == "openai_timeout"
+    assert task_error["api_mode"] == "responses"
+    assert task_error["details"] == {"last_status": "in_progress"}
+    assert "gpt-configured" in str(task_error)
+
+
+def test_execute_context_plan_preserves_previous_completed_task_results_on_failure(monkeypatch):
+    context_id = ObjectId()
+    previous_task_results = _completed_context_task_results()
+    plan = logic.approve_context_intelligence_plan({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "need": "Build a security plan",
+        "context_intelligence_plan": logic.build_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "need": "Build a security plan",
+        }),
+    })
+    plan["tasks"] = plan["tasks"][:1]
+    plan["revisions"][0]["tasks"] = plan["revisions"][0]["tasks"][:1]
+    fake_db = FakeDB(
+        contexts=[
+            {
+                "_id": context_id,
+                "country": "Spain",
+                "sector": "Healthcare",
+                "critical_assets": "Patient records",
+                "need": "Build a security plan",
+                "security_context": logic.build_context_security_context({
+                    "country": "Spain",
+                    "sector": "Healthcare",
+                    "critical_assets": "Patient records",
+                    "need": "Build a security plan",
+                }),
+                "context_intelligence_plan": plan,
+                "context_task_results": previous_task_results,
+                "final_context": {"status": "completed"},
+            }
+        ]
+    )
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    def failing_agent(*args, **kwargs):
+        raise ProviderTimeoutError(
+            phase="context_agent_task_result",
+            schema_name="context_agent_task_result",
+            model="gpt-configured",
+            api_mode="responses",
+        )
+
+    monkeypatch.setattr(logic, "run_structured_with_agent", failing_agent)
+
+    result = logic.execute_context_plan(str(context_id))
+
+    context = fake_db.contexts.docs[0]
+    assert result["success"] is False
+    assert context["status"] == "context_plan_failed"
+    assert context["context_task_results"]["status"] == "failed"
+    assert context["previous_completed_context_task_results"] == previous_task_results
+    assert context["final_context"] == {"status": "completed"}
 
 
 def _completed_context_task_results():

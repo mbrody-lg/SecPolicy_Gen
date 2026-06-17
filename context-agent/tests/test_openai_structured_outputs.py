@@ -568,6 +568,159 @@ def test_openai_agent_run_structured_uses_assistant_instructions_and_requested_s
     )
 
 
+class FakeAssistantRuns:
+    def __init__(self, retrieved_runs):
+        self.retrieved_runs = list(retrieved_runs)
+        self.create_calls = []
+        self.retrieve_calls = []
+
+    def create(self, **kwargs):
+        self.create_calls.append(kwargs)
+        return SimpleNamespace(id="run-1")
+
+    def retrieve(self, **kwargs):
+        self.retrieve_calls.append(kwargs)
+        if self.retrieved_runs:
+            return self.retrieved_runs.pop(0)
+        return SimpleNamespace(id="run-1", status="in_progress")
+
+
+class FakeAssistantMessages:
+    def __init__(self):
+        self.create_calls = []
+
+    def create(self, **kwargs):
+        self.create_calls.append(kwargs)
+
+
+class FakeAssistantThreads:
+    def __init__(self, runs):
+        self.runs = runs
+        self.messages = FakeAssistantMessages()
+
+    def create(self):
+        return SimpleNamespace(id="thread-1")
+
+
+class FakeAssistantClient:
+    def __init__(self, runs, *, timeout_seconds=180.0):
+        self.timeout_seconds = timeout_seconds
+        self.beta = SimpleNamespace(threads=FakeAssistantThreads(runs))
+
+
+def install_fake_assistant_agent(monkeypatch, retrieved_runs, *, timeout_seconds=180.0):
+    from app.agents.openai import agent as agent_module
+    from app.agents.openai.agent import OpenAIAgent
+
+    fake_runs = FakeAssistantRuns(retrieved_runs)
+    fake_client = FakeAssistantClient(fake_runs, timeout_seconds=timeout_seconds)
+    monkeypatch.setattr(agent_module, "OpenAIClient", lambda: fake_client)
+
+    class FakeProactive:
+        def __init__(self, **kwargs):
+            pass
+
+        def execute(self, prompt):
+            return f"refined: {prompt}"
+
+    monkeypatch.setattr(agent_module, "ProactiveGoalCreator", FakeProactive)
+    agent = OpenAIAgent(
+        name="context-agent",
+        instructions="Assistant instructions",
+        model="gpt-configured",
+    )
+    agent.assistant_id = "assistant-1"
+    return agent, fake_client
+
+
+def test_openai_agent_run_maps_failed_assistant_run_to_safe_diagnostic(monkeypatch):
+    failed_run = SimpleNamespace(
+        id="run-1",
+        status="failed",
+        last_error=SimpleNamespace(code="invalid_prompt", message="raw provider text"),
+        incomplete_details=None,
+    )
+    agent, _ = install_fake_assistant_agent(monkeypatch, [failed_run])
+
+    with pytest.raises(ProviderConnectivityError) as exc_info:
+        agent.run("user company context")
+
+    diagnostic = exc_info.value.to_diagnostic()
+    assert diagnostic["api_mode"] == "assistants"
+    assert diagnostic["phase"] == "assistant_run"
+    assert diagnostic["details"] == {
+        "run_status": "failed",
+        "last_error_code": "invalid_prompt",
+    }
+    assert "raw provider text" not in str(diagnostic)
+    assert "user company context" not in str(diagnostic)
+
+
+def test_openai_agent_run_maps_rate_limited_assistant_run(monkeypatch):
+    failed_run = SimpleNamespace(
+        id="run-1",
+        status="failed",
+        last_error=SimpleNamespace(code="rate_limit_exceeded", message="quota details"),
+        incomplete_details=None,
+    )
+    agent, _ = install_fake_assistant_agent(monkeypatch, [failed_run])
+
+    with pytest.raises(ProviderRateLimitError) as exc_info:
+        agent.run("user company context")
+
+    diagnostic = exc_info.value.to_diagnostic()
+    assert diagnostic["error_code"] == "openai_rate_limit"
+    assert diagnostic["details"] == {
+        "run_status": "failed",
+        "last_error_code": "rate_limit_exceeded",
+    }
+    assert "quota details" not in str(diagnostic)
+
+
+def test_openai_agent_run_maps_incomplete_assistant_run(monkeypatch):
+    incomplete_run = SimpleNamespace(
+        id="run-1",
+        status="incomplete",
+        last_error=None,
+        incomplete_details=SimpleNamespace(reason="max_completion_tokens"),
+    )
+    agent, _ = install_fake_assistant_agent(monkeypatch, [incomplete_run])
+
+    with pytest.raises(ProviderIncompleteError) as exc_info:
+        agent.run("user company context")
+
+    assert exc_info.value.to_diagnostic()["details"] == {
+        "run_status": "incomplete",
+        "incomplete_reason": "max_completion_tokens",
+    }
+
+
+def test_openai_agent_run_times_out_pending_assistant_run(monkeypatch):
+    from app.agents.openai import agent as agent_module
+
+    pending_run = SimpleNamespace(
+        id="run-1",
+        status="in_progress",
+        last_error=None,
+        incomplete_details=None,
+    )
+    agent, _ = install_fake_assistant_agent(
+        monkeypatch,
+        [pending_run],
+        timeout_seconds=1.0,
+    )
+    monotonic_values = iter([0.0, 1.1])
+    monkeypatch.setattr(agent_module.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(agent_module.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(ProviderTimeoutError) as exc_info:
+        agent.run("user company context")
+
+    diagnostic = exc_info.value.to_diagnostic()
+    assert diagnostic["api_mode"] == "assistants"
+    assert diagnostic["details"] == {"last_status": "in_progress"}
+
+
 def test_factory_passes_role_instructions_when_backend_accepts_them(monkeypatch, tmp_path):
     captured = {}
 
