@@ -1,15 +1,20 @@
 """Role processor that improves raw agent responses."""
 
 from app.agents.openai.client import OpenAIClient
-from app.agents.openai.structured import create_structured_chat_completion
+from app.agents.openai.structured import (
+    ProviderRequest,
+    create_structured_provider_call,
+)
 
-DEFAULT_INSTRUCTIONS = """Analyze and improve this Context Agent response for clarity, structure and usefulness.
+DEFAULT_INSTRUCTIONS = """
+Analyze and improve this Context Agent response for clarity, structure and usefulness.
 
 Preserve the original workflow phase and constraints from the prompt:
 - If the prompt says not to draft a policy, the improved response must not draft a policy.
 - If the prompt is a planning prompt, keep the output as a reviewable plan.
 - If the prompt is a task-execution prompt, keep the output focused on that single task.
-- If the prompt is a handoff artifact, keep it factual and structured for downstream Policy Agent/RAG use.
+- If the prompt is a handoff artifact, keep it factual and structured for
+  downstream Policy Agent/RAG use.
 - Preserve explicit facts, assumptions, missing information, task ids, revision ids, and hashes.
 
 Add compact context tags when useful, using forms such as
@@ -56,18 +61,22 @@ class PromptResponseOptimiser(OpenAIClient):
         GENERATED RESPONSE:
         {agent_response}
         """
-        parsed = create_structured_chat_completion(
+        parsed = create_structured_provider_call(
             chat=self.client.chat,
-            model=self.model,
-            messages=[
-                {"role": "system", "content": self.instructions},
-                {"role": "user", "content": prompt},
-            ],
-            schema_name="context_agent_optimised_response",
-            json_schema=OPTIMISED_RESPONSE_SCHEMA,
-            phase="context_response_optimisation",
-            temperature=0.2,
-            max_tokens=15000,
+            responses=self.client.responses,
+            request=ProviderRequest(
+                model=self.model,
+                api_mode=self.structured_api_mode,
+                messages=[
+                    {"role": "system", "content": self.instructions},
+                    {"role": "user", "content": prompt},
+                ],
+                schema_name="context_agent_optimised_response",
+                json_schema=OPTIMISED_RESPONSE_SCHEMA,
+                phase="context_response_optimisation",
+                temperature=0.2,
+                max_tokens=15000,
+            ),
         )
 
         return parsed["improved_response"].strip()

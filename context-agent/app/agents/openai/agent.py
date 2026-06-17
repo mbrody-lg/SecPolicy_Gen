@@ -9,7 +9,10 @@ from app.agents.base import Agent
 from app.agents.openai.client import OpenAIClient
 from app.agents.openai.roles.optimiser import PromptResponseOptimiser
 from app.agents.openai.roles.proactive import ProactiveGoalCreator
-from app.agents.openai.structured import create_structured_chat_completion
+from app.agents.openai.structured import (
+    ProviderRequest,
+    create_structured_provider_call,
+)
 
 class OpenAIAgent(Agent):
     """Concrete agent that uses OpenAI Assistants and role processors."""
@@ -134,15 +137,20 @@ class OpenAIAgent(Agent):
         )
         refined_prompt = proactive.execute(prompt)
 
-        return create_structured_chat_completion(
+        return create_structured_provider_call(
             chat=self.client.chat,
-            model=self.model,
-            messages=[
-                {"role": "system", "content": self.instructions},
-                {"role": "user", "content": refined_prompt},
-            ],
-            schema_name=schema_name,
-            json_schema=json_schema,
-            temperature=0.2,
-            max_tokens=15000,
+            responses=self.client.responses,
+            request=ProviderRequest(
+                model=self.model,
+                api_mode=self.client.structured_api_mode,
+                messages=[
+                    {"role": "system", "content": self.instructions},
+                    {"role": "user", "content": refined_prompt},
+                ],
+                schema_name=schema_name,
+                json_schema=json_schema,
+                phase=schema_name,
+                temperature=0.2,
+                max_tokens=15000,
+            ),
         )
