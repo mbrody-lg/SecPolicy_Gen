@@ -12,12 +12,14 @@ from app.agents.openai.structured import (
     ProviderCallError,
     ProviderConnectivityError,
     ProviderIncompleteError,
+    ProviderRequest,
     ProviderRateLimitError,
     ProviderRefusalError,
     ProviderSchemaMismatchError,
     ProviderTimeoutError,
     StructuredOutputError,
     create_structured_chat_completion,
+    create_structured_provider_call,
 )
 
 
@@ -51,18 +53,45 @@ class FakeChat:
         self.completions = completions
 
 
+class FakeResponses:
+    def __init__(self, payload=None, *, status="completed", output=None, error=None):
+        self.payloads = (
+            list(payload) if isinstance(payload, list) else [payload or {"answer": "ok"}]
+        )
+        self.status = status
+        self.output = output or []
+        self.error = error
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.error:
+            raise self.error
+        payload = self.payloads[min(len(self.calls) - 1, len(self.payloads) - 1)]
+        return SimpleNamespace(
+            status=self.status,
+            incomplete_details=SimpleNamespace(reason="max_output_tokens"),
+            output_text=json.dumps(payload),
+            output=self.output,
+        )
+
+
 class FakeOpenAI:
     completions = FakeCompletions()
+    responses = FakeResponses()
 
-    def __init__(self, *, base_url, api_key):
+    def __init__(self, *, base_url, api_key, timeout=None):
         self.chat = FakeChat(self.completions)
         self.beta = SimpleNamespace()
+        self.responses = self.__class__.responses
         self.base_url = base_url
         self.api_key = api_key
+        self.timeout = timeout
 
 
-def install_fake_openai(monkeypatch, completions):
+def install_fake_openai(monkeypatch, completions, responses=None):
     FakeOpenAI.completions = completions
+    FakeOpenAI.responses = responses or FakeResponses()
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
     monkeypatch.setenv("OPENAI_API_URL", "https://openai.example.test/v1")
     monkeypatch.setattr(client_module, "OpenAI", FakeOpenAI)
@@ -100,6 +129,108 @@ def test_structured_chat_completion_sends_strict_json_schema():
             "strict": True,
         },
     }
+
+
+def test_provider_request_rejects_retention_and_background_modes():
+    base = {
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "schema_name": "test_schema",
+        "json_schema": {"type": "object"},
+    }
+
+    with pytest.raises(ValueError, match="store=false"):
+        ProviderRequest(**base, store=True)
+
+    with pytest.raises(ValueError, match="background=false"):
+        ProviderRequest(**base, background=True)
+
+
+def test_structured_responses_call_sends_strict_schema_without_retention():
+    responses = FakeResponses({"answer": "ok"})
+
+    result = create_structured_provider_call(
+        responses=responses,
+        request=ProviderRequest(
+            api_mode="responses",
+            model="gpt-test",
+            messages=[
+                {"role": "system", "content": "system instructions"},
+                {"role": "user", "content": "hello"},
+            ],
+            schema_name="test_schema",
+            json_schema={
+                "type": "object",
+                "properties": {"answer": {"type": "string"}},
+                "required": ["answer"],
+                "additionalProperties": False,
+            },
+            max_tokens=500,
+        ),
+    )
+
+    assert result == {"answer": "ok"}
+    call = responses.calls[0]
+    assert call["input"] == [
+        {"role": "system", "content": "system instructions"},
+        {"role": "user", "content": "hello"},
+    ]
+    assert call["store"] is False
+    assert call["background"] is False
+    assert call["max_output_tokens"] == 500
+    assert call["text"] == {
+        "format": {
+            "type": "json_schema",
+            "name": "test_schema",
+            "schema": {
+                "type": "object",
+                "properties": {"answer": {"type": "string"}},
+                "required": ["answer"],
+                "additionalProperties": False,
+            },
+            "strict": True,
+        },
+    }
+
+
+def test_structured_responses_rejects_refusal():
+    refusal = SimpleNamespace(type="refusal", refusal="not allowed")
+    message = SimpleNamespace(type="message", content=[refusal])
+    responses = FakeResponses(output=[message])
+
+    with pytest.raises(ProviderRefusalError) as exc_info:
+        create_structured_provider_call(
+            responses=responses,
+            request=ProviderRequest(
+                api_mode="responses",
+                model="gpt-test",
+                messages=[{"role": "user", "content": "hello"}],
+                schema_name="test_schema",
+                json_schema={"type": "object"},
+            ),
+        )
+
+    assert exc_info.value.to_diagnostic()["api_mode"] == "responses"
+
+
+def test_structured_responses_maps_incomplete_output():
+    responses = FakeResponses(status="incomplete")
+
+    with pytest.raises(ProviderIncompleteError) as exc_info:
+        create_structured_provider_call(
+            responses=responses,
+            request=ProviderRequest(
+                api_mode="responses",
+                model="gpt-test",
+                messages=[{"role": "user", "content": "hello"}],
+                schema_name="test_schema",
+                json_schema={"type": "object"},
+            ),
+        )
+
+    diagnostic = exc_info.value.to_diagnostic()
+    assert diagnostic["api_mode"] == "responses"
+    assert diagnostic["details"] == {"reason": "max_output_tokens"}
 
 
 def test_structured_chat_completion_rejects_refusal():
@@ -306,6 +437,28 @@ def test_proactive_goal_creator_uses_configured_model_instructions_and_schema(mo
     assert "improved_prompt" in call["response_format"]["json_schema"]["schema"]["required"]
 
 
+def test_proactive_goal_creator_uses_configured_responses_mode(monkeypatch):
+    completions = FakeCompletions({"unexpected": "chat path"})
+    responses = FakeResponses({
+        "improved_prompt": "Improved via responses",
+        "workflow_phase": "PLANNING",
+        "preserved_constraints": ["Do not draft a policy"],
+    })
+    install_fake_openai(monkeypatch, completions, responses)
+    monkeypatch.setenv("OPENAI_STRUCTURED_API_MODE", "responses")
+
+    role = ProactiveGoalCreator(
+        model="gpt-configured",
+        instructions="CUSTOM PROACTIVE INSTRUCTIONS",
+    )
+    result = role.execute("Phase: PLANNING\nInput")
+
+    assert result == "Improved via responses"
+    assert completions.calls == []
+    assert responses.calls[0]["text"]["format"]["name"] == "context_agent_proactive_prompt"
+    assert responses.calls[0]["store"] is False
+
+
 def test_response_optimiser_uses_configured_model_instructions_and_schema(monkeypatch):
     completions = FakeCompletions({
         "improved_response": "Structured final context",
@@ -330,6 +483,30 @@ def test_response_optimiser_uses_configured_model_instructions_and_schema(monkey
     }
     assert call["response_format"]["json_schema"]["name"] == "context_agent_optimised_response"
     assert "improved_response" in call["response_format"]["json_schema"]["schema"]["required"]
+
+
+def test_response_optimiser_uses_configured_responses_mode(monkeypatch):
+    completions = FakeCompletions({"unexpected": "chat path"})
+    responses = FakeResponses({
+        "improved_response": "Optimised via responses",
+        "workflow_phase": "POLICY_HANDOFF",
+        "preserved_constraints": ["Preserve facts"],
+        "context_tags": ["[context:sector]Healthcare"],
+    })
+    install_fake_openai(monkeypatch, completions, responses)
+    monkeypatch.setenv("OPENAI_STRUCTURED_API_MODE", "responses")
+
+    role = PromptResponseOptimiser(
+        model="gpt-configured",
+        instructions="CUSTOM OPTIMISER INSTRUCTIONS",
+    )
+    result = role.execute("Original prompt", "Raw response")
+
+    assert result == "Optimised via responses"
+    assert completions.calls == []
+    assert responses.calls[0]["text"]["format"]["name"] == (
+        "context_agent_optimised_response"
+    )
 
 
 def test_openai_agent_run_structured_uses_assistant_instructions_and_requested_schema(monkeypatch):

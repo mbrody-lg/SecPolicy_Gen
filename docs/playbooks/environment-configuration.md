@@ -49,6 +49,8 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | `QUESTIONS_CONFIG_PATH` | `required` | Defaults to `app/config/context_questions.yaml` on host; Compose passes container path | Question/prompt config loading | Path should be explicit in Docker |
 | `OPENAI_API_KEY` | `secret` | No real example value | OpenAI client | Required only for non-mock provider execution |
 | `OPENAI_API_URL` | `runtime knob` | Safe provider default may be documented | OpenAI client | Compose should pass explicitly when used |
+| `OPENAI_STRUCTURED_API_MODE` | `runtime knob` | Safe default `chat_completions` | OpenAI structured provider adapter | Restrict to `chat_completions` or `responses`; default must preserve current behavior |
+| `OPENAI_PROVIDER_TIMEOUT_SECONDS` | `runtime knob` | Safe default `180` | OpenAI SDK client | Parse as positive numeric value; errors must not expose provider payloads |
 | `POLICY_AGENT_TIMEOUT_SECONDS` | `runtime knob` | Safe default `30` | Policy handoff HTTP calls | Parse as positive numeric value |
 | `VALIDATOR_AGENT_TIMEOUT_SECONDS` | `runtime knob` | Safe default `30` | Validator handoff HTTP calls | Parse as positive numeric value |
 | `PIPELINE_JOB_STALE_AFTER_SECONDS` | `runtime knob` | Safe default `1800` | Async policy pipeline job recovery | Parse as positive numeric value |
