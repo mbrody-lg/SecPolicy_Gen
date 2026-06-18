@@ -74,3 +74,10 @@ def test_final_context_schema_covers_policy_handoff_fields():
         "risk_tolerance",
         "policy_objective",
     }
+
+
+def test_final_context_schema_is_not_policy_agent_handoff_contract():
+    schema = context_phase_output_schema("final_context")
+
+    assert "policy_handoff" in schema["properties"]
+    assert "structured_findings" not in schema["properties"]["policy_handoff"]["properties"]
