@@ -2426,6 +2426,13 @@ def test_context_detail_workflow_tabs_render_required_content(client, monkeypatc
             b"Final context",
             b"Synthesize final context",
         ]),
+        ("task_needs_context", [
+            b"Context Agent has 1 pending question",
+            b"Confirm the regulated operating country.",
+            b"Required to complete context-plan task: Company profile.",
+            b"needs_more_context",
+            b"Update context",
+        ]),
         ("final_needs_improvement", [
             b"Final context",
             b"Needs improvement",

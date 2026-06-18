@@ -151,6 +151,45 @@ def context_document(context_id, state):
             "context_task_results": completed_task_results(),
         })
         return doc
+    if state == "task_needs_context":
+        doc.update({
+            "status": "context_plan_needs_input",
+            "context_building": {
+                "version": "1.0",
+                "status": "needs_information",
+                "missing_information": [],
+                "questions": [
+                    {
+                        "id": "context_task_company_profile_1_confirm_country",
+                        "field_path": "context_task_results.company_profile.missing_details.1",
+                        "answer_field": "need",
+                        "question": "Confirm the regulated operating country.",
+                        "rationale": "Required to complete context-plan task: Company profile.",
+                        "status": "pending",
+                        "answer": None,
+                        "source": "context_task_result.missing_details",
+                        "task_id": "company_profile",
+                    }
+                ],
+            },
+            "context_intelligence_plan": approved_plan(),
+            "context_task_results": {
+                "version": "1.0",
+                "status": "needs_more_context",
+                "plan_revision_id": "plan-rev-1",
+                "context_snapshot_hash": "hash-1",
+                "tasks": [
+                    {
+                        "task_id": "company_profile",
+                        "title": "Company profile",
+                        "status": "needs_more_context",
+                        "result": "The company profile needs another jurisdiction detail.",
+                        "missing_details": ["Confirm the regulated operating country."],
+                    }
+                ],
+            },
+        })
+        return doc
     if state == "final_needs_improvement":
         doc.update({
             "status": "final_context_needs_improvement",
