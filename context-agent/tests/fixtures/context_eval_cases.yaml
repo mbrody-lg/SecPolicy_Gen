@@ -1,0 +1,197 @@
+cases:
+  - id: healthcare_complete
+    family: healthcare
+    description: Complete healthcare context with patient data and ISO hints.
+    answers:
+      country: Spain
+      region: Catalonia
+      sector: Private healthcare
+      company_activity: Outpatient clinic managing patient appointments and clinical records.
+      important_assets: Medical records, appointment system, employee files
+      critical_assets: Patient data, clinical records
+      data_categories: health data, employee data, personal data
+      third_party_dependencies: External laboratory provider
+      cloud_services: Cloud appointment SaaS
+      current_security_operations: Backups, endpoint protection, access reviews
+      methodology: ISO 27001, ISO 27799
+      regulatory_hints: GDPR
+      generic: Specific
+      policy_type: Access control policy
+      need: Protect patient data and clinical systems.
+    expected:
+      required_coverage: 1.0
+      max_missing: 0
+      confidence_min: medium
+      data_categories: [health_data, employee_data, personal_data]
+      collection_families: [legal_norms, sector_norms, security_frameworks, risk_methodologies, implementation_guides]
+
+  - id: ecommerce_complete
+    family: ecommerce
+    description: E-commerce context with payment and customer data.
+    answers:
+      country: France
+      region: EU
+      sector: E-commerce
+      company_activity: Online retail store with customer database and web platform.
+      important_assets: Web shop, customer database, order system
+      critical_assets: Customer database, payment checkout
+      data_categories: personal data, payment data
+      third_party_dependencies: Payment provider, hosting provider, plugins
+      cloud_services: Cloud hosting
+      current_security_operations: MFA, backups, vulnerability scanning
+      methodology: CIS Controls
+      regulatory_hints: GDPR
+      generic: Specific
+      policy_type: Supplier security policy
+      need: Reduce payment and third-party platform risk.
+    expected:
+      required_coverage: 1.0
+      max_missing: 0
+      confidence_min: medium
+      data_categories: [personal_data, commerce_data]
+      collection_families: [legal_norms, sector_norms, security_frameworks, risk_methodologies, implementation_guides]
+
+  - id: legal_services_complete
+    family: legal
+    description: Legal services context with confidential client documentation.
+    answers:
+      country: Spain
+      region: EU
+      sector: Legal services
+      company_activity: Law firm managing confidential contracts and litigation files.
+      important_assets: Client files, contract repository, email archive
+      critical_assets: Client files, litigation documentation
+      data_categories: personal data, employee records
+      third_party_dependencies: Document management SaaS provider
+      cloud_services: SaaS document platform
+      current_security_operations: Access reviews, backups
+      methodology: ISO 27001
+      regulatory_hints: GDPR
+      generic: Specific
+      policy_type: Information classification policy
+      need: Protect confidential client documentation.
+    expected:
+      required_coverage: 1.0
+      max_missing: 0
+      confidence_min: medium
+      data_categories: [personal_data, employee_data]
+      collection_families: [legal_norms, sector_norms, security_frameworks, risk_methodologies, implementation_guides]
+
+  - id: industrial_ot_complete
+    family: industrial_ot
+    description: Industrial context with operational technology assets.
+    answers:
+      country: Germany
+      region: EU
+      sector: Manufacturing
+      company_activity: Industrial plant operating production lines and warehouse systems.
+      important_assets: ERP, production line controllers, maintenance workstations
+      critical_assets: Production line controllers, ERP
+      data_categories: employee data, supplier data
+      third_party_dependencies: Maintenance provider, hosting provider
+      cloud_services: Cloud ERP
+      current_security_operations: Network segmentation, backups
+      methodology: ISO 27001
+      regulatory_hints: Client security requirements
+      generic: Specific
+      policy_type: OT access policy
+      need: Reduce production disruption and supplier access risk.
+    expected:
+      required_coverage: 1.0
+      max_missing: 0
+      confidence_min: medium
+      data_categories: [employee_data]
+      collection_families: [legal_norms, sector_norms, security_frameworks, risk_methodologies, implementation_guides]
+
+  - id: saas_complete
+    family: saas
+    description: SaaS provider context with customer tenant data.
+    answers:
+      country: Ireland
+      region: EU
+      sector: SaaS
+      company_activity: B2B SaaS platform processing customer database records.
+      important_assets: Tenant database, API, source code repository
+      critical_assets: Tenant database, production API
+      data_categories: personal data, customer database
+      third_party_dependencies: Cloud provider, monitoring SaaS provider
+      cloud_services: Cloud hosting, SaaS monitoring
+      current_security_operations: MFA, CI checks, backups
+      methodology: ISO 27001
+      regulatory_hints: GDPR
+      generic: Specific
+      policy_type: Secure development policy
+      need: Protect customer tenant data and production APIs.
+    expected:
+      required_coverage: 1.0
+      max_missing: 0
+      confidence_min: medium
+      data_categories: [personal_data]
+      collection_families: [legal_norms, sector_norms, security_frameworks, risk_methodologies, implementation_guides]
+
+  - id: incomplete_missing_required_fields
+    family: incomplete
+    description: Incomplete intake should preserve missing-information precision.
+    answers:
+      country: ""
+      sector: ""
+      company_activity: Small company with unclear needs.
+      important_assets: Shared drive
+      critical_assets: ""
+      need: ""
+      generic: Specific
+    expected:
+      required_coverage: 0.0
+      min_missing: 4
+      confidence_max: very_low
+      missing_information:
+        - profile.sector
+        - profile.operating_countries
+        - information_assets.critical_assets
+        - policy_intent.need
+      collection_families: [legal_norms]
+
+  - id: ambiguous_context
+    family: ambiguous
+    description: Ambiguous context should not overstate completeness.
+    answers:
+      country: Portugal
+      sector: ""
+      company_activity: We need a security policy for a mixed business unit.
+      important_assets: Documents
+      critical_assets: Internal documents
+      need: Improve security governance.
+      generic: Generic
+    expected:
+      required_coverage: 0.75
+      min_missing: 1
+      confidence_max: low
+      missing_information:
+        - profile.sector
+      collection_families: [legal_norms, risk_methodologies]
+
+  - id: multilingual_context
+    family: multilingual
+    description: Spanish/Catalan wording should still infer common regulated data.
+    answers:
+      country: Spain
+      region: Catalunya
+      sector: Comerç electrònic
+      company_activity: Botiga online que tracta datos personales, pagos i dades de clients.
+      important_assets: Plataforma web, base de dades de clients
+      critical_assets: Base de dades de clients, sistema de pago
+      third_party_dependencies: Proveedor de pago, hosting provider
+      cloud_services: Cloud hosting
+      current_security_operations: MFA i còpies de seguretat
+      methodology: ISO 27001
+      regulatory_hints: RGPD
+      generic: Specific
+      policy_type: Política de control d'accés
+      need: Protegir datos personales i pagos de clients.
+      language: Catalan
+    expected:
+      required_coverage: 1.0
+      max_missing: 0
+      confidence_min: medium
+      data_categories: [personal_data, commerce_data]
+      collection_families: [legal_norms, sector_norms, security_frameworks, risk_methodologies, implementation_guides]
