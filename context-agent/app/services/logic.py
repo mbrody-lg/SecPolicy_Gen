@@ -627,7 +627,13 @@ def build_context_building_state(
             questions.append(question)
 
     for field_path, question in existing_questions.items():
-        if field_path not in missing_information and question.get("status") == "answered":
+        if (
+            field_path not in missing_information
+            and (
+                question.get("status") == "answered"
+                or str(question.get("source") or "").startswith("context_task_result.")
+            )
+        ):
             questions.append(question)
 
     status = "approved" if bypassed else "sufficient"
@@ -660,15 +666,27 @@ def apply_context_building_answers(context: dict, submitted_answers: dict[str, s
             answered_questions.append(question)
             continue
         answer_field = question.get("answer_field")
-        if answer_field in CONTEXT_ANSWER_FIELDS:
-            answer_updates[answer_field] = answer
-            answered = dict(question)
-            answered["status"] = "answered"
-            answered["answer"] = answer
-            answered["answered_at"] = datetime.now(timezone.utc).isoformat()
-            answered_questions.append(answered)
-        else:
+        if answer_field not in CONTEXT_ANSWER_FIELDS:
             answered_questions.append(question)
+            continue
+
+        answered = dict(question)
+        answered["status"] = "answered"
+        answered["answer"] = answer
+        answered["answered_at"] = datetime.now(timezone.utc).isoformat()
+        answered_questions.append(answered)
+
+        if str(question.get("source") or "").startswith("context_task_result."):
+            current_need = str(
+                answer_updates.get(answer_field) or context.get(answer_field, "") or ""
+            ).strip()
+            question_text = str(question.get("question") or "Additional context").strip()
+            task_answer = f"{question_text}\n{answer}"
+            answer_updates[answer_field] = "\n\n".join(
+                part for part in (current_need, task_answer) if part
+            )
+        else:
+            answer_updates[answer_field] = answer
 
     updated_context = {**context, **answer_updates}
     security_context = build_context_security_context(updated_context)
@@ -762,6 +780,93 @@ def _context_building_question(field_path: str, existing: dict | None = None) ->
     if question.get("answer") and question.get("status") == "pending":
         question["status"] = "answered"
     return question
+
+
+def _safe_context_question_fragment(value: str) -> str:
+    fragment = "".join(
+        character.lower() if character.isalnum() else "_"
+        for character in str(value or "")
+    ).strip("_")
+    return fragment[:80] or "missing_detail"
+
+
+def _context_task_missing_detail_questions(
+    task_result: dict,
+    existing: dict | None = None,
+) -> list[dict]:
+    """Build context-building questions from task execution missing details."""
+    missing_details = _string_list(task_result.get("missing_details"))
+    if not missing_details:
+        return []
+
+    existing_questions = {}
+    if isinstance(existing, dict):
+        existing_questions = {
+            str(question.get("id") or ""): dict(question)
+            for question in existing.get("questions", [])
+            if isinstance(question, dict) and question.get("id")
+        }
+
+    task_id = str(task_result.get("task_id") or "context_task")
+    title = str(task_result.get("title") or task_id).strip()
+    questions = []
+    for index, detail in enumerate(missing_details, start=1):
+        detail_fragment = _safe_context_question_fragment(detail)
+        question_id = f"context_task_{_safe_context_question_fragment(task_id)}_{index}_{detail_fragment}"
+        question = {
+            "id": question_id,
+            "field_path": f"context_task_results.{task_id}.missing_details.{index}",
+            "answer_field": "need",
+            "question": detail,
+            "rationale": f"Required to complete context-plan task: {title}.",
+            "status": "pending",
+            "answer": None,
+            "source": "context_task_result.missing_details",
+            "task_id": task_id,
+        }
+        existing_question = existing_questions.get(question_id)
+        if existing_question:
+            question.update({
+                key: existing_question[key]
+                for key in ("status", "answer", "answered_at", "deferred_at", "deferred_reason")
+                if key in existing_question
+            })
+        questions.append(question)
+    return questions
+
+
+def add_context_task_missing_questions(context: dict, task_result: dict) -> dict:
+    """Add task-discovered missing-details questions to Context Building."""
+    context_building = context.get("context_building") or build_context_building_state(context)
+    existing_questions = context_building.get("questions", [])
+    if not isinstance(existing_questions, list):
+        existing_questions = []
+
+    new_questions = _context_task_missing_detail_questions(
+        task_result,
+        existing={**context_building, "questions": existing_questions},
+    )
+    if not new_questions:
+        return {
+            **context_building,
+            "status": "needs_information",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    questions_by_id = {
+        str(question.get("id") or ""): dict(question)
+        for question in existing_questions
+        if isinstance(question, dict) and question.get("id")
+    }
+    for question in new_questions:
+        questions_by_id[str(question["id"])] = question
+
+    return {
+        **context_building,
+        "status": "needs_information",
+        "questions": list(questions_by_id.values()),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 def _context_tasks_prompt_summary(plan: dict) -> str:
@@ -1187,12 +1292,14 @@ def execute_context_plan(context_id: str, on_task_progress=None) -> dict:
         if task_result["status"] == "needs_more_context":
             task_results["status"] = "needs_more_context"
             task_results["completed_at"] = datetime.now(timezone.utc).isoformat()
+            context_building = add_context_task_missing_questions(context, task_result)
             mongo.db.contexts.update_one(
                 {"_id": context_obj_id},
                 {
                     "$set": {
                         "status": "context_plan_needs_input",
                         "context_task_results": task_results,
+                        "context_building": context_building,
                     }
                 },
             )

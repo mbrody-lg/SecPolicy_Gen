@@ -1011,7 +1011,80 @@ def test_execute_context_plan_blocks_when_task_needs_more_context(monkeypatch):
     assert context["status"] == "context_plan_needs_input"
     assert context["context_task_results"]["status"] == "needs_more_context"
     assert context["context_task_results"]["tasks"][0]["status"] == "needs_more_context"
+    assert context["context_building"]["status"] == "needs_information"
+    task_question = next(
+        question
+        for question in context["context_building"]["questions"]
+        if question.get("source") == "context_task_result.missing_details"
+    )
+    assert task_question["question"] == (
+        "Confirm the regulated operating country."
+    )
+    assert task_question["task_id"] == "company_profile"
     assert progress_events[-1]["event_type"] == "context_task_needs_more_context"
+
+
+def test_context_task_missing_question_answer_updates_context_need():
+    context = {
+        "country": "Spain",
+        "sector": "Healthcare",
+        "company_activity": "Private clinic.",
+        "important_assets": "Patient records.",
+        "critical_assets": "Patient records",
+        "data_categories": "Health and employee data.",
+        "current_security_operations": "Basic endpoint protection.",
+        "generic": "Specific",
+        "need": "Build a security plan",
+        "context_building": {
+            "version": "1.0",
+            "status": "needs_information",
+            "bypassed": False,
+            "missing_information": [],
+            "questions": [
+                {
+                    "id": "context_task_company_profile_1_confirm_country",
+                    "field_path": "context_task_results.company_profile.missing_details.1",
+                    "answer_field": "need",
+                    "question": "Confirm the regulated operating country.",
+                    "rationale": "Required to complete context-plan task: Company profile.",
+                    "status": "pending",
+                    "answer": None,
+                    "source": "context_task_result.missing_details",
+                    "task_id": "company_profile",
+                },
+                {
+                    "id": "context_task_company_profile_2_confirm_owner",
+                    "field_path": "context_task_results.company_profile.missing_details.2",
+                    "answer_field": "need",
+                    "question": "Confirm the security owner.",
+                    "rationale": "Required to complete context-plan task: Company profile.",
+                    "status": "pending",
+                    "answer": None,
+                    "source": "context_task_result.missing_details",
+                    "task_id": "company_profile",
+                }
+            ],
+        },
+    }
+
+    result = logic.apply_context_building_answers(
+        context,
+        {
+            "context_task_company_profile_1_confirm_country": "Spain is the regulated country.",
+            "context_task_company_profile_2_confirm_owner": "The CIO owns security.",
+        },
+    )
+
+    assert result["answer_updates"]["need"] == (
+        "Build a security plan\n\n"
+        "Confirm the regulated operating country.\n"
+        "Spain is the regulated country.\n\n"
+        "Confirm the security owner.\n"
+        "The CIO owns security."
+    )
+    assert result["context_building"]["questions"][0]["status"] == "answered"
+    assert result["context_building"]["questions"][1]["status"] == "answered"
+    assert result["status"] == "awaiting_task_validation"
 
 
 def _completed_context_task_results():
