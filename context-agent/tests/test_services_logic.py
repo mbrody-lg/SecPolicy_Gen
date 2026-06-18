@@ -105,14 +105,11 @@ def test_get_context_and_prompt_prefers_context_refined_prompt(monkeypatch):
 
     monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
 
-    payload = logic.get_context_and_prompt(str(context_id))
+    with pytest.raises(logic.PipelineStepError) as exc_info:
+        logic.get_context_and_prompt(str(context_id))
 
-    assert payload["refined_prompt"] == "canonical refined prompt"
-    assert payload["language"] == "es"
-    assert payload["model_version"] == "1.2.3"
-    assert payload["business_context"]["country"] == "Spain"
-    assert payload["business_context"]["sector"] == "Healthcare"
-    assert payload["business_context"]["critical_assets"] == ["Patient data"]
+    assert exc_info.value.error_code == "policy_handoff_invalid"
+    assert exc_info.value.details["handoff_error_code"] == "final_context_version_unsupported"
 
 
 def test_get_context_and_prompt_falls_back_to_legacy_interaction(monkeypatch):
@@ -130,12 +127,11 @@ def test_get_context_and_prompt_falls_back_to_legacy_interaction(monkeypatch):
 
     monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
 
-    payload = logic.get_context_and_prompt(str(context_id))
+    with pytest.raises(logic.PipelineStepError) as exc_info:
+        logic.get_context_and_prompt(str(context_id))
 
-    assert payload["refined_prompt"] == "legacy refined prompt"
-    assert payload["language"] == "en"
-    assert payload["model_version"] == "0.2.0"
-    assert payload["business_context"]["country"] is None
+    assert exc_info.value.error_code == "policy_handoff_invalid"
+    assert exc_info.value.details["handoff_error_code"] == "final_context_version_unsupported"
 
 
 def test_get_context_and_prompt_normalizes_numeric_model_version(monkeypatch):
@@ -155,9 +151,11 @@ def test_get_context_and_prompt_normalizes_numeric_model_version(monkeypatch):
 
     monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
 
-    payload = logic.get_context_and_prompt(str(context_id))
+    with pytest.raises(logic.PipelineStepError) as exc_info:
+        logic.get_context_and_prompt(str(context_id))
 
-    assert payload["model_version"] == "1"
+    assert exc_info.value.error_code == "policy_handoff_invalid"
+    assert exc_info.value.details["handoff_error_code"] == "final_context_version_unsupported"
 
 
 def test_get_health_status_returns_static_liveness_payload():
@@ -940,6 +938,82 @@ def test_execute_context_plan_preserves_previous_completed_task_results_on_failu
     assert context["final_context"] == {"status": "completed"}
 
 
+def test_execute_context_plan_blocks_when_task_needs_more_context(monkeypatch):
+    context_id = ObjectId()
+    plan = logic.approve_context_intelligence_plan({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "need": "Build a security plan",
+        "context_intelligence_plan": logic.build_context_intelligence_plan({
+            "country": "Spain",
+            "sector": "Healthcare",
+            "critical_assets": "Patient records",
+            "need": "Build a security plan",
+        }),
+    })
+    plan["tasks"] = plan["tasks"][:1]
+    plan["revisions"][0]["tasks"] = plan["revisions"][0]["tasks"][:1]
+    fake_db = FakeDB(
+        contexts=[
+            {
+                "_id": context_id,
+                "country": "Spain",
+                "sector": "Healthcare",
+                "critical_assets": "Patient records",
+                "need": "Build a security plan",
+                "security_context": logic.build_context_security_context({
+                    "country": "Spain",
+                    "sector": "Healthcare",
+                    "critical_assets": "Patient records",
+                    "need": "Build a security plan",
+                }),
+                "context_intelligence_plan": plan,
+            }
+        ]
+    )
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+    structured_response = {
+        "task_id": "company_profile",
+        "status": "needs_more_context",
+        "findings": ["Company profile is not detailed enough."],
+        "assumptions": [],
+        "missing_details": ["Confirm the regulated operating country."],
+        "risks": [],
+        "policy_implications": [],
+        "rag_retrieval_hints": {
+            "collection_families": ["controls"],
+            "jurisdictions": ["Spain"],
+            "sectors": ["Healthcare"],
+            "methodologies": ["ISO 27001"],
+            "query_terms": ["healthcare operating country"],
+        },
+    }
+    monkeypatch.setattr(
+        logic,
+        "run_structured_with_agent",
+        lambda *args, **kwargs: structured_response,
+    )
+    progress_events = []
+
+    result = logic.execute_context_plan(
+        str(context_id),
+        on_task_progress=lambda progress: progress_events.append(progress),
+    )
+
+    context = fake_db.contexts.docs[0]
+    assert result["success"] is False
+    assert result["error_code"] == "context_task_needs_more_context"
+    assert result["details"] == {
+        "task_id": "company_profile",
+        "missing_details": ["Confirm the regulated operating country."],
+    }
+    assert context["status"] == "context_plan_needs_input"
+    assert context["context_task_results"]["status"] == "needs_more_context"
+    assert context["context_task_results"]["tasks"][0]["status"] == "needs_more_context"
+    assert progress_events[-1]["event_type"] == "context_task_needs_more_context"
+
+
 def _completed_context_task_results():
     return {
         "version": "1.0",
@@ -1023,6 +1097,41 @@ def test_synthesize_final_context_requires_completed_task_results(monkeypatch):
     assert result["error_code"] == "context_task_results_not_completed"
     assert "final_context" not in fake_db.contexts.docs[0]
     assert "refined_prompt" not in fake_db.contexts.docs[0]
+
+
+def test_synthesize_final_context_rejects_incomplete_task_status(monkeypatch):
+    context_id = ObjectId()
+    task_results = _completed_context_task_results()
+    task_results["tasks"][0]["status"] = "needs_more_context"
+    fake_db = FakeDB(
+        contexts=[
+            {
+                "_id": context_id,
+                "country": "Spain",
+                "sector": "Healthcare",
+                "critical_assets": "Patient records",
+                "data_categories": "health_data",
+                "need": "Build a security plan",
+                "security_context": logic.build_context_security_context({
+                    "country": "Spain",
+                    "sector": "Healthcare",
+                    "critical_assets": "Patient records",
+                    "data_categories": "health_data",
+                    "need": "Build a security plan",
+                }),
+                "context_intelligence_plan": _approved_context_plan(),
+                "context_task_results": task_results,
+            }
+        ],
+        interactions=[],
+    )
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    result = logic.synthesize_final_context(str(context_id))
+
+    assert result["success"] is False
+    assert result["error_code"] == "context_task_results_not_completed"
+    assert "final_context" not in fake_db.contexts.docs[0]
 
 
 def test_synthesize_final_context_persists_final_context_and_refined_prompt(monkeypatch):
@@ -1174,6 +1283,11 @@ def test_get_context_and_prompt_includes_structured_policy_handoff(monkeypatch):
 
     handoff = payload["policy_handoff_context"]
     assert payload["business_context"]["sector"] == "Healthcare"
+    assert handoff["version"] == "1.0"
+    assert handoff["contract"] == "context_agent.policy_handoff"
+    assert handoff["source"] == "context-agent"
+    assert handoff["final_context_version"] == "1.0"
+    assert handoff["context_ready_for_policy"] is True
     assert handoff["business_context"]["sector"] == "Healthcare"
     assert handoff["plan_revision_id"] == "plan-rev-1"
     assert handoff["structured_findings"][0]["findings"] == [
@@ -1187,6 +1301,54 @@ def test_get_context_and_prompt_includes_structured_policy_handoff(monkeypatch):
     assert "controls" in handoff["retrieval_hints"]["collection_families"]
     assert "health_data" in handoff["retrieval_hints"]["data_types"]
     assert "healthcare access review" in handoff["retrieval_hints"]["query_terms"]
+
+
+def test_get_context_and_prompt_rejects_invalid_policy_handoff(monkeypatch):
+    context_id = ObjectId()
+    security_context = logic.build_context_security_context({
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "data_categories": "health_data",
+        "methodology": "ISO 27001",
+        "need": "Build a security plan",
+    })
+    context = {
+        "_id": context_id,
+        "status": "context_ready_for_policy",
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "data_categories": "health_data",
+        "methodology": "ISO 27001",
+        "need": "Build a security plan",
+        "language": "en",
+        "version": "1.0",
+        "security_context": security_context,
+        "context_intelligence_plan": _approved_context_plan(),
+        "context_task_results": _completed_structured_context_task_results(),
+    }
+    final_context = logic.build_final_context(
+        context,
+        security_context=security_context,
+        plan_revision=logic.context_plan_revision(context["context_intelligence_plan"]),
+    )
+    final_context["sections"]["task_findings"]["items"][0]["status"] = "failed"
+    context["final_context"] = final_context
+    context["refined_prompt"] = logic.render_final_context_prompt(final_context)
+    fake_db = FakeDB(contexts=[context], interactions=[])
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    with pytest.raises(logic.PipelineStepError) as exc_info:
+        logic.get_context_and_prompt(str(context_id))
+
+    assert exc_info.value.error_code == "policy_handoff_invalid"
+    assert exc_info.value.error_type == "contract_error"
+    assert exc_info.value.details == {
+        "context_id": str(context_id),
+        "handoff_error_code": "structured_finding_not_completed",
+        "field": "structured_findings.0.status",
+    }
 
 
 def test_synthesize_final_context_rejects_missing_security_context_information(monkeypatch):
@@ -1915,9 +2077,10 @@ def test_get_context_and_prompt_uses_request_correlation_id(monkeypatch, app):
 
     with app.test_request_context("/", headers={"X-Correlation-ID": "corr-request"}):
         app.preprocess_request()
-        payload = logic.get_context_and_prompt(str(context_id))
+        with pytest.raises(logic.PipelineStepError) as exc_info:
+            logic.get_context_and_prompt(str(context_id))
 
-    assert payload["correlation_id"] == "corr-request"
+    assert exc_info.value.correlation_id == "corr-request"
 
 
 def test_call_policy_agent_prefers_request_correlation_id_over_payload(app, monkeypatch):

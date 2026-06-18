@@ -139,6 +139,7 @@ CONTEXT_INTELLIGENCE_PLAN_VERSION = "1.0"
 CONTEXT_BUILDING_VERSION = "1.0"
 CONTEXT_TASK_RESULTS_VERSION = "1.0"
 FINAL_CONTEXT_VERSION = "1.0"
+POLICY_HANDOFF_CONTEXT_VERSION = "1.0"
 CONTEXT_BUILDING_QUESTION_MAP = {
     "profile.sector": {
         "answer_field": "sector",
@@ -1140,23 +1141,28 @@ def execute_context_plan(context_id: str, on_task_progress=None) -> dict:
             {"$set": {"context_task_results": task_results}},
         )
         if on_task_progress:
+            progress_event_type = "context_task_completed"
+            if task_result["status"] == "failed":
+                progress_event_type = "context_task_failed"
+            elif task_result["status"] == "needs_more_context":
+                progress_event_type = "context_task_needs_more_context"
+            progress_message = f"Completed {task_result.get('title') or task_result['task_id']}."
+            if task_result["status"] == "failed":
+                progress_message = f"Failed {task_result.get('title') or task_result['task_id']}."
+            elif task_result["status"] == "needs_more_context":
+                progress_message = (
+                    f"Needs more context for "
+                    f"{task_result.get('title') or task_result['task_id']}."
+                )
             on_task_progress({
-                "event_type": (
-                    "context_task_failed"
-                    if task_result["status"] == "failed"
-                    else "context_task_completed"
-                ),
+                "event_type": progress_event_type,
                 "stage": "context_plan_execution",
                 "current": len(completed_tasks),
                 "total": total_tasks,
                 "current_task_id": task_result["task_id"],
                 "current_task_title": task_result.get("title") or task_result["task_id"],
                 "completed_task_ids": [item["task_id"] for item in completed_tasks],
-                "last_message": (
-                    f"Failed {task_result.get('title') or task_result['task_id']}."
-                    if task_result["status"] == "failed"
-                    else f"Completed {task_result.get('title') or task_result['task_id']}."
-                ),
+                "last_message": progress_message,
             })
         if task_result["status"] == "failed":
             task_results["status"] = "failed"
@@ -1177,6 +1183,27 @@ def execute_context_plan(context_id: str, on_task_progress=None) -> dict:
                 task_result["error"]["error_code"],
                 task_result["error"]["safe_message"],
                 details={"task_id": task_result["task_id"]},
+            )
+        if task_result["status"] == "needs_more_context":
+            task_results["status"] = "needs_more_context"
+            task_results["completed_at"] = datetime.now(timezone.utc).isoformat()
+            mongo.db.contexts.update_one(
+                {"_id": context_obj_id},
+                {
+                    "$set": {
+                        "status": "context_plan_needs_input",
+                        "context_task_results": task_results,
+                    }
+                },
+            )
+            return _context_plan_execution_error(
+                "context_task_needs_more_context",
+                "Context plan task needs more context before final synthesis.",
+                status_code=409,
+                details={
+                    "task_id": task_result["task_id"],
+                    "missing_details": task_result.get("missing_details", []),
+                },
             )
 
     completed_at = datetime.now(timezone.utc).isoformat()
@@ -1228,13 +1255,36 @@ def _execute_context_plan_task(context: dict, task: dict, plan_revision: dict) -
         )
         result = _context_task_result_text(structured_result)
         completed_at = datetime.now(timezone.utc).isoformat()
-        return {
+        status = str(structured_result.get("status") or "completed").strip()
+        if status not in {"completed", "needs_more_context", "failed"}:
+            status = "failed"
+        response = {
             **base_result,
-            "status": "completed",
+            "status": status,
             "result": str(result or "").strip(),
             "structured_result": structured_result,
             "completed_at": completed_at,
         }
+        response["findings"] = _string_list(structured_result.get("findings"))
+        response["assumptions"] = _string_list(structured_result.get("assumptions"))
+        response["missing_details"] = _string_list(structured_result.get("missing_details"))
+        response["risks"] = _string_list(structured_result.get("risks"))
+        response["policy_implications"] = _string_list(
+            structured_result.get("policy_implications")
+        )
+        response["rag_retrieval_hints"] = (
+            structured_result.get("rag_retrieval_hints")
+            if isinstance(structured_result.get("rag_retrieval_hints"), dict)
+            else {}
+        )
+        if status == "failed":
+            response["error"] = {
+                "error_type": "provider_result_error",
+                "error_code": "context_task_result_failed",
+                "safe_message": "Context plan task returned a failed result.",
+                "status_code": 502,
+            }
+        return response
     except ProviderCallError as error:
         completed_at = datetime.now(timezone.utc).isoformat()
         return {
@@ -1290,6 +1340,17 @@ def synthesize_final_context(context_id: str) -> dict:
         return _final_context_error(
             "context_task_results_not_completed",
             "Execute the approved context plan before final context synthesis.",
+            status_code=409,
+        )
+    incomplete_tasks = [
+        task
+        for task in task_results.get("tasks", [])
+        if isinstance(task, dict) and task.get("status") != "completed"
+    ]
+    if incomplete_tasks:
+        return _final_context_error(
+            "context_task_results_not_completed",
+            "All context plan tasks must be completed before final context synthesis.",
             status_code=409,
         )
     plan = context.get("context_intelligence_plan")
@@ -1891,10 +1952,13 @@ def policy_handoff_context_from_context_record(context: dict) -> dict:
         if isinstance(item, dict)
     ]
     return {
-        "version": FINAL_CONTEXT_VERSION,
+        "version": POLICY_HANDOFF_CONTEXT_VERSION,
         "source": "context-agent",
+        "contract": "context_agent.policy_handoff",
         "security_context_version": security_context.get("version"),
+        "final_context_version": final_context.get("version"),
         "final_context_status": final_context.get("status"),
+        "context_ready_for_policy": final_context.get("context_ready_for_policy"),
         "plan_revision_id": final_context.get("plan_revision_id"),
         "context_snapshot_hash": final_context.get("context_snapshot_hash"),
         "business_context": business_context_from_context_record(context),
@@ -1924,11 +1988,107 @@ def policy_handoff_context_from_context_record(context: dict) -> dict:
     }
 
 
+def validate_policy_handoff_context(handoff: dict) -> dict:
+    """Validate the versioned Context Agent handoff before Policy Agent use."""
+    if not isinstance(handoff, dict):
+        return _policy_handoff_validation_error("policy_handoff_not_object")
+    if handoff.get("version") != POLICY_HANDOFF_CONTEXT_VERSION:
+        return _policy_handoff_validation_error("policy_handoff_version_unsupported")
+    if handoff.get("contract") != "context_agent.policy_handoff":
+        return _policy_handoff_validation_error("policy_handoff_contract_invalid")
+    if handoff.get("source") != "context-agent":
+        return _policy_handoff_validation_error("policy_handoff_source_invalid")
+    if handoff.get("security_context_version") != SECURITY_CONTEXT_VERSION:
+        return _policy_handoff_validation_error("security_context_version_unsupported")
+    if handoff.get("final_context_version") != FINAL_CONTEXT_VERSION:
+        return _policy_handoff_validation_error("final_context_version_unsupported")
+    if handoff.get("final_context_status") != "ready":
+        return _policy_handoff_validation_error("final_context_not_ready")
+    if handoff.get("context_ready_for_policy") is not True:
+        return _policy_handoff_validation_error("context_not_ready_for_policy")
+    if not str(handoff.get("plan_revision_id") or "").strip():
+        return _policy_handoff_validation_error("plan_revision_id_missing")
+    if not str(handoff.get("context_snapshot_hash") or "").strip():
+        return _policy_handoff_validation_error("context_snapshot_hash_missing")
+    sections = handoff.get("final_context_sections")
+    if not isinstance(sections, dict) or not sections:
+        return _policy_handoff_validation_error("final_context_sections_missing")
+    for section_id, section in sections.items():
+        if not isinstance(section, dict):
+            return _policy_handoff_validation_error(
+                "final_context_section_invalid",
+                field=f"final_context_sections.{section_id}",
+            )
+        if section.get("status") != "accepted":
+            return _policy_handoff_validation_error(
+                "final_context_section_not_accepted",
+                field=f"final_context_sections.{section_id}.status",
+            )
+        if not str(section.get("content") or "").strip():
+            return _policy_handoff_validation_error(
+                "final_context_section_empty",
+                field=f"final_context_sections.{section_id}.content",
+            )
+    findings = handoff.get("structured_findings")
+    if not isinstance(findings, list) or not findings:
+        return _policy_handoff_validation_error("structured_findings_missing")
+    for index, finding in enumerate(findings):
+        if not isinstance(finding, dict):
+            return _policy_handoff_validation_error(
+                "structured_finding_invalid",
+                field=f"structured_findings.{index}",
+            )
+        if finding.get("status") != "completed":
+            return _policy_handoff_validation_error(
+                "structured_finding_not_completed",
+                field=f"structured_findings.{index}.status",
+            )
+        if not str(finding.get("task_id") or "").strip():
+            return _policy_handoff_validation_error(
+                "structured_finding_task_id_missing",
+                field=f"structured_findings.{index}.task_id",
+            )
+        has_structured_evidence = any(
+            _string_list(finding.get(field))
+            for field in ("findings", "risks", "policy_implications")
+        )
+        has_legacy_content = bool(str(finding.get("content") or "").strip())
+        if not has_structured_evidence and not has_legacy_content:
+            return _policy_handoff_validation_error(
+                "structured_finding_evidence_missing",
+                field=f"structured_findings.{index}",
+            )
+    if handoff.get("unresolved_gaps"):
+        return _policy_handoff_validation_error("policy_handoff_unresolved_gaps")
+    retrieval_hints = handoff.get("retrieval_hints")
+    if not isinstance(retrieval_hints, dict):
+        return _policy_handoff_validation_error("retrieval_hints_missing")
+    if not _string_list(retrieval_hints.get("collection_families")):
+        return _policy_handoff_validation_error(
+            "retrieval_hints_incomplete",
+            field="retrieval_hints.collection_families",
+        )
+    return {"success": True}
+
+
+def _policy_handoff_validation_error(error_code: str, *, field: str | None = None) -> dict:
+    result = {
+        "success": False,
+        "error_type": "contract_error",
+        "error_code": error_code,
+        "message": "Policy handoff context is not valid.",
+    }
+    if field:
+        result["field"] = field
+    return result
+
+
 def _policy_handoff_task_item(item: dict) -> dict:
     return {
         "task_id": item.get("item_id"),
         "title": item.get("title"),
         "status": item.get("status"),
+        "content": str(item.get("content") or "").strip(),
         "findings": _string_list(item.get("findings")),
         "assumptions": _string_list(item.get("assumptions")),
         "missing_details": _string_list(item.get("missing_details")),
@@ -2337,13 +2497,32 @@ def get_context_and_prompt(context_id: str) -> dict:
                 correlation_id=correlation_id,
             )
 
+    policy_handoff_context = policy_handoff_context_from_context_record(context)
+    handoff_validation = validate_policy_handoff_context(policy_handoff_context)
+    if not handoff_validation.get("success"):
+        details = {
+            "context_id": context_id,
+            "handoff_error_code": handoff_validation["error_code"],
+        }
+        if handoff_validation.get("field"):
+            details["field"] = handoff_validation["field"]
+        raise PipelineStepError(
+            stage="context_fetch",
+            message="Policy handoff context is not valid.",
+            error_type="contract_error",
+            error_code="policy_handoff_invalid",
+            status_code=409,
+            details=details,
+            correlation_id=correlation_id,
+        )
+
     return {
         "context_id": context_id,
         "refined_prompt": refined_prompt,
         "language": context.get("language", "en"),
         "model_version": str(context.get("version", "0.1.0")),
         "business_context": business_context_from_context_record(context),
-        "policy_handoff_context": policy_handoff_context_from_context_record(context),
+        "policy_handoff_context": policy_handoff_context,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "correlation_id": correlation_id,
     }
