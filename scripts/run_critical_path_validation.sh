@@ -91,6 +91,7 @@ wait_for_ready "validator-agent" "http://localhost:5001/ready" "validator-agent"
 echo "[critical-path] running service suites"
 make context-tests
 make context-evals
+make context-browser-smoke
 make policy-tests
 make validator-tests
 make governance-tests

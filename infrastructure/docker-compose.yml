@@ -66,6 +66,21 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+  context-browser-tests:
+    build: ../tests/browser
+    profiles:
+      - test
+    working_dir: /repo/tests/browser
+    volumes:
+      - ..:/repo:ro
+    environment:
+      - CONTEXT_BROWSER_BASE_URL=${CONTEXT_BROWSER_BASE_URL:-http://context-agent:5000}
+      - CONTEXT_BROWSER_FIXTURE_PATH=${CONTEXT_BROWSER_FIXTURE_PATH:-/repo/migration/context-browser-smoke.json}
+    depends_on:
+      context-agent:
+        condition: service_healthy
+    networks:
+      - internal
   policy-agent:
     build: ../policy-agent
     container_name: policy_agent_service

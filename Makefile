@@ -8,7 +8,7 @@ FRONTEND_DIR=context-agent/frontend
 PNPM?=pnpm
 PNPM_COMMAND=$(PNPM) --pm-on-fail=ignore
 
-.PHONY: all docker-preflight up down clean rebuild logs observability-urls shell-context context-tests context-evals context-import frontend-pnpm-check frontend-install frontend-build frontend-check policy-shell policy-tests policy-vectorize policy-rag-validate policy-rag-backup policy-rag-restore validator-shell validator-tests governance-tests functional-smoke functional-smoke-real functional-smoke-real-full functional-smoke-real-backup critical-path-validation bootstrap-test-env host-fast-tests lint help
+.PHONY: all docker-preflight up down clean rebuild logs observability-urls shell-context context-tests context-evals context-browser-smoke context-import frontend-pnpm-check frontend-install frontend-build frontend-check policy-shell policy-tests policy-vectorize policy-rag-validate policy-rag-backup policy-rag-restore validator-shell validator-tests governance-tests functional-smoke functional-smoke-real functional-smoke-real-full functional-smoke-real-backup critical-path-validation bootstrap-test-env host-fast-tests lint help
 
 ## Verify docker and compose prerequisites
 docker-preflight:
@@ -51,6 +51,10 @@ context-tests:
 ## Run deterministic Context Agent evaluation release gate
 context-evals:
 	docker exec context_agent_web pytest -q tests/test_context_evaluation_release_gate.py
+
+## Run Docker-encapsulated Context Agent browser release gate
+context-browser-smoke:
+	bash scripts/run_context_browser_smoke.sh
 
 ## Run tests for agent-context
 context-import: 
@@ -168,6 +172,7 @@ help:
 	@echo "make context-shell 	-> Access context-agent shell"
 	@echo "make context-tests 	-> Run tests inside context-agent"
 	@echo "make context-evals 	-> Run deterministic Context Agent evaluation gate"
+	@echo "make context-browser-smoke -> Run Docker-encapsulated Context Agent browser smoke"
 	@echo "make context-import 	-> Run sample content import"
 	@echo "make frontend-pnpm-check -> Validate frontend package-manager contract"
 	@echo "make frontend-install -> Install locked Context Agent frontend dependencies"
