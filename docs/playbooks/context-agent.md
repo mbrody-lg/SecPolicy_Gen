@@ -34,6 +34,7 @@ This playbook is the service-specific execution guide for `context-agent`.
 - If a change only touches templates or presentation, still run the relevant route or service tests.
 - If a change touches agent logic, check the prompt-generation path and the persistence path together.
 - If a change affects external calls, verify both the success path and the fallback or failure path.
+- For explicit live-provider validation, run `RUN_REAL_PROVIDER_TESTS=1 make context-live-provider-smoke`. The generated artifact is `migration/context-live-provider-smoke.json` and must contain only hashes and bounded metadata.
 
 ## Commit Discipline
 
