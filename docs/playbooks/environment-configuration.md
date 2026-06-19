@@ -126,6 +126,8 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | `MIGRATION_SMOKE_PROBE_ATTEMPTS` | `runtime knob` | Safe default `60` | Functional smoke probes | Parse as positive integer |
 | `MIGRATION_SMOKE_PROBE_DELAY_SECONDS` | `runtime knob` | Safe default `2` | Functional smoke probes | Parse as positive integer |
 | `MIGRATION_SMOKE_LOG_TAIL_LINES` | `runtime knob` | Safe default `80` | Functional smoke diagnostics | Keep logs bounded and redacted |
+| `CONTEXT_BROWSER_FIXTURE_HOST_PATH` | `safe default` | Defaults to `migration/context-browser-smoke.json` | Context browser smoke | Local fixture manifest path; do not commit generated artifact |
+| `CONTEXT_LIVE_PROVIDER_SMOKE_OUTPUT` | `safe default` | Defaults to `migration/context-live-provider-smoke.json` | Context live-provider smoke | Local redacted evidence path; do not commit generated artifact |
 | `RUN_REAL_PROVIDER_TESTS` | `runtime knob` | Defaults to off | Live provider tests | Must be explicit; deterministic tests must not require it |
 | `COMPOSE_FILE` | `safe default` | Defaults to infrastructure Compose file | Docker preflight | Path must exist |
 | `ENV_FILE` | `safe default` | Defaults to `infrastructure/.env` | Docker preflight | Path must exist for stack targets |

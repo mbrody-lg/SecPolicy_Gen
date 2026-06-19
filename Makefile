@@ -8,7 +8,7 @@ FRONTEND_DIR=context-agent/frontend
 PNPM?=pnpm
 PNPM_COMMAND=$(PNPM) --pm-on-fail=ignore
 
-.PHONY: all docker-preflight up down clean rebuild logs observability-urls shell-context context-tests context-evals context-browser-smoke context-import frontend-pnpm-check frontend-install frontend-build frontend-check policy-shell policy-tests policy-vectorize policy-rag-validate policy-rag-backup policy-rag-restore validator-shell validator-tests governance-tests functional-smoke functional-smoke-real functional-smoke-real-full functional-smoke-real-backup critical-path-validation bootstrap-test-env host-fast-tests lint help
+.PHONY: all docker-preflight up down clean rebuild logs observability-urls shell-context context-tests context-evals context-browser-smoke context-live-provider-smoke context-import frontend-pnpm-check frontend-install frontend-build frontend-check policy-shell policy-tests policy-vectorize policy-rag-validate policy-rag-backup policy-rag-restore validator-shell validator-tests governance-tests functional-smoke functional-smoke-real functional-smoke-real-full functional-smoke-real-backup critical-path-validation bootstrap-test-env host-fast-tests lint help
 
 ## Verify docker and compose prerequisites
 docker-preflight:
@@ -55,6 +55,10 @@ context-evals:
 ## Run Docker-encapsulated Context Agent browser release gate
 context-browser-smoke:
 	bash scripts/run_context_browser_smoke.sh
+
+## Run opt-in Context Agent live-provider smoke with redacted evidence
+context-live-provider-smoke:
+	bash scripts/run_context_live_provider_smoke.sh
 
 ## Run tests for agent-context
 context-import: 
@@ -141,6 +145,9 @@ functional-smoke-real-backup:
 
 validate-smoke-artifact:
 	python3 scripts/validate_smoke_artifact.py migration/functional-smoke-result.json
+	@if [ -f migration/context-live-provider-smoke.json ]; then \
+		python3 scripts/validate_context_live_provider_smoke_artifact.py migration/context-live-provider-smoke.json; \
+	fi
 
 ## Run the critical Context -> Policy -> Validator validation path with CI-aligned evidence
 critical-path-validation:
@@ -173,6 +180,7 @@ help:
 	@echo "make context-tests 	-> Run tests inside context-agent"
 	@echo "make context-evals 	-> Run deterministic Context Agent evaluation gate"
 	@echo "make context-browser-smoke -> Run Docker-encapsulated Context Agent browser smoke"
+	@echo "make context-live-provider-smoke -> Run opt-in Context Agent live-provider smoke"
 	@echo "make context-import 	-> Run sample content import"
 	@echo "make frontend-pnpm-check -> Validate frontend package-manager contract"
 	@echo "make frontend-install -> Install locked Context Agent frontend dependencies"
