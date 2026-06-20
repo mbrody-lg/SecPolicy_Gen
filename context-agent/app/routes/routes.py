@@ -17,9 +17,11 @@ from app.routes.input_contracts import (
     PIPELINE_JOB_ID_PATTERN,
     RouteInputError,
     parse_bounded_token,
+    parse_bounded_string,
     parse_enum,
     parse_object_id,
     parse_page,
+    parse_string_map,
     require_json_object,
     route_input_error_response,
 )
@@ -79,6 +81,12 @@ CONTEXT_STATUS_FILTERS = {
 SORT_ORDERS = {"asc", "desc"}
 PIPELINE_COMMANDS = {"generate_policy", "execute_context_plan"}
 LESSON_STATUSES = {"pending_review", "approved_for_export"}
+CONTEXT_FIELD_MAX_LENGTH = 4000
+CONTEXT_PROMPT_MAX_LENGTH = 8000
+CONTEXT_FEEDBACK_MAX_LENGTH = 4000
+CONTEXT_COMMENT_MAX_LENGTH = 4000
+CONTEXT_SELECTED_EXCERPT_MAX_LENGTH = 4000
+POLICY_CALLBACK_TEXT_MAX_LENGTH = 100_000
 
 
 def _jsonify_escaped(payload):
@@ -135,6 +143,146 @@ POLICY_PROCESS_TONES = {
     "cancelled": "muted",
     "not_started": "muted",
 }
+
+
+def _parse_context_create_form() -> dict[str, str]:
+    """Parse supported context creation fields from an HTML form."""
+    allowed_fields = context_answer_fields()
+    parsed = {}
+    for field in allowed_fields:
+        if field in request.form:
+            parsed[field] = parse_bounded_string(
+                request.form.get(field),
+                field=field,
+                max_length=CONTEXT_FIELD_MAX_LENGTH,
+            )
+    return parsed
+
+
+def _known_context_building_question_ids(context: dict) -> set[str]:
+    """Return currently valid context-building question ids for a context."""
+    questions = (context.get("context_building") or {}).get("questions") or []
+    return {
+        str(question.get("id"))
+        for question in questions
+        if isinstance(question, dict) and question.get("id")
+    }
+
+
+def _validate_context_building_answer_ids(context: dict, submitted_answers: dict[str, str]) -> None:
+    """Reject answers for unknown context-building question ids."""
+    known_ids = _known_context_building_question_ids(context)
+    unknown_ids = sorted(
+        str(question_id)
+        for question_id in submitted_answers
+        if str(question_id) not in known_ids
+    )
+    if unknown_ids:
+        raise RouteInputError(
+            field="answers",
+            error_code="unknown_context_building_question",
+            message="Context-building answers contain an unknown question id.",
+            value=unknown_ids[0],
+        )
+
+
+def _parse_context_building_defer_payload() -> tuple[str, str]:
+    """Parse a context-building defer request from JSON or form data."""
+    if request.is_json:
+        payload = require_json_object(request.get_json(silent=True))
+        question_id = payload.get("question_id")
+        reason = payload.get("reason")
+    else:
+        question_id = request.form.get("question_id")
+        reason = request.form.get("reason")
+    return (
+        parse_bounded_string(question_id, field="question_id", max_length=128, required=True),
+        parse_bounded_string(reason, field="reason", max_length=CONTEXT_FEEDBACK_MAX_LENGTH),
+    )
+
+
+def _parse_final_context_improvement_comments() -> dict[str, str]:
+    """Parse final-context improvement comments from JSON or form data."""
+    if request.is_json:
+        payload = require_json_object(request.get_json(silent=True))
+        comments_source = payload.get("comments") or payload.get("sections") or {}
+        return parse_string_map(
+            comments_source,
+            field="comments",
+            max_key_length=128,
+            max_value_length=CONTEXT_COMMENT_MAX_LENGTH,
+            allow_empty=False,
+        )
+
+    section_id = parse_bounded_string(
+        request.form.get("section_id"),
+        field="section_id",
+        max_length=128,
+        required=True,
+    )
+    comment = parse_bounded_string(
+        request.form.get("comment"),
+        field="comment",
+        max_length=CONTEXT_COMMENT_MAX_LENGTH,
+    )
+    comment_scope = parse_bounded_string(
+        request.form.get("comment_scope"),
+        field="comment_scope",
+        max_length=128,
+    )
+    selected_excerpt = parse_bounded_string(
+        request.form.get("selected_excerpt"),
+        field="selected_excerpt",
+        max_length=CONTEXT_SELECTED_EXCERPT_MAX_LENGTH,
+    )
+    if selected_excerpt:
+        comment = f"Selected text: {selected_excerpt}\n\nComment: {comment or 'Improve the selected text.'}"
+    if comment_scope and comment:
+        comment = f"[{comment_scope}] {comment}"
+    if not comment:
+        raise RouteInputError(
+            field="comment",
+            error_code="missing_comment",
+            message="comment is required.",
+        )
+    return {section_id: comment}
+
+
+def _parse_policy_callback_payload() -> dict:
+    """Parse the validated-policy callback JSON envelope."""
+    payload = require_json_object(request.get_json(silent=True))
+    string_limits = {
+        "policy_text": POLICY_CALLBACK_TEXT_MAX_LENGTH,
+        "generated_at": 128,
+        "policy_agent_version": 128,
+        "language": 32,
+        "status": 64,
+    }
+    parsed = dict(payload)
+    for field, max_length in string_limits.items():
+        if field in payload:
+            parsed[field] = parse_bounded_string(
+                payload.get(field),
+                field=field,
+                max_length=max_length,
+            )
+    recommendations = payload.get("recommendations")
+    if recommendations is not None:
+        if not isinstance(recommendations, list) or any(not isinstance(item, str) for item in recommendations):
+            raise RouteInputError(
+                field="recommendations",
+                error_code="invalid_recommendations",
+                message="recommendations must be a list of strings.",
+            )
+        parsed["recommendations"] = [
+            parse_bounded_string(
+                item,
+                field="recommendations",
+                max_length=CONTEXT_COMMENT_MAX_LENGTH,
+            )
+            for item in recommendations
+        ]
+    return parsed
 
 
 @main.route("/health")
@@ -383,8 +531,10 @@ def _policy_generation_blocker(context: dict | None) -> dict | None:
 def create():
     """Create a new context and trigger the initial agent response."""
     if request.method == "POST":
-        allowed_fields = context_answer_fields()
-        data = {k: v.strip() for k, v in request.form.items() if k in allowed_fields}
+        try:
+            data = _parse_context_create_form()
+        except RouteInputError as exc:
+            return route_input_error_response(exc)
         security_context = build_context_security_context(data)
         context_building = build_context_building_state(data, security_context=security_context)
         context_plan = build_context_intelligence_plan(data)
@@ -591,6 +741,11 @@ def answer_context_building_questions(context_id):
     if not context:
         return abort(404, "Context not found.")
 
+    try:
+        _validate_context_building_answer_ids(context, submitted_answers)
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
+
     if not submitted_answers:
         flash("Add at least one answer before updating the context.", "warning")
         return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-intake"))
@@ -647,16 +802,10 @@ def defer_context_building_question_route(context_id):
     if not context:
         return abort(404, "Context not found.")
 
-    if request.is_json:
-        try:
-            payload = require_json_object(request.get_json(silent=True))
-        except RouteInputError as exc:
-            return route_input_error_response(exc)
-        question_id = payload.get("question_id")
-        reason = payload.get("reason")
-    else:
-        question_id = request.form.get("question_id")
-        reason = request.form.get("reason")
+    try:
+        question_id, reason = _parse_context_building_defer_payload()
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
 
     result = defer_context_building_question(context, str(question_id or ""), reason)
     if not result.get("success"):
@@ -685,28 +834,43 @@ def _context_building_answers_from_request() -> dict[str, str]:
     if request.is_json:
         payload = require_json_object(request.get_json(silent=True))
         answers = payload.get("answers", payload)
-        if isinstance(answers, dict):
-            parsed = {}
-            for key, value in answers.items():
-                if not isinstance(value, str):
-                    raise RouteInputError(
-                        field="answers",
-                        error_code="invalid_answers",
-                        message="Context-building answers must be strings.",
-                    )
-                parsed[str(key)] = value
-            return parsed
-        return {}
+        return parse_string_map(
+            answers,
+            field="answers",
+            max_key_length=128,
+            max_value_length=CONTEXT_FIELD_MAX_LENGTH,
+        )
 
     question_id = request.form.get("question_id")
     answer = request.form.get("answer")
     if question_id and answer is not None:
-        return {question_id: answer}
+        return {
+            parse_bounded_string(
+                question_id,
+                field="question_id",
+                max_length=128,
+                required=True,
+            ): parse_bounded_string(
+                answer,
+                field="answer",
+                max_length=CONTEXT_FIELD_MAX_LENGTH,
+            )
+        }
 
     answers = {}
     for key, value in request.form.items():
         if key.startswith("answers[") and key.endswith("]"):
-            answers[key.removeprefix("answers[").removesuffix("]")] = value
+            question_id = parse_bounded_string(
+                key.removeprefix("answers[").removesuffix("]"),
+                field="question_id",
+                max_length=128,
+                required=True,
+            )
+            answers[question_id] = parse_bounded_string(
+                value,
+                field="answer",
+                max_length=CONTEXT_FIELD_MAX_LENGTH,
+            )
     return answers
 
 @main.route("/context/<context_id>/continue", methods=["POST"])
@@ -721,7 +885,14 @@ def continue_context(context_id):
     if not context:
         return abort(404, "Context not found.")
 
-    new_prompt = request.form.get("prompt", "").strip()
+    try:
+        new_prompt = parse_bounded_string(
+            request.form.get("prompt"),
+            field="prompt",
+            max_length=CONTEXT_PROMPT_MAX_LENGTH,
+        )
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
     if not new_prompt:
         return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-intake"))
 
@@ -827,7 +998,14 @@ def approve_context_plan(context_id):
         flash("Answer the context-building questions before approving the plan.", "warning")
         return redirect(url_for("main.context_detail", context_id=context_id))
 
-    feedback = request.form.get("feedback", "")
+    try:
+        feedback = parse_bounded_string(
+            request.form.get("feedback"),
+            field="feedback",
+            max_length=CONTEXT_FEEDBACK_MAX_LENGTH,
+        )
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
     approved_plan = approve_context_intelligence_plan(context, feedback)
     mongo.db.contexts.update_one(
         {"_id": context_obj_id},
@@ -932,22 +1110,10 @@ def mark_final_context_sections_for_improvement_route(context_id):
         parse_object_id(context_id)
     except RouteInputError as exc:
         return route_input_error_response(exc)
-    if request.is_json:
-        try:
-            payload = require_json_object(request.get_json(silent=True))
-        except RouteInputError as exc:
-            return route_input_error_response(exc)
-        comments_by_section = payload.get("comments") or payload.get("sections") or {}
-    else:
-        section_id = request.form.get("section_id")
-        comment = request.form.get("comment")
-        comment_scope = (request.form.get("comment_scope") or "").strip()
-        selected_excerpt = (request.form.get("selected_excerpt") or "").strip()
-        if selected_excerpt:
-            comment = f"Selected text: {selected_excerpt}\n\nComment: {comment or 'Improve the selected text.'}"
-        if comment_scope and comment:
-            comment = f"[{comment_scope}] {comment}"
-        comments_by_section = {section_id: comment} if section_id else {}
+    try:
+        comments_by_section = _parse_final_context_improvement_comments()
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
 
     result = mark_final_context_sections_for_improvement(context_id, comments_by_section)
     if _wants_json_response():
@@ -1074,7 +1240,7 @@ def send_policy_to_context(context_id):
     """Persist a validated policy payload in context interactions."""
     try:
         parse_object_id(context_id)
-        data = require_json_object(request.get_json(force=True))
+        data = _parse_policy_callback_payload()
         store_validated_policy(context_id, data)
         return redirect(url_for("main.context_detail", context_id=context_id))
     except RouteInputError as exc:
