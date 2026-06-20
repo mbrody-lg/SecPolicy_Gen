@@ -350,6 +350,29 @@ def test_create_route_persists_context_building_questions_when_context_is_incomp
     ]
 
 
+def test_create_route_rejects_oversized_known_field_before_provider_call(client, monkeypatch):
+    called = False
+
+    def fake_run_context_planning_review(prompt, context_id, model_version=None):
+        nonlocal called
+        called = True
+        return {"text": "", "structured_review": {}}
+
+    monkeypatch.setattr(routes_module, "run_context_planning_review", fake_run_context_planning_review)
+
+    response = client.post(
+        "/create",
+        data={"country": "Spain", "need": "x" * 4001},
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert payload["error_type"] == "contract_error"
+    assert payload["error_code"] == "need_too_long"
+    assert called is False
+
+
 def test_context_building_answers_update_context_and_rebuild_plan(client, monkeypatch):
     context_id = ObjectId()
     security_context = routes_module.build_context_security_context({
@@ -422,6 +445,37 @@ def test_context_building_answers_rejects_non_string_json_answers(client):
     payload = response.get_json()
     assert payload["error_type"] == "contract_error"
     assert payload["error_code"] == "invalid_answers"
+
+
+def test_context_building_answers_rejects_unknown_question_id(client):
+    context_id = ObjectId()
+    security_context = routes_module.build_context_security_context({
+        "country": "Spain",
+        "need": "Build a security plan",
+    })
+    context_building = routes_module.build_context_building_state(
+        {"country": "Spain", "need": "Build a security plan"},
+        security_context=security_context,
+    )
+    routes_module.mongo.db.contexts.insert_one({
+        "_id": context_id,
+        "country": "Spain",
+        "need": "Build a security plan",
+        "status": "context_building_needs_input",
+        "security_context": security_context,
+        "context_building": context_building,
+    })
+
+    response = client.post(
+        f"/context/{context_id}/context-building/answers",
+        json={"answers": {"not_a_context_building_question": "Healthcare"}},
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert payload["error_type"] == "contract_error"
+    assert payload["error_code"] == "unknown_context_building_question"
 
 
 def test_context_building_answers_can_complete_context(client):
@@ -517,6 +571,37 @@ def test_continue_context_uses_context_update_prompt(client, monkeypatch):
     context = routes_module.mongo.db.contexts.find_one({"_id": context_id})
     assert context["context_building"]["provider_review"]["summary"] == "Updated context assessment."
     assert context["context_building"]["provider_review"]["security_domains"] == ["access_control"]
+
+
+def test_continue_context_rejects_oversized_prompt_before_provider_call(client, monkeypatch):
+    context_id = ObjectId()
+    routes_module.mongo.db.contexts.insert_one({
+        "_id": context_id,
+        "country": "Spain",
+        "sector": "Healthcare",
+        "critical_assets": "Patient records",
+        "need": "Build a security plan",
+    })
+    called = False
+
+    def fake_run_context_building_review(prompt, context_id, model_version=None):
+        nonlocal called
+        called = True
+        return {"text": "", "structured_review": {}}
+
+    monkeypatch.setattr(routes_module, "run_context_building_review", fake_run_context_building_review)
+
+    response = client.post(
+        f"/context/{context_id}/continue",
+        data={"prompt": "x" * 8001},
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert payload["error_type"] == "contract_error"
+    assert payload["error_code"] == "prompt_too_long"
+    assert called is False
 
 
 def test_context_building_question_can_be_deferred(client):
@@ -1699,6 +1784,35 @@ def test_send_policy_to_context_preserves_inbound_correlation_id_in_error_body_a
     assert response.get_json()["correlation_id"] == "corr-inbound"
 
 
+def test_send_policy_to_context_rejects_invalid_recommendations_before_storage(client, monkeypatch):
+    context_id = str(ObjectId())
+    called = False
+
+    def fake_store_validated_policy(current_context_id, current_payload):
+        nonlocal called
+        called = True
+        return {"context_id": current_context_id}
+
+    monkeypatch.setattr(routes_module, "store_validated_policy", fake_store_validated_policy)
+
+    response = client.post(
+        f"/context/{context_id}/policy",
+        json={
+            "policy_text": "Validated policy text",
+            "generated_at": "2026-04-10T10:00:00+00:00",
+            "policy_agent_version": "0.1.0",
+            "language": "en",
+            "recommendations": [{"unsafe": "shape"}],
+        },
+    )
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert payload["error_type"] == "contract_error"
+    assert payload["error_code"] == "invalid_recommendations"
+    assert called is False
+
+
 def test_send_policy_to_context_redirects_after_storage(client, monkeypatch):
     context_id = str(ObjectId())
     captured = {}
@@ -2163,6 +2277,26 @@ def test_mark_final_context_section_for_improvement_escapes_json_response(client
         response.get_json()["final_context"]["sections"]["security_scope"]["comments"][0]["comment"]
     )
     assert comment == "&lt;script&gt;alert(1)&lt;/script&gt;"
+
+
+def test_mark_final_context_section_for_improvement_rejects_non_string_comment(client):
+    context_id = str(ObjectId())
+    _insert_context_executed_for_final_synthesis(context_id)
+    client.post(
+        f"/context/{context_id}/final-context/synthesize",
+        headers={"Accept": "application/json"},
+    )
+
+    response = client.post(
+        f"/context/{context_id}/final-context/sections/improve",
+        json={"comments": {"security_scope": ["Clarify third-party access."]}},
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert payload["error_type"] == "contract_error"
+    assert payload["error_code"] == "invalid_comments"
 
 
 def test_context_detail_disables_policy_generation_when_final_context_needs_improvement(client, monkeypatch):

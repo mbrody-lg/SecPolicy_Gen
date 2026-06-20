@@ -118,6 +118,82 @@ def parse_bounded_token(
     return value.strip()
 
 
+def parse_bounded_string(
+    value: Any,
+    *,
+    field: str,
+    max_length: int,
+    required: bool = False,
+    trim: bool = True,
+) -> str:
+    """Parse a bounded string body field."""
+    if value is None:
+        if required:
+            raise RouteInputError(
+                field=field,
+                error_code=f"missing_{field}",
+                message=f"{field} is required.",
+            )
+        return ""
+    if not isinstance(value, str):
+        raise RouteInputError(
+            field=field,
+            error_code=f"invalid_{field}",
+            message=f"{field} must be a string.",
+            value=value,
+        )
+    parsed = value.strip() if trim else value
+    if required and not parsed:
+        raise RouteInputError(
+            field=field,
+            error_code=f"missing_{field}",
+            message=f"{field} is required.",
+        )
+    if len(parsed) > max_length:
+        raise RouteInputError(
+            field=field,
+            error_code=f"{field}_too_long",
+            message=f"{field} is too long.",
+            value=value,
+        )
+    return parsed
+
+
+def parse_string_map(
+    value: Any,
+    *,
+    field: str,
+    max_key_length: int = 128,
+    max_value_length: int,
+    allow_empty: bool = True,
+) -> dict[str, str]:
+    """Parse a JSON object whose keys and values must be bounded strings."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise RouteInputError(
+            field=field,
+            error_code=f"invalid_{field}",
+            message=f"{field} must be a JSON object.",
+        )
+    parsed = {}
+    for key, item in value.items():
+        parsed_key = parse_bounded_string(
+            key,
+            field=f"{field}_key",
+            max_length=max_key_length,
+            required=True,
+        )
+        parsed_value = parse_bounded_string(
+            item,
+            field=field,
+            max_length=max_value_length,
+            required=not allow_empty,
+        )
+        parsed[parsed_key] = parsed_value
+    return parsed
+
+
 def require_json_object(value: Any, *, field: str = "body") -> dict:
     """Require a JSON object payload."""
     if value is None:
