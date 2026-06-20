@@ -11,6 +11,18 @@ from markupsafe import escape
 from app import mongo
 from app.metrics import metrics_response
 from app.observability import log_event
+from app.routes.input_contracts import (
+    CORRELATION_ID_PATTERN,
+    LESSON_ID_PATTERN,
+    PIPELINE_JOB_ID_PATTERN,
+    RouteInputError,
+    parse_bounded_token,
+    parse_enum,
+    parse_object_id,
+    parse_page,
+    require_json_object,
+    route_input_error_response,
+)
 from app.services.logic import (
     PipelineStepError,
     SECURITY_CONTEXT_VERSION,
@@ -52,6 +64,21 @@ from app.services.pipeline_worker import start_pipeline_job_worker
 
 main = Blueprint("main", __name__)
 logger = logging.getLogger(__name__)
+
+CONTEXT_STATUS_FILTERS = {
+    "awaiting_task_validation",
+    "completed",
+    "context_building_needs_input",
+    "context_plan_approved",
+    "context_plan_executed",
+    "context_ready_for_policy",
+    "final_context_needs_improvement",
+    "planning",
+    "pending",
+}
+SORT_ORDERS = {"asc", "desc"}
+PIPELINE_COMMANDS = {"generate_policy", "execute_context_plan"}
+LESSON_STATUSES = {"pending_review", "approved_for_export"}
 
 
 def _jsonify_escaped(payload):
@@ -193,9 +220,22 @@ def _flash_system_refresh_result(result: dict) -> None:
 def index():
     """Render the context dashboard with filters, sort, and pagination."""
     per_page = 10
-    page = max(int(request.args.get("page", 1)), 1)
-    status_filter = request.args.get("status", "")
-    sort_order = request.args.get("sort", "desc")
+    try:
+        page = parse_page(request.args.get("page", 1))
+        status_filter = parse_enum(
+            request.args.get("status", ""),
+            field="status",
+            allowed=CONTEXT_STATUS_FILTERS,
+            default="",
+        )
+        sort_order = parse_enum(
+            request.args.get("sort", "desc"),
+            field="sort",
+            allowed=SORT_ORDERS,
+            default="desc",
+        )
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
 
     query = {}
     if status_filter:
@@ -440,15 +480,14 @@ def create():
 @main.route("/context/<context_id>")
 def context_detail(context_id):
     """Render a context detail page with ordered interactions."""
-    from bson.errors import InvalidId
     try:
-        context_id = ObjectId(context_id)
-        context = mongo.db.contexts.find_one({"_id": context_id})
+        context_obj_id = parse_object_id(context_id)
+        context = mongo.db.contexts.find_one({"_id": context_obj_id})
         if not context:
             return abort(404, "Context not found.")
 
         interactions = list(
-            mongo.db.interactions.find({"context_id": context_id}).sort("timestamp", 1)
+            mongo.db.interactions.find({"context_id": context_obj_id}).sort("timestamp", 1)
         )
         # Render only agent answers to HTML from Markdown
         for item in interactions:
@@ -475,16 +514,16 @@ def context_detail(context_id):
             if isinstance(task, dict):
                 task["rendered_result"] = render_markdown(task.get("result") or "")
 
-    except (InvalidId, TypeError, Exception):
-        return abort(400, "Invalid identifier.")
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
 
     return render_template(
         "context_detail.html",
         context=context,
         interactions=interactions,
         system_status=get_system_status(),
-        latest_pipeline_job=find_latest_pipeline_job(str(context_id)),
-        latest_context_plan_job=find_latest_pipeline_job(str(context_id), command="execute_context_plan"),
+        latest_pipeline_job=find_latest_pipeline_job(str(context_obj_id)),
+        latest_context_plan_job=find_latest_pipeline_job(str(context_obj_id), command="execute_context_plan"),
         developer_diagnostics_enabled=_developer_diagnostics_enabled(),
         context_agent_response=context_agent_response,
     )
@@ -493,17 +532,10 @@ def context_detail(context_id):
 @main.route("/context/<context_id>/security_context", methods=["GET"])
 def get_security_context(context_id):
     """Return the structured security context for a stored context."""
-    from bson.errors import InvalidId
     try:
-        object_id = ObjectId(context_id)
-    except (InvalidId, TypeError):
-        return jsonify({
-            "success": False,
-            "error_type": "contract_error",
-            "error_code": "invalid_context_id",
-            "message": "Invalid context_id format.",
-            "details": {"context_id": context_id},
-        }), 400
+        object_id = parse_object_id(context_id)
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
 
     context = mongo.db.contexts.find_one({"_id": object_id})
     if not context:
@@ -521,17 +553,10 @@ def get_security_context(context_id):
 @main.route("/context/<context_id>/context-plan", methods=["GET"])
 def get_context_plan(context_id):
     """Return the public context-intelligence plan artifact."""
-    from bson.errors import InvalidId
     try:
-        object_id = ObjectId(context_id)
-    except (InvalidId, TypeError):
-        return jsonify({
-            "success": False,
-            "error_type": "contract_error",
-            "error_code": "invalid_context_id",
-            "message": "Invalid context_id format.",
-            "details": {"context_id": context_id},
-        }), 400
+        object_id = parse_object_id(context_id)
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
 
     context = mongo.db.contexts.find_one({"_id": object_id})
     if not context:
@@ -557,12 +582,15 @@ def get_context_plan(context_id):
 @main.route("/context/<context_id>/context-building/answers", methods=["POST"])
 def answer_context_building_questions(context_id):
     """Persist CONTEXT BUILDING answers and rebuild security-context artifacts."""
-    context_obj_id = ObjectId(context_id)
+    try:
+        context_obj_id = parse_object_id(context_id)
+        submitted_answers = _context_building_answers_from_request()
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
     context = mongo.db.contexts.find_one({"_id": context_obj_id})
     if not context:
         return abort(404, "Context not found.")
 
-    submitted_answers = _context_building_answers_from_request()
     if not submitted_answers:
         flash("Add at least one answer before updating the context.", "warning")
         return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-intake"))
@@ -611,13 +639,19 @@ def answer_context_building_questions(context_id):
 @main.route("/context/<context_id>/context-building/questions/defer", methods=["POST"])
 def defer_context_building_question_route(context_id):
     """Defer a CONTEXT BUILDING question while keeping planning blocked."""
-    context_obj_id = ObjectId(context_id)
+    try:
+        context_obj_id = parse_object_id(context_id)
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
     context = mongo.db.contexts.find_one({"_id": context_obj_id})
     if not context:
         return abort(404, "Context not found.")
 
     if request.is_json:
-        payload = request.get_json(silent=True) or {}
+        try:
+            payload = require_json_object(request.get_json(silent=True))
+        except RouteInputError as exc:
+            return route_input_error_response(exc)
         question_id = payload.get("question_id")
         reason = payload.get("reason")
     else:
@@ -649,10 +683,19 @@ def defer_context_building_question_route(context_id):
 def _context_building_answers_from_request() -> dict[str, str]:
     """Extract submitted CONTEXT BUILDING answers from form or JSON requests."""
     if request.is_json:
-        payload = request.get_json(silent=True) or {}
+        payload = require_json_object(request.get_json(silent=True))
         answers = payload.get("answers", payload)
         if isinstance(answers, dict):
-            return {str(key): str(value) for key, value in answers.items()}
+            parsed = {}
+            for key, value in answers.items():
+                if not isinstance(value, str):
+                    raise RouteInputError(
+                        field="answers",
+                        error_code="invalid_answers",
+                        message="Context-building answers must be strings.",
+                    )
+                parsed[str(key)] = value
+            return parsed
         return {}
 
     question_id = request.form.get("question_id")
@@ -669,7 +712,12 @@ def _context_building_answers_from_request() -> dict[str, str]:
 @main.route("/context/<context_id>/continue", methods=["POST"])
 def continue_context(context_id):
     """Append user input to an existing context and request next agent response."""
-    context = mongo.db.contexts.find_one({"_id": ObjectId(context_id)})
+    try:
+        context_obj_id = parse_object_id(context_id)
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
+
+    context = mongo.db.contexts.find_one({"_id": context_obj_id})
     if not context:
         return abort(404, "Context not found.")
 
@@ -678,14 +726,14 @@ def continue_context(context_id):
         return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-intake"))
 
     count = mongo.db.interactions.count_documents({
-        "context_id": ObjectId(context_id),
+        "context_id": context_obj_id,
         "question_id": {"$regex": "^need"}
     })
     new_question_id = f"need_{count + 1}"
 
     # 1. Save user interaction
     mongo.db.interactions.insert_one({
-        "context_id": ObjectId(context_id),
+        "context_id": context_obj_id,
         "question_id": new_question_id,
         "question_text": "Add more information or questions...",
         "answer": new_prompt,
@@ -705,7 +753,7 @@ def continue_context(context_id):
     # 3. If no valid response exists, keep context pending and skip response save
     if not response or not response.strip():
         mongo.db.contexts.update_one(
-            {"_id": ObjectId(context_id)},
+            {"_id": context_obj_id},
             {"$set": {"status": "pending"}}
         )
         flash("A response could not be generated. Please try again.", "warning")
@@ -713,7 +761,7 @@ def continue_context(context_id):
 
     # 4. Save agent response
     mongo.db.interactions.insert_one({
-        "context_id": ObjectId(context_id),
+        "context_id": context_obj_id,
         "question_id": f"response_{count + 1}",
         "question_text": "Agent response",
         "answer": response.strip(),
@@ -744,7 +792,7 @@ def continue_context(context_id):
     )
 
     mongo.db.contexts.update_one(
-        {"_id": ObjectId(context_id)},
+        {"_id": context_obj_id},
         {
             "$set": {
                 "need": updated_context_data["need"],
@@ -767,7 +815,10 @@ def continue_context(context_id):
 @main.route("/context/<context_id>/context-plan/approve", methods=["POST"])
 def approve_context_plan(context_id):
     """Approve the context-intelligence plan before task execution."""
-    context_obj_id = ObjectId(context_id)
+    try:
+        context_obj_id = parse_object_id(context_id)
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
     context = mongo.db.contexts.find_one({"_id": context_obj_id})
     if not context:
         return abort(404, "Context not found.")
@@ -804,7 +855,10 @@ def approve_context_plan(context_id):
 @main.route("/context/<context_id>/context-plan/execute", methods=["POST"])
 def trigger_context_plan_execution(context_id):
     """Start asynchronous execution of an approved context-intelligence plan."""
-    context_obj_id = ObjectId(context_id)
+    try:
+        context_obj_id = parse_object_id(context_id)
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
     context = mongo.db.contexts.find_one({"_id": context_obj_id})
     if not context:
         return abort(404, "Context not found.")
@@ -857,6 +911,10 @@ def trigger_context_plan_execution(context_id):
 @main.route("/context/<context_id>/final-context/synthesize", methods=["POST"])
 def trigger_final_context_synthesis(context_id):
     """Synthesize final context after approved plan execution."""
+    try:
+        parse_object_id(context_id)
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
     result = synthesize_final_context(context_id)
     if _wants_json_response():
         return _jsonify_escaped(result), 200 if result.get("success") else result.get("status_code", 500)
@@ -870,8 +928,15 @@ def trigger_final_context_synthesis(context_id):
 @main.route("/context/<context_id>/final-context/sections/improve", methods=["POST"])
 def mark_final_context_sections_for_improvement_route(context_id):
     """Mark one or more final-context sections as needing improvement."""
+    try:
+        parse_object_id(context_id)
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
     if request.is_json:
-        payload = request.get_json(silent=True) or {}
+        try:
+            payload = require_json_object(request.get_json(silent=True))
+        except RouteInputError as exc:
+            return route_input_error_response(exc)
         comments_by_section = payload.get("comments") or payload.get("sections") or {}
     else:
         section_id = request.form.get("section_id")
@@ -897,6 +962,10 @@ def mark_final_context_sections_for_improvement_route(context_id):
 @main.route("/context/<context_id>/final-context/sections/regenerate", methods=["POST"])
 def regenerate_final_context_sections_route(context_id):
     """Regenerate final-context sections marked for improvement."""
+    try:
+        parse_object_id(context_id)
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
     result = regenerate_final_context_sections(context_id)
     if _wants_json_response():
         return _jsonify_escaped(result), 200 if result.get("success") else result.get("status_code", 500)
@@ -910,6 +979,10 @@ def regenerate_final_context_sections_route(context_id):
 @main.route("/context/<context_id>/context-lessons/export", methods=["GET"])
 def export_context_lessons_route(context_id):
     """Export reviewed context lessons for explicit future RAG ingestion."""
+    try:
+        parse_object_id(context_id)
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
     result = export_context_lessons(context_id)
     return _jsonify_escaped(result), 200 if result.get("success") else result.get("status_code", 500)
 
@@ -917,11 +990,32 @@ def export_context_lessons_route(context_id):
 @main.route("/context/<context_id>/context-lessons/<lesson_id>/status", methods=["POST"])
 def update_context_lesson_status_route(context_id, lesson_id):
     """Review one context lesson for explicit future RAG export."""
+    try:
+        parse_object_id(context_id)
+        lesson_id = parse_bounded_token(lesson_id, field="lesson_id", pattern=LESSON_ID_PATTERN)
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
     if request.is_json:
-        payload = request.get_json(silent=True) or {}
-        status = payload.get("status", "pending_review")
+        try:
+            payload = require_json_object(request.get_json(silent=True))
+            status = parse_enum(
+                payload.get("status", "pending_review"),
+                field="lesson_status",
+                allowed=LESSON_STATUSES,
+                default="pending_review",
+            )
+        except RouteInputError as exc:
+            return route_input_error_response(exc)
     else:
-        status = request.form.get("status", "pending_review")
+        try:
+            status = parse_enum(
+                request.form.get("status", "pending_review"),
+                field="lesson_status",
+                allowed=LESSON_STATUSES,
+                default="pending_review",
+            )
+        except RouteInputError as exc:
+            return route_input_error_response(exc)
 
     result = update_context_lesson_status(context_id, lesson_id, status)
     if _wants_json_response():
@@ -961,12 +1055,15 @@ def _context_plan_execution_blocker(context: dict) -> dict | None:
 def delete_context(context_id):
     """Delete a context and its interaction history."""
     try:
-        result = mongo.db.contexts.delete_one({"_id": ObjectId(context_id)})
-        mongo.db.interactions.delete_many({"context_id": ObjectId(context_id)})
+        context_obj_id = parse_object_id(context_id)
+        result = mongo.db.contexts.delete_one({"_id": context_obj_id})
+        mongo.db.interactions.delete_many({"context_id": context_obj_id})
         if result.deleted_count == 1:
             flash("Context successfully removed.", "success")
         else:
             flash("The context could not be deleted.", "warning")
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
     except Exception:
         flash("Error deleting context.", "danger")
 
@@ -976,9 +1073,12 @@ def delete_context(context_id):
 def send_policy_to_context(context_id):
     """Persist a validated policy payload in context interactions."""
     try:
-        data = request.get_json(force=True) or {}
+        parse_object_id(context_id)
+        data = require_json_object(request.get_json(force=True))
         store_validated_policy(context_id, data)
         return redirect(url_for("main.context_detail", context_id=context_id))
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
     except PipelineStepError as exc:
         correlation_id = request.headers.get("X-Correlation-ID") or context_id
         return jsonify({
@@ -1004,7 +1104,11 @@ def send_policy_to_context(context_id):
 @main.route("/context/<context_id>/generate_policy", methods=["POST"])
 def trigger_policy_generation(context_id):
     """Start end-to-end policy generation and validation for a context."""
-    context = mongo.db.contexts.find_one({"_id": ObjectId(context_id)})
+    try:
+        context_obj_id = parse_object_id(context_id)
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
+    context = mongo.db.contexts.find_one({"_id": context_obj_id})
     blocker = _policy_generation_blocker(context)
     if blocker:
         payload = {
@@ -1070,6 +1174,10 @@ def trigger_policy_generation(context_id):
 @main.route("/context/<context_id>/system/refresh", methods=["POST"])
 def context_system_refresh(context_id):
     """Attempt controlled local maintenance actions and return to the context detail."""
+    try:
+        parse_object_id(context_id)
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
     result = refresh_system_state()
     if _wants_json_response():
         return jsonify(result), 202 if result.get("success") else 503
@@ -1235,6 +1343,10 @@ def _public_pipeline_event(event: dict) -> dict:
 @main.route("/pipeline/jobs/<job_id>", methods=["GET"])
 def get_pipeline_job_status(job_id):
     """Return a bounded pipeline job status document."""
+    try:
+        job_id = parse_bounded_token(job_id, field="job_id", pattern=PIPELINE_JOB_ID_PATTERN)
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
     job = get_pipeline_job(job_id)
     if not job:
         return jsonify({
@@ -1250,6 +1362,10 @@ def get_pipeline_job_status(job_id):
 @main.route("/pipeline/jobs/<job_id>/events", methods=["GET"])
 def get_pipeline_job_events(job_id):
     """Return bounded recent events for a pipeline job."""
+    try:
+        job_id = parse_bounded_token(job_id, field="job_id", pattern=PIPELINE_JOB_ID_PATTERN)
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
     job = get_pipeline_job(job_id)
     if not job:
         return jsonify({
@@ -1270,7 +1386,16 @@ def get_pipeline_job_events(job_id):
 @main.route("/context/<context_id>/pipeline/jobs/active", methods=["GET"])
 def get_active_pipeline_job_status(context_id):
     """Return the active pipeline job for a context when one exists."""
-    command = request.args.get("command", "generate_policy")
+    try:
+        parse_object_id(context_id)
+        command = parse_enum(
+            request.args.get("command", "generate_policy"),
+            field="command",
+            allowed=PIPELINE_COMMANDS,
+            default="generate_policy",
+        )
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
     job = find_active_pipeline_job(context_id, command=command)
     if not job:
         return jsonify({
@@ -1286,6 +1411,14 @@ def get_active_pipeline_job_status(context_id):
 @main.route("/diagnostics/<correlation_id>", methods=["GET"])
 def get_diagnostics(correlation_id):
     """Return a bounded pipeline diagnostic document by correlation id."""
+    try:
+        correlation_id = parse_bounded_token(
+            correlation_id,
+            field="correlation_id",
+            pattern=CORRELATION_ID_PATTERN,
+        )
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
     diagnostic = get_pipeline_diagnostic(correlation_id)
     if not diagnostic:
         return jsonify({

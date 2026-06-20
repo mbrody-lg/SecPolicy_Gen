@@ -104,6 +104,26 @@ def test_dashboard_route(client, monkeypatch):
     assert b"Generated contexts" in response.data
 
 
+@pytest.mark.parametrize(
+    ("query", "error_code"),
+    [
+        ("page=abc", "invalid_page"),
+        ("page=0", "invalid_page"),
+        ("sort=sideways", "invalid_sort"),
+        ("status=<script>", "invalid_status"),
+    ],
+)
+def test_dashboard_route_rejects_invalid_query_params(client, monkeypatch, query, error_code):
+    monkeypatch.setattr(routes_module.mongo, "db", FakeDB(), raising=False)
+
+    response = client.get(f"/?{query}")
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert payload["error_type"] == "contract_error"
+    assert payload["error_code"] == error_code
+
+
 def test_dashboard_route_renders_system_status_panel(client, monkeypatch):
     monkeypatch.setattr(routes_module.mongo, "db", FakeDB(), raising=False)
     monkeypatch.setattr(
@@ -387,6 +407,21 @@ def test_context_building_answers_update_context_and_rebuild_plan(client, monkey
     assert question_interaction["origin"] == "agent"
     assert question_interaction["answer"] == ""
     assert question_interaction["question_text"] == "Which business sector should the security context use?"
+
+
+def test_context_building_answers_rejects_non_string_json_answers(client):
+    context_id = ObjectId()
+
+    response = client.post(
+        f"/context/{context_id}/context-building/answers",
+        json={"answers": {"context_building_profile_sector": ["Healthcare"]}},
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert payload["error_type"] == "contract_error"
+    assert payload["error_code"] == "invalid_answers"
 
 
 def test_context_building_answers_can_complete_context(client):
@@ -1095,6 +1130,15 @@ def test_security_context_route_rejects_invalid_context_id(client):
 
     assert response.status_code == 400
     assert response.get_json()["error_code"] == "invalid_context_id"
+
+
+def test_context_detail_rejects_invalid_context_id(client):
+    response = client.get("/context/not-an-object-id")
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert payload["error_type"] == "contract_error"
+    assert payload["error_code"] == "invalid_context_id"
 
 
 def test_context_detail_renders_security_context_panel(client, monkeypatch):
@@ -2270,6 +2314,21 @@ def test_update_context_lesson_status_marks_lesson_exportable_json(client):
     assert context["context_lessons"][0]["status"] == "approved_for_export"
 
 
+def test_update_context_lesson_status_rejects_invalid_status_json(client):
+    context_id = str(ObjectId())
+
+    response = client.post(
+        f"/context/{context_id}/context-lessons/lesson-1/status",
+        json={"status": "publish_now"},
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert payload["error_type"] == "contract_error"
+    assert payload["error_code"] == "invalid_lesson_status"
+
+
 def test_update_context_lesson_status_escapes_json_response(client):
     context_id = str(ObjectId())
     routes_module.mongo.db.contexts.insert_one({
@@ -2667,6 +2726,23 @@ def test_get_pipeline_job_status_returns_public_job(client, monkeypatch):
     assert payload["job"]["diagnostic_url"] == "/diagnostics/corr-1"
 
 
+def test_get_pipeline_job_status_rejects_invalid_job_id(client, monkeypatch):
+    called = False
+
+    def fake_get_pipeline_job(job_id):
+        nonlocal called
+        called = True
+        return None
+
+    monkeypatch.setattr(routes_module, "get_pipeline_job", fake_get_pipeline_job)
+
+    response = client.get("/pipeline/jobs/<script>")
+
+    assert response.status_code == 400
+    assert response.get_json()["error_code"] == "invalid_job_id"
+    assert called is False
+
+
 def test_get_pipeline_job_events_returns_bounded_events(client, monkeypatch):
     monkeypatch.setattr(
         routes_module,
@@ -2716,14 +2792,16 @@ def test_get_pipeline_job_events_returns_bounded_events(client, monkeypatch):
 
 def test_get_active_pipeline_job_status_returns_404_when_missing(client, monkeypatch):
     monkeypatch.setattr(routes_module, "find_active_pipeline_job", lambda context_id, command="generate_policy": None)
+    context_id = str(ObjectId())
 
-    response = client.get("/context/ctx-1/pipeline/jobs/active")
+    response = client.get(f"/context/{context_id}/pipeline/jobs/active")
 
     assert response.status_code == 404
     assert response.get_json()["error_code"] == "active_pipeline_job_not_found"
 
 
 def test_get_active_pipeline_job_status_accepts_command_query(client, monkeypatch):
+    context_id = str(ObjectId())
     captured = {}
     monkeypatch.setattr(
         routes_module,
@@ -2741,11 +2819,28 @@ def test_get_active_pipeline_job_status_accepts_command_query(client, monkeypatc
         },
     )
 
-    response = client.get("/context/ctx-1/pipeline/jobs/active?command=execute_context_plan")
+    response = client.get(f"/context/{context_id}/pipeline/jobs/active?command=execute_context_plan")
 
     assert response.status_code == 200
-    assert captured == {"context_id": "ctx-1", "command": "execute_context_plan"}
+    assert captured == {"context_id": context_id, "command": "execute_context_plan"}
     assert response.get_json()["job"]["command"] == "execute_context_plan"
+
+
+def test_get_active_pipeline_job_status_rejects_invalid_command(client, monkeypatch):
+    called = False
+
+    def fake_find_active_pipeline_job(context_id, command="generate_policy"):
+        nonlocal called
+        called = True
+        return None
+
+    monkeypatch.setattr(routes_module, "find_active_pipeline_job", fake_find_active_pipeline_job)
+
+    response = client.get(f"/context/{ObjectId()}/pipeline/jobs/active?command=delete_everything")
+
+    assert response.status_code == 400
+    assert response.get_json()["error_code"] == "invalid_command"
+    assert called is False
 
 
 def test_context_system_refresh_redirects_back_to_context(client, monkeypatch):
@@ -2804,6 +2899,23 @@ def test_get_diagnostics_route_returns_document(client, monkeypatch):
     ]
     assert "_id" not in payload
     assert "raw_response" not in payload
+
+
+def test_get_diagnostics_route_rejects_invalid_correlation_id(client, monkeypatch):
+    called = False
+
+    def fake_get_pipeline_diagnostic(correlation_id):
+        nonlocal called
+        called = True
+        return None
+
+    monkeypatch.setattr(routes_module, "get_pipeline_diagnostic", fake_get_pipeline_diagnostic)
+
+    response = client.get("/diagnostics/<script>")
+
+    assert response.status_code == 400
+    assert response.get_json()["error_code"] == "invalid_correlation_id"
+    assert called is False
 
 
 def test_get_diagnostics_route_returns_404_when_missing(client, monkeypatch):
