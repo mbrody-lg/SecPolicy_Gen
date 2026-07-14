@@ -45,6 +45,7 @@ When the work needs a single CI-aligned evidence command for the full critical l
 ## Operational Playbooks
 
 - [Context -> Policy -> Validator Runbook](./context-policy-validator-loop.md)
+- [Target Agent Contract Pack](./target-agent-contract-pack.md)
 - [Observability Log Contract](./observability-log-contract.md)
 - [Developer Recovery](./developer-recovery.md)
 - [CI Handoff Contract](./ci-handoff-contract.md)
