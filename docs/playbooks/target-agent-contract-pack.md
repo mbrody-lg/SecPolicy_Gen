@@ -37,7 +37,18 @@ runtime, unless a different project reference is supplied.
 
 ## Artifact Contracts
 
-All artifacts must include:
+Use current service contracts as the source of truth. Docker Agent/cagent
+configs may reference these contracts, but must not redefine them.
+
+This pack has three contract layers:
+
+| Layer | Meaning | Change rule |
+| --- | --- | --- |
+| Current service contract | Already produced or accepted by `context-agent`, `policy-agent`, or `validator-agent` | Must match current code and tests |
+| Compatibility bridge | Explicit adapter shape between current services | May be tightened only with producer and consumer tests |
+| Target runtime artifact | Required for Docker Agent/cagent dry-run, shadow mode, parity, or cutover | Must not be treated as current service behavior until implemented |
+
+Target runtime artifacts should include these envelope fields when practical:
 
 - `schema_version`;
 - `artifact_id`;
@@ -48,14 +59,16 @@ All artifacts must include:
 - `status`;
 - `errors`.
 
-Use current service contracts as the source of truth. Docker Agent/cagent
-configs may reference these contracts, but must not redefine them.
+Do not require this envelope on current service contracts that already use a
+different version field, for example `security_context.v1`.
 
 ## Required Artifacts
 
 ### `workflow_state`
 
 Tracks the current workflow phase and available actions.
+
+Layer: target runtime artifact.
 
 Required fields:
 
@@ -72,6 +85,8 @@ Required fields:
 ### `security_context.v1`
 
 Represents the approved enterprise security context.
+
+Layer: current service contract.
 
 Required fields:
 
@@ -99,6 +114,8 @@ Key reusable fields include:
 
 Represents Context Agent phase outputs.
 
+Layer: current service contract.
+
 Current artifacts:
 
 - `context_building`;
@@ -122,11 +139,17 @@ Reusable fields:
 - `unresolved_gaps`;
 - `policy_handoff`.
 
+Phase-specific required fields remain owned by
+`context-agent/app/context_output_schemas.py`. This pack must not collapse
+those phase schemas into a single shared schema.
+
 ### `policy_agent.business_context`
 
 Represents the current compatibility bridge from Context Agent to Policy Agent.
 
-Required fields:
+Layer: compatibility bridge.
+
+Context Agent should emit these fields when available:
 
 - `country`;
 - `region`;
@@ -140,9 +163,15 @@ Required fields:
 - `data_types`;
 - `retrieval_collection_families`.
 
+Policy Agent currently requires only its generation payload core fields and
+treats `business_context` as optional/open-shaped. Tightening this bridge
+requires producer and consumer tests in the same PR.
+
 ### `context_agent.policy_handoff.v1`
 
 Represents the final approved handoff from Context Agent to Policy Agent.
+
+Layer: current service contract.
 
 Required fields:
 
@@ -164,16 +193,28 @@ Required fields:
 
 Validation-critical conditions:
 
+- exact `version` is supported by Context Agent;
 - `contract` is `context_agent.policy_handoff`;
 - `source` is `context-agent`;
+- `security_context_version` matches the current security context version;
+- `final_context_version` matches the current final context version;
+- `final_context_status` is `ready`;
+- `context_ready_for_policy` is `true`;
+- `plan_revision_id` is not empty;
+- `context_snapshot_hash` is not empty;
 - final context sections are accepted;
+- final context sections have non-empty content;
 - structured findings are completed;
+- structured findings have stable `task_id` values;
+- findings expose structured evidence or legacy content;
 - `unresolved_gaps` is empty;
 - `retrieval_hints.collection_families` is not empty.
 
 ### `rag.retrieval_context`
 
 Represents the normalized policy-generation input used for retrieval planning.
+
+Layer: current service contract.
 
 Required fields:
 
@@ -190,9 +231,15 @@ Required fields:
 - `need`;
 - `data_types`.
 
+Current behavior derives `data_types` from prompt, sector, methodology, and
+need. Treat provided `business_context.data_types` as input intent until Policy
+Agent explicitly consumes it.
+
 ### `rag.retrieval_plan`
 
 Represents deterministic collection-specific retrieval planning.
+
+Layer: current service contract.
 
 Required fields:
 
@@ -207,11 +254,16 @@ Each step must include `family`, `collection`, `query`, `filters`, and `top_k`.
 
 Carries the regulatory and methodology evidence used by policy generation.
 
+Layer: current service contract.
+
 Required fields:
 
 - `text`;
 - `source_id`;
-- `collection`;
+- `collection`.
+
+Optional or derived fields:
+
 - `family`;
 - `document_id`;
 - `score`;
@@ -221,6 +273,8 @@ Required fields:
 ### `policy_agent.policy_draft`
 
 Represents generated policy content before validation.
+
+Layer: current service contract.
 
 Required fields:
 
@@ -235,6 +289,8 @@ Required fields:
 ### `validator.validation_payload`
 
 Represents the payload Validator Agent must be able to validate.
+
+Layer: current service contract.
 
 Required fields:
 
@@ -254,19 +310,35 @@ Optional fields:
 
 Represents validator output.
 
+Layer: current service contract.
+
 Required fields:
 
-- `decision`: `accepted`, `review`, or `rejected`;
+- `status`: `accepted`, `review`, or `rejected`;
 - `reasons`;
-- `recommendations`;
+- `recommendations`.
+
+Optional fields:
+
+- `evaluator_analysis`;
+- `retrieval_evidence`;
+- `correlation_id`.
+
+Target validation extensions:
+
 - `evidence_gaps`;
 - `context_gaps`;
 - `policy_gaps`;
-- `regeneration_instructions`;
+- `regeneration_instructions`.
+
+These target extensions require implementation and tests before they can be
+treated as validator output.
 
 ### `runtime_invocation`
 
 Represents one Docker Agent/cagent execution attempt.
+
+Layer: target runtime artifact.
 
 Required fields:
 
@@ -287,6 +359,8 @@ Required fields:
 
 Compares current authoritative execution with Docker Agent/cagent execution.
 
+Layer: target runtime artifact.
+
 Required fields:
 
 - `case_id`;
@@ -304,15 +378,20 @@ Required fields:
 
 Represents cross-service traceability for current and candidate runtimes.
 
+Layer: current service contract.
+
 Required fields:
+
+- `event`;
+- `service`;
+- `stage`;
+- `result`.
+
+Optional fields when available and safe:
 
 - `X-Correlation-ID`;
 - `correlation_id`;
 - `context_id`;
-- `event`;
-- `service`;
-- `stage`;
-- `result`;
 - `route`;
 - `method`;
 - `status_code`;
@@ -323,6 +402,8 @@ Required fields:
 ### `loop.evidence_artifact`
 
 Represents attachable runtime validation evidence.
+
+Layer: current service contract.
 
 Current artifact:
 
@@ -372,6 +453,41 @@ not canonical business contracts.
 PR #17 can continue after the PR #16 decision. Shadow-mode runners and
 summaries are useful only if they compare current authoritative execution
 against the target artifacts above.
+
+## INIT-25 Decision Gates
+
+Use these gates before expanding Docker Agent/cagent scope.
+
+### Continue
+
+Continue migration when:
+
+- dry-run output validates the current service contracts or explicitly marked
+  target runtime artifacts;
+- shadow mode is non-authoritative and produces useful parity reports;
+- Docker Agent/cagent reduces orchestration, packaging, observability, or
+  runtime-permission complexity;
+- rollback remains simpler than the migration path.
+
+### Narrow
+
+Narrow migration to adapter experiments when:
+
+- Docker Agent/cagent is useful for one bounded context but not the whole
+  product workflow;
+- YAML prompts or runtime scripts start duplicating domain contracts;
+- parity evidence is useful but not stable enough for CI promotion;
+- runtime permissions require more access than the current architecture.
+
+### Pause
+
+Pause migration when:
+
+- Docker Agent/cagent scaffolding mainly reproduces current implementation
+  details without improving the final product workflow;
+- target artifacts cannot be validated against deterministic fixtures;
+- shadow execution mutates authoritative state;
+- runtime auth, permission, observability, or rollback gates are unclear.
 
 ## Acceptance Gates
 
