@@ -1,0 +1,38 @@
+{
+  "case_id": "legal-office-confidentiality",
+  "contract_compatible": false,
+  "artifact_differences": [
+    {
+      "artifact": "context_agent.policy_handoff.v1",
+      "field": "context_ready_for_policy",
+      "reason": "candidate_did_not_preserve_final_context_gate"
+    }
+  ],
+  "evidence_coverage": {
+    "required_families": ["legal_norms", "implementation_guides"],
+    "covered_families": ["legal_norms"],
+    "missing_families": ["implementation_guides"]
+  },
+  "validation_difference": {
+    "authoritative_status": "accepted",
+    "candidate_status": "rejected",
+    "changed": true
+  },
+  "runtime_errors": [
+    {
+      "error_code": "candidate_contract_failed",
+      "stage": "dry_run"
+    }
+  ],
+  "timing": {
+    "authoritative_ms": 1250,
+    "candidate_ms": 900
+  },
+  "observability": {
+    "correlation_id": "init25-legal-office-confidentiality",
+    "has_runtime_invocation": true,
+    "has_logs_ref": true
+  },
+  "security_findings": [],
+  "recommendation": "pause"
+}

@@ -1,4 +1,5 @@
 import sys
+import json
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.validate_init25_parity_artifact import validate  # noqa: E402
+
+
+FIXTURE_DIR = ROOT / "tests" / "fixtures" / "init25" / "parity_reports"
 
 
 def _valid_report():
@@ -75,3 +79,10 @@ def test_init25_parity_artifact_rejects_contract_success_with_runtime_errors():
 
     with pytest.raises(SystemExit, match="contract-compatible reports must not contain runtime_errors"):
         validate(report)
+
+
+@pytest.mark.parametrize("fixture_path", sorted(FIXTURE_DIR.glob("*.json")))
+def test_init25_parity_fixture_contracts_are_valid(fixture_path):
+    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+    validate(payload)
