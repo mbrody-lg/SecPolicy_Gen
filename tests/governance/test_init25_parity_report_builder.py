@@ -78,6 +78,27 @@ def test_init25_parity_report_builder_recommends_pause_for_runtime_errors():
     assert report["recommendation"] == "pause"
 
 
+def test_init25_parity_report_builder_narrows_on_validation_drift():
+    candidate = _candidate_summary()
+    candidate["validation_status"] = "review"
+
+    report = build_report("healthcare-clinic-gdpr", _authoritative_summary(), candidate)
+
+    assert report["contract_compatible"] is True
+    assert report["validation_difference"]["changed"] is True
+    assert report["recommendation"] == "narrow"
+
+
+def test_init25_parity_report_builder_pauses_on_security_findings():
+    candidate = _candidate_summary()
+    candidate["security_findings"] = [{"finding_code": "unsafe_permission", "stage": "dry_run"}]
+
+    report = build_report("healthcare-clinic-gdpr", _authoritative_summary(), candidate)
+
+    assert report["contract_compatible"] is True
+    assert report["recommendation"] == "pause"
+
+
 def test_init25_parity_report_builder_cli_writes_valid_report(tmp_path):
     authoritative = tmp_path / "authoritative.json"
     candidate = tmp_path / "candidate.json"

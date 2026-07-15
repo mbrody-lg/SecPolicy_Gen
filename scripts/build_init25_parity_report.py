@@ -79,10 +79,12 @@ def _recommendation(
     contract_compatible: bool,
     runtime_errors: list[dict[str, Any]],
     missing_families: list[str],
+    validation_changed: bool,
+    security_findings: list[dict[str, Any]],
 ) -> str:
-    if runtime_errors:
+    if runtime_errors or security_findings:
         return "pause"
-    if not contract_compatible or missing_families:
+    if not contract_compatible or missing_families or validation_changed:
         return "narrow"
     return "continue"
 
@@ -93,6 +95,8 @@ def build_report(case_id: str, authoritative: dict[str, Any], candidate: dict[st
     runtime_errors = _object_list(candidate.get("runtime_errors"))
     authoritative_status = str(authoritative.get("validation_status") or "unknown")
     candidate_status = str(candidate.get("validation_status") or "unknown")
+    security_findings = _object_list(candidate.get("security_findings"))
+    validation_changed = authoritative_status != candidate_status
     contract_compatible = not artifact_differences and not runtime_errors
     report = {
         "case_id": case_id,
@@ -102,7 +106,7 @@ def build_report(case_id: str, authoritative: dict[str, Any], candidate: dict[st
         "validation_difference": {
             "authoritative_status": authoritative_status,
             "candidate_status": candidate_status,
-            "changed": authoritative_status != candidate_status,
+            "changed": validation_changed,
         },
         "runtime_errors": runtime_errors,
         "timing": {
@@ -114,11 +118,13 @@ def build_report(case_id: str, authoritative: dict[str, Any], candidate: dict[st
             "has_runtime_invocation": bool(candidate.get("runtime_invocation")),
             "has_logs_ref": bool(candidate.get("logs_ref")),
         },
-        "security_findings": _object_list(candidate.get("security_findings")),
+        "security_findings": security_findings,
         "recommendation": _recommendation(
             contract_compatible=contract_compatible,
             runtime_errors=runtime_errors,
             missing_families=evidence_coverage["missing_families"],
+            validation_changed=validation_changed,
+            security_findings=security_findings,
         ),
     }
     validate(report)

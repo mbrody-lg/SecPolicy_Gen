@@ -57,6 +57,11 @@ def _contains_sensitive_key(value: Any) -> bool:
     return False
 
 
+def validate_no_sensitive_fields(value: Any) -> None:
+    if _contains_sensitive_key(value):
+        _fail("artifact contains sensitive or raw runtime payload keys")
+
+
 def _require_object(payload: dict[str, Any], field: str) -> dict[str, Any]:
     value = payload.get(field)
     if not isinstance(value, dict):
@@ -64,11 +69,16 @@ def _require_object(payload: dict[str, Any], field: str) -> dict[str, Any]:
     return value
 
 
-def _require_list(payload: dict[str, Any], field: str) -> list[Any]:
+def _require_string_list(payload: dict[str, Any], field: str) -> None:
     value = payload.get(field)
-    if not isinstance(value, list):
-        _fail(f"{field} must be a list")
-    return value
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        _fail(f"{field} must be a list of strings")
+
+
+def _require_object_list(payload: dict[str, Any], field: str) -> None:
+    value = payload.get(field)
+    if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+        _fail(f"{field} must be a list of objects")
 
 
 def validate(payload: dict[str, Any]) -> None:
@@ -81,23 +91,69 @@ def validate(payload: dict[str, Any]) -> None:
     if not isinstance(payload.get("contract_compatible"), bool):
         _fail("contract_compatible must be a boolean")
 
-    _require_list(payload, "artifact_differences")
-    _require_list(payload, "runtime_errors")
-    _require_list(payload, "security_findings")
-    _require_object(payload, "evidence_coverage")
-    _require_object(payload, "validation_difference")
-    _require_object(payload, "timing")
-    _require_object(payload, "observability")
+    _require_object_list(payload, "artifact_differences")
+    _require_object_list(payload, "runtime_errors")
+    _require_object_list(payload, "security_findings")
+    evidence_coverage = _require_object(payload, "evidence_coverage")
+    validation_difference = _require_object(payload, "validation_difference")
+    timing = _require_object(payload, "timing")
+    observability = _require_object(payload, "observability")
+    for field in ("required_families", "covered_families", "missing_families"):
+        _require_string_list(evidence_coverage, field)
+    if not isinstance(validation_difference.get("authoritative_status"), str):
+        _fail("validation_difference.authoritative_status must be a string")
+    if not isinstance(validation_difference.get("candidate_status"), str):
+        _fail("validation_difference.candidate_status must be a string")
+    if not isinstance(validation_difference.get("changed"), bool):
+        _fail("validation_difference.changed must be a boolean")
+    for field in ("authoritative_ms", "candidate_ms"):
+        if timing.get(field) is not None and not isinstance(timing[field], (int, float)):
+            _fail(f"timing.{field} must be numeric or null")
+    if observability.get("correlation_id") is not None and not isinstance(observability["correlation_id"], str):
+        _fail("observability.correlation_id must be a string or null")
+    for field in ("has_runtime_invocation", "has_logs_ref"):
+        if not isinstance(observability.get(field), bool):
+            _fail(f"observability.{field} must be a boolean")
 
     recommendation = payload.get("recommendation")
     if recommendation not in VALID_RECOMMENDATIONS:
         _fail("recommendation must be continue, narrow, or pause")
 
-    if payload["contract_compatible"] and payload["runtime_errors"]:
-        _fail("contract-compatible reports must not contain runtime_errors")
+    expected_missing = sorted(
+        set(evidence_coverage["required_families"])
+        - set(evidence_coverage["covered_families"])
+    )
+    if evidence_coverage["missing_families"] != expected_missing:
+        _fail("evidence_coverage.missing_families is inconsistent")
+    expected_changed = (
+        validation_difference["authoritative_status"]
+        != validation_difference["candidate_status"]
+    )
+    if validation_difference["changed"] is not expected_changed:
+        _fail("validation_difference.changed is inconsistent")
+    expected_compatible = not payload["artifact_differences"] and not payload["runtime_errors"]
+    if payload["contract_compatible"] is not expected_compatible:
+        _fail("contract_compatible is inconsistent")
 
-    if _contains_sensitive_key(payload):
-        _fail("artifact contains sensitive or raw runtime payload keys")
+    if recommendation == "continue":
+        if not payload["contract_compatible"]:
+            _fail("continue requires contract_compatible=true")
+        if evidence_coverage["missing_families"]:
+            _fail("continue requires complete evidence coverage")
+        if validation_difference["changed"]:
+            _fail("continue requires unchanged validation status")
+        if payload["security_findings"]:
+            _fail("continue requires no security findings")
+
+    expected_recommendation = "continue"
+    if payload["runtime_errors"] or payload["security_findings"]:
+        expected_recommendation = "pause"
+    elif not payload["contract_compatible"] or expected_missing or expected_changed:
+        expected_recommendation = "narrow"
+    if recommendation != expected_recommendation:
+        _fail(f"recommendation must be {expected_recommendation} for this report")
+
+    validate_no_sensitive_fields(payload)
 
 
 def main() -> None:
