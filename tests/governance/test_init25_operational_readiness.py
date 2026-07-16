@@ -1,75 +1,87 @@
+import hashlib
+
 from scripts.assess_init25_operational_readiness import assess
 
 
-def _campaign() -> dict:
-    run = {
-        "terminal": True,
-        "unclassified_errors": 0,
-        "authoritative_mutations": 0,
-        "orphan_processes": 0,
-        "logs_verified": True,
-        "cost_usd": 0.10,
-        "authoritative_ms": 100,
-        "candidate_ms": 110,
-    }
+def _evidence(root, name):
+    path = root / f"{name}.json"
+    path.write_text(f'{{"evidence":"{name}"}}', encoding="utf-8")
+    return {"path": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "status": "passed"}
+
+
+def _admission():
+    return {"schema_version": "1.0", "initiative": "INIT-25", "gate": "vertical_pilot_admission", "eligible": True}
+
+
+def _campaign(root):
+    runs = []
+    for index in range(30):
+        runs.append({
+            "run_id": f"run-{index}", "status": "success", "terminal": True,
+            "error_classification": "none", "authoritative_mutations": 0,
+            "orphan_processes": 0, "logs_verified": True, "cost_usd": 0.10,
+            "authoritative_ms": 100, "candidate_ms": 110,
+            "input_hash": f"{index:064x}", "result_hash": f"{index + 100:064x}",
+            "provenance": {
+                "commit_sha": "commit", "config_digest": "config", "model_version": "model",
+                "runtime_version": "runtime", "timestamp": "2026-07-16T00:00:00Z",
+            },
+            "evidence": _evidence(root, f"run-{index}"),
+        })
+    drills = {name: _evidence(root, f"drill-{name}") for name in (
+        "backup_restore", "corrupted_evidence", "provider_failure",
+        "restart_recovery", "timeout_cancellation",
+    )}
+    drills["rollback"] = [_evidence(root, "rollback-1"), _evidence(root, "rollback-2")]
+    controls = {name: _evidence(root, f"control-{name}") for name in (
+        "auth_verified", "internal_only_network", "non_root",
+        "otel_content_capture_disabled", "resources_explicit",
+        "secrets_governed", "session_storage_governed",
+    )}
     return {
-        "budget_usd": 4,
-        "runs": [dict(run) for _ in range(30)],
-        "drills": {
-            "backup_restore": "passed",
-            "corrupted_evidence": "passed",
-            "provider_failure": "passed",
-            "restart_recovery": "passed",
-            "timeout_cancellation": "passed",
-            "rollback_runs": 2,
-        },
-        "runtime": {
-            "auth_verified": True,
-            "internal_only_network": True,
-            "non_root": True,
-            "otel_content_capture_disabled": True,
-            "resources_explicit": True,
-            "secrets_governed": True,
-            "session_storage_governed": True,
-            "sbom_digest": "sha256:sbom",
-            "scan_digest": "sha256:scan",
-        },
+        "budget_usd": 4, "runs": runs, "drills": drills,
+        "runtime": {"controls": controls, "sbom": _evidence(root, "sbom"), "scan": _evidence(root, "scan")},
     }
 
 
-def test_missing_campaign_fails_closed() -> None:
-    report = assess({"eligible": False}, None)
-
-    assert report["ready"] is False
-    assert report["campaign_executed"] is False
-    assert report["next_action"] == "pause_runtime_expansion"
+def test_missing_or_malformed_campaign_fails_closed(tmp_path) -> None:
+    assert assess({}, None, tmp_path)["ready"] is False
+    assert assess(_admission(), {"runs": "thirty"}, tmp_path)["ready"] is False
 
 
-def test_complete_observed_campaign_can_reach_direction_review() -> None:
-    report = assess({"eligible": True}, _campaign())
+def test_verified_campaign_can_reach_direction_review(tmp_path) -> None:
+    report = assess(_admission(), _campaign(tmp_path), tmp_path)
 
     assert report["ready"] is True
     assert report["metrics"]["observed_runs"] == 30
     assert report["next_action"] == "review_direction"
 
 
-def test_mutation_or_missing_drill_blocks_readiness() -> None:
-    campaign = _campaign()
-    campaign["runs"][0]["authoritative_mutations"] = 1
-    campaign["drills"]["provider_failure"] = "failed"
+def test_duplicate_runs_or_fabricated_supply_chain_digest_block(tmp_path) -> None:
+    campaign = _campaign(tmp_path)
+    campaign["runs"][1]["run_id"] = campaign["runs"][0]["run_id"]
+    campaign["runtime"]["sbom"]["sha256"] = "0" * 64
 
-    report = assess({"eligible": True}, campaign)
+    report = assess(_admission(), campaign, tmp_path)
 
-    assert report["ready"] is False
-    assert "no_authoritative_mutations_or_orphans" in report["blockers"]
-    assert "required_drills_passed" in report["blockers"]
+    assert "at_least_30_unique_observed_runs" in report["blockers"]
+    assert "supply_chain_evidence_verified" in report["blockers"]
 
 
-def test_latency_regression_requires_preagreed_quality_exception() -> None:
-    campaign = _campaign()
-    for run in campaign["runs"]:
-        run["candidate_ms"] = 150
+def test_failed_runs_cannot_pass_success_threshold(tmp_path) -> None:
+    campaign = _campaign(tmp_path)
+    for run in campaign["runs"][:2]:
+        run["status"] = "failed"
+        run["error_classification"] = "provider_failure"
 
-    assert assess({"eligible": True}, campaign)["ready"] is False
-    campaign["quality_gain_preagreed"] = True
-    assert assess({"eligible": True}, campaign)["ready"] is True
+    assert assess(_admission(), campaign, tmp_path)["ready"] is False
+
+
+def test_nearest_rank_p95_catches_two_latency_outliers(tmp_path) -> None:
+    campaign = _campaign(tmp_path)
+    for run in campaign["runs"][-2:]:
+        run["candidate_ms"] = 200
+
+    report = assess(_admission(), campaign, tmp_path)
+
+    assert report["checks"]["latency_regression_bounded"] is False
