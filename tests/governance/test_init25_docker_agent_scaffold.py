@@ -39,7 +39,7 @@ def _config():
     return yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
 
 
-def test_init25_scaffold_uses_v1881_schema_and_named_yaml_model():
+def test_init25_scaffold_uses_pinned_schema_and_named_yaml_model():
     config = _config()
 
     assert config["version"] == 10

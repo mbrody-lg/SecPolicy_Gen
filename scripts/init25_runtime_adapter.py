@@ -24,6 +24,9 @@ from uuid import uuid4
 
 MAX_PROMPT_BYTES = 1024 * 1024
 MAX_OUTPUT_BYTES = 1024 * 1024
+RUNTIME_LOCK = (
+    Path(__file__).resolve().parents[1] / "agents" / "docker-agent-runtime.lock.json"
+)
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _AGENT = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -129,6 +132,23 @@ def _load_permission_profile(path: Path) -> tuple[dict[str, Any], str]:
     ):
         raise ValueError("permission_profile_invalid")
     return body, digest
+
+
+def _load_runtime_lock(path: Path) -> tuple[str, str]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("runtime_lock_invalid") from exc
+    version = payload.get("version") if isinstance(payload, dict) else None
+    commit = payload.get("commit") if isinstance(payload, dict) else None
+    if (
+        not isinstance(version, str)
+        or not re.fullmatch(r"v\d+\.\d+\.\d+", version)
+        or not isinstance(commit, str)
+        or not re.fullmatch(r"[0-9a-f]{40}", commit)
+    ):
+        raise ValueError("runtime_lock_invalid")
+    return version, commit
 
 
 def _bounded_error(stderr: str, stdout: str, returncode: int) -> str | None:
@@ -267,13 +287,16 @@ class DockerAgentRuntimeAdapter:
             self.permission_profile_path
         )
         self._config_sha256 = _sha256(self.config_path.read_bytes())
-        self._runtime_version_cache: str | None = None
+        self._expected_runtime_identity = _load_runtime_lock(RUNTIME_LOCK)
+        self._runtime_identity_cache: tuple[str, str] | None = None
 
     def _environment(self, runtime_root: Path) -> dict[str, str]:
         allowed = self._profile["environment"]["allow"]
         env = {key: os.environ[key] for key in allowed if key in os.environ}
         env.update(
             {
+                "DOCKER_AGENT_AUTO_INSTALL": "false",
+                "DOCKER_AGENT_AUTO_UPDATE": "false",
                 "HOME": str(runtime_root / "home"),
                 "TELEMETRY_ENABLED": "false",
             }
@@ -281,9 +304,11 @@ class DockerAgentRuntimeAdapter:
         (runtime_root / "home").mkdir()
         return env
 
-    def _runtime_version(self, env: dict[str, str], timeout: float) -> str:
-        if self._runtime_version_cache is not None:
-            return self._runtime_version_cache
+    def _runtime_identity(
+        self, env: dict[str, str], timeout: float
+    ) -> tuple[str, str] | None:
+        if self._runtime_identity_cache is not None:
+            return self._runtime_identity_cache
         try:
             result = subprocess.run(
                 ["docker", "agent", "version"],
@@ -293,15 +318,16 @@ class DockerAgentRuntimeAdapter:
                 env=env,
                 timeout=min(10, timeout),
             )
-        except subprocess.TimeoutExpired:
-            return "unavailable"
+        except (OSError, subprocess.TimeoutExpired):
+            return None
         if result.returncode:
-            return "unavailable"
-        match = re.search(r"\bversion\s+(v?\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)\b", result.stdout)
-        version = match.group(1) if match else "unavailable"
-        if version != "unavailable":
-            self._runtime_version_cache = version
-        return version
+            return None
+        version = re.search(r"\bversion\s+(v\d+\.\d+\.\d+)\b", result.stdout)
+        commit = re.search(r"^Commit:\s+([0-9a-f]{40})$", result.stdout, re.MULTILINE)
+        if not version or not commit:
+            return None
+        self._runtime_identity_cache = (version.group(1), commit.group(1))
+        return self._runtime_identity_cache
 
     def _write_log_evidence(self, invocation_id: str, events: list[dict[str, Any]]) -> dict[str, Any]:
         logs_dir = self.output_dir / "runtime-logs"
@@ -397,17 +423,22 @@ class DockerAgentRuntimeAdapter:
                 runtime_version = "unavailable"
             elif self.executor is None:
                 remaining = deadline - time.monotonic()
-                runtime_version = (
-                    self._runtime_version(env, remaining)
+                runtime_identity = (
+                    self._runtime_identity(env, remaining)
                     if remaining > 0
-                    else "unavailable"
+                    else None
                 )
+                runtime_version = runtime_identity[0] if runtime_identity else "unavailable"
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     execution = _Execution(returncode=124, error_code="runtime_timeout")
-                elif runtime_version == "unavailable":
+                elif runtime_identity is None:
                     execution = _Execution(
                         returncode=1, error_code="runtime_version_unavailable"
+                    )
+                elif runtime_identity != self._expected_runtime_identity:
+                    execution = _Execution(
+                        returncode=1, error_code="runtime_incompatible"
                     )
                 else:
                     execution = _run_process_group(

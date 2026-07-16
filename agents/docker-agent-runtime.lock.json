@@ -1,0 +1,9 @@
+{
+  "version": "v1.110.0",
+  "commit": "dd41b8b43e849b914747c66fa146b3c19a1acb25",
+  "schema_version": 10,
+  "assets": {
+    "darwin-arm64": "bcba8df651335075329a52639d2c092c22670d54a55b82d631f2b9437b3ee53c",
+    "linux-amd64": "6ba922b5878438139b636e8daf9e925882a813e480c9592375960f56615189f0"
+  }
+}

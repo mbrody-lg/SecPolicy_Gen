@@ -1,9 +1,9 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/docker/docker-agent/v1.88.1/agent-schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/docker/docker-agent/v1.110.0/agent-schema.json
 version: 10
 
 metadata:
   author: SecPolicyGen
-  description: Read-only INIT-25 contract dry-run team for Docker Agent v1.88.1
+  description: Read-only INIT-25 contract dry-run team for Docker Agent v1.110.0
   version: "0.1.0"
 
 models:

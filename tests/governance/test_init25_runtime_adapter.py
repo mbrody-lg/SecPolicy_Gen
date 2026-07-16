@@ -103,6 +103,8 @@ def test_runtime_uses_ephemeral_home(tmp_path):
 
     assert captured["HOME"] != os.environ.get("HOME")
     assert not Path(captured["HOME"]).exists()
+    assert captured["DOCKER_AGENT_AUTO_INSTALL"] == "false"
+    assert captured["DOCKER_AGENT_AUTO_UPDATE"] == "false"
     assert captured["TELEMETRY_ENABLED"] == "false"
 
 
@@ -134,6 +136,29 @@ def test_sbx_absent_fails_closed_without_starting_runtime(tmp_path, monkeypatch)
     assert result.runtime_invocation["mode"] == "shadow"
     assert result.runtime_invocation["output_artifact_ids"] == []
     assert adapter.verify_logs_ref(result.runtime_invocation["logs_ref"])
+
+
+def test_runtime_identity_drift_fails_closed_before_execution(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "scripts.init25_runtime_adapter.shutil.which",
+        lambda *_args, **_kwargs: "/sbx",
+    )
+    adapter = _adapter(tmp_path)
+    monkeypatch.setattr(
+        adapter,
+        "_runtime_identity",
+        lambda *_args: ("v1.88.1", "0" * 40),
+    )
+    monkeypatch.setattr(
+        "scripts.init25_runtime_adapter._run_process_group",
+        lambda *_args, **_kwargs: pytest.fail("incompatible runtime was executed"),
+    )
+
+    result = _invoke(adapter)
+
+    assert result.error_code == "runtime_incompatible"
+    assert result.returncode == 1
+    assert result.runtime_invocation["runtime_version"] == "v1.88.1"
 
 
 def test_logs_are_allowlisted_and_canary_never_persisted(tmp_path):
