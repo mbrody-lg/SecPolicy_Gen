@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CAPABILITY_CONTRACT = ROOT / "docs/contracts/init25-candidate-capabilities.yaml"
 PERMISSION_PROFILE = ROOT / "agents/init25_shadow_permission_profile.json"
 AGENT_CONFIG = ROOT / "agents/secpolicy_contract_dry_run.yaml"
+EVIDENCE_MANIFEST = ROOT / "migration/init25/vertical-pilot-evidence.json"
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -31,10 +33,25 @@ def _load_json(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _verified_evidence(manifest_path: Path, evidence_id: str) -> bool:
+    if not manifest_path.is_file():
+        return False
+    try:
+        manifest = _load_json(manifest_path)
+        entry = manifest.get("evidence", {}).get(evidence_id)
+        artifact = (manifest_path.parent / entry["path"]).resolve(strict=True)
+        artifact.relative_to(manifest_path.parent.resolve())
+        digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    except (KeyError, OSError, TypeError, ValueError):
+        return False
+    return entry.get("status") == "passed" and entry.get("sha256") == digest
+
+
 def assess(
     capability_contract: Path = CAPABILITY_CONTRACT,
     permission_profile: Path = PERMISSION_PROFILE,
     agent_config: Path = AGENT_CONFIG,
+    evidence_manifest: Path = EVIDENCE_MANIFEST,
 ) -> dict[str, Any]:
     contract = _load_yaml(capability_contract)
     profile = _load_json(permission_profile)
@@ -47,11 +64,13 @@ def assess(
         "candidate_ports_active": contract.get("status") == "active",
         "verified_principal_available": (
             isinstance(activation, dict)
-            and activation.get("requires_verified_principal") is False
+            and activation.get("requires_verified_principal") is True
+            and _verified_evidence(evidence_manifest, "verified_principal")
         ),
         "deadline_cancellation_available": (
             isinstance(activation, dict)
-            and activation.get("requires_deadline_enforcer") is False
+            and activation.get("requires_deadline_enforcer") is True
+            and _verified_evidence(evidence_manifest, "deadline_cancellation")
         ),
         "service_network_allowlisted": (
             isinstance(tools, dict)
@@ -59,6 +78,7 @@ def assess(
             and "service" in tools.get("allow", [])
             and "network" not in tools.get("deny", [])
             and "service" not in tools.get("deny", [])
+            and _verified_evidence(evidence_manifest, "service_network_permissions")
         ),
         "coordinator_scope_is_policy_validator_only": (
             coordinator.get("sub_agents") == ["policy_agent", "validator_agent"]
