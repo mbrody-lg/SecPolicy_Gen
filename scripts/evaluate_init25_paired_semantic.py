@@ -97,6 +97,8 @@ def evaluate_batch(cases: list[dict[str, Any]], pairs: list[dict[str, Any]]) -> 
     ]
     return {
         "schema_version": "1.0",
+        "initiative": "INIT-25",
+        "gate": "paired_semantic_evidence",
         "case_count": len(cases),
         "paired_case_count": len(comparisons),
         "complete": not missing,
