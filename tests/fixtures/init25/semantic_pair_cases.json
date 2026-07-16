@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "cases": [
+    {"case_id":"healthcare-specific-en","sector":"healthcare","specificity":"organization_specific","language":"en","scenario":"standard","input":{"organization":"regional clinic","context_ready_for_policy":true},"required_evidence_families":["legal_norms","sector_norms","security_frameworks"]},
+    {"case_id":"healthcare-specific-es","sector":"healthcare","specificity":"organization_specific","language":"es","scenario":"non_applicable_sources","input":{"organization":"clinica regional","context_ready_for_policy":true},"required_evidence_families":["legal_norms","sector_norms","security_frameworks"]},
+    {"case_id":"healthcare-generic-en","sector":"healthcare","specificity":"generic","language":"en","scenario":"incomplete_context","input":{"organization":"healthcare provider","context_ready_for_policy":false},"required_evidence_families":["legal_norms","sector_norms"]},
+    {"case_id":"healthcare-generic-es","sector":"healthcare","specificity":"generic","language":"es","scenario":"provider_failure","input":{"organization":"proveedor sanitario","context_ready_for_policy":true},"required_evidence_families":["legal_norms","sector_norms"]},
+    {"case_id":"legal-specific-ca","sector":"legal","specificity":"organization_specific","language":"ca","scenario":"standard","input":{"organization":"despatx juridic catala","context_ready_for_policy":true},"required_evidence_families":["legal_norms","security_frameworks"]},
+    {"case_id":"legal-specific-en","sector":"legal","specificity":"organization_specific","language":"en","scenario":"unsupported_claims","input":{"organization":"international law office","context_ready_for_policy":true},"required_evidence_families":["legal_norms","security_frameworks"]},
+    {"case_id":"legal-generic-ca","sector":"legal","specificity":"generic","language":"ca","scenario":"incomplete_context","input":{"organization":"serveis juridics","context_ready_for_policy":false},"required_evidence_families":["legal_norms"]},
+    {"case_id":"legal-generic-en","sector":"legal","specificity":"generic","language":"en","scenario":"non_applicable_sources","input":{"organization":"legal services","context_ready_for_policy":true},"required_evidence_families":["legal_norms"]},
+    {"case_id":"iot-specific-es","sector":"iot","specificity":"organization_specific","language":"es","scenario":"standard","input":{"organization":"fabricante de sensores industriales","context_ready_for_policy":true},"required_evidence_families":["legal_norms","sector_norms","security_frameworks","implementation_guides"]},
+    {"case_id":"iot-specific-ca","sector":"iot","specificity":"organization_specific","language":"ca","scenario":"provider_failure","input":{"organization":"fabricant de dispositius connectats","context_ready_for_policy":true},"required_evidence_families":["legal_norms","sector_norms","security_frameworks","implementation_guides"]},
+    {"case_id":"iot-generic-es","sector":"iot","specificity":"generic","language":"es","scenario":"unsupported_claims","input":{"organization":"empresa iot","context_ready_for_policy":true},"required_evidence_families":["legal_norms","security_frameworks"]},
+    {"case_id":"iot-generic-ca","sector":"iot","specificity":"generic","language":"ca","scenario":"incomplete_context","input":{"organization":"empresa de dispositius","context_ready_for_policy":false},"required_evidence_families":["legal_norms","security_frameworks"]}
+  ]
+}
