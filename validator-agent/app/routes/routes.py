@@ -6,6 +6,7 @@ from bson import ObjectId
 from flask import Blueprint, abort, current_app, jsonify, request
 
 from app import mongo
+from app.candidate_contract import authorize_candidate_request
 from app.metrics import metrics_response
 from app.observability import log_event
 from app.services.logic import get_health_status, get_readiness_status, run_validation_pipeline
@@ -96,6 +97,31 @@ def validate_policy():
         error_code=result.get("error_code"),
     )
     return jsonify(result), status_code
+
+
+@routes.route("/candidate/validate-policy", methods=["POST"])
+def validate_candidate_policy():
+    """Validate a policy candidate once without persistence or policy revision."""
+    metadata, contract_error = authorize_candidate_request(
+        audience="validator-agent",
+        scope="policy:candidate:validate",
+    )
+    if contract_error:
+        payload, status_code = contract_error
+        return jsonify(payload), status_code
+
+    result = run_validation_pipeline(request.get_json(silent=True), read_only=True)
+    status_code = result.pop("status_code", 200)
+    if not result.get("success"):
+        return jsonify(result), status_code
+
+    validation = result["validation"]
+    validation["candidate"] = {
+        "authoritative": False,
+        "tenant_id": metadata["tenant_id"],
+        "idempotency_key": metadata["idempotency_key"],
+    }
+    return jsonify(validation), status_code
 
 
 @routes.route("/validation/<context_id>", methods=["GET"])

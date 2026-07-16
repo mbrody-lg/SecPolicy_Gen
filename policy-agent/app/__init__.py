@@ -166,4 +166,14 @@ def create_app():
             response.headers[CORRELATION_ID_HEADER] = correlation_id
         return response
 
+    @app.errorhandler(413)
+    def request_too_large(_error):
+        return {
+            "success": False,
+            "error_type": "contract_error",
+            "error_code": "request_too_large",
+            "message": "Request body exceeds the allowed size.",
+            "details": {"stage": "http_request"},
+        }, 413
+
     return app

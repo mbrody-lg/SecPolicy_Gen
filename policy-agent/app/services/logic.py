@@ -1149,10 +1149,13 @@ def run_with_agent(
     context_id: str,
     model_version: str,
     business_context: dict | None = None,
+    *,
+    store_config: bool = True,
 ) -> dict:
     """Run full policy-agent role pipeline for initial policy generation."""
     config = load_policy_config()
-    _store_policy_config(model_version, config)
+    if store_config:
+        _store_policy_config(model_version, config)
 
     agent = create_agent_from_config(config)
     retrieval_plan = build_retrieval_plan(
@@ -1203,8 +1206,8 @@ def update_with_agent(prompt: str, context_id: str | None = None, model_version:
     return agent.run(prompt, context_id)
 
 
-def generate_policy_payload(payload: dict | None) -> dict:
-    """Validate payload, run generation flow, and normalize the persisted response."""
+def generate_policy_payload(payload: dict | None, *, persist: bool = True) -> dict:
+    """Validate payload, run generation flow, and optionally persist the response."""
     data = validate_generation_payload(payload)
     correlation_id = data["correlation_id"]
     started_perf = perf_counter()
@@ -1215,6 +1218,7 @@ def generate_policy_payload(payload: dict | None) -> dict:
             context_id=data["context_id"],
             model_version=data["model_version"],
             business_context={**data.get("business_context", {}), "language": data["language"]},
+            store_config=persist,
         )
     except FileNotFoundError as exc:
         logger.exception(
@@ -1288,15 +1292,16 @@ def generate_policy_payload(payload: dict | None) -> dict:
         "model_version": data["model_version"],
         "policy_agent_version": "0.1.0",
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "lifecycle_status": "generated",
+        "lifecycle_status": "generated" if persist else "candidate",
         "revision_count": 0,
         "ownership": {
             "owner_service": "policy-agent",
-            "source_of_truth": True,
-            "collection": "policies",
+            "source_of_truth": persist,
+            "collection": "policies" if persist else None,
         },
     }
-    mongo.db.policies.insert_one(result)
+    if persist:
+        mongo.db.policies.insert_one(result)
     log_event(
         logger,
         logging.INFO,
@@ -1311,10 +1316,10 @@ def generate_policy_payload(payload: dict | None) -> dict:
     return _pipeline_success(stage="completed", policy=result)
 
 
-def run_generation_pipeline(payload: dict | None) -> dict:
+def run_generation_pipeline(payload: dict | None, *, persist: bool = True) -> dict:
     """Execute policy generation and return a structured success or error envelope."""
     try:
-        return generate_policy_payload(payload)
+        return generate_policy_payload(payload, persist=persist)
     except PipelineStepError as exc:
         return _pipeline_error(exc)
 
