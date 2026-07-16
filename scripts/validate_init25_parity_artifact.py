@@ -10,6 +10,10 @@ from typing import Any
 
 
 VALID_RECOMMENDATIONS = {"continue", "narrow", "pause"}
+VALID_SEMANTIC_READINESS = {"not_assessed", "not_ready"}
+VALID_CUTOVER_READINESS = {"not_ready"}
+VALID_AUTHORITATIVE_EVIDENCE = {"projected", "observed", "unverified"}
+VALID_CANDIDATE_EVIDENCE = {"simulated", "live", "unverified"}
 SENSITIVE_KEY_PARTS = {
     "api_key",
     "authorization",
@@ -118,6 +122,40 @@ def validate(payload: dict[str, Any]) -> None:
     recommendation = payload.get("recommendation")
     if recommendation not in VALID_RECOMMENDATIONS:
         _fail("recommendation must be continue, narrow, or pause")
+
+    assessment = payload.get("assessment")
+    if assessment is not None:
+        if not isinstance(assessment, dict) or set(assessment) != {
+            "contract_recommendation",
+            "semantic_readiness",
+            "cutover_readiness",
+            "evidence_basis",
+        }:
+            _fail("assessment must contain the required readiness fields")
+        if assessment["contract_recommendation"] != recommendation:
+            _fail("assessment contract recommendation must match recommendation")
+        if assessment["semantic_readiness"] not in VALID_SEMANTIC_READINESS:
+            _fail("assessment semantic_readiness is invalid")
+        if assessment["cutover_readiness"] not in VALID_CUTOVER_READINESS:
+            _fail("assessment cutover_readiness is invalid")
+        evidence_basis = assessment["evidence_basis"]
+        if not isinstance(evidence_basis, dict) or set(evidence_basis) != {
+            "authoritative",
+            "candidate",
+        }:
+            _fail("assessment evidence_basis must contain authoritative and candidate")
+        if evidence_basis["authoritative"] not in VALID_AUTHORITATIVE_EVIDENCE:
+            _fail("assessment authoritative evidence is invalid")
+        if evidence_basis["candidate"] not in VALID_CANDIDATE_EVIDENCE:
+            _fail("assessment candidate evidence is invalid")
+        evidence_is_live = (
+            evidence_basis["authoritative"] == "observed"
+            and evidence_basis["candidate"] == "live"
+        )
+        if not evidence_is_live and assessment["semantic_readiness"] != "not_assessed":
+            _fail("semantic readiness requires observed and live evidence")
+        if not evidence_is_live and assessment["cutover_readiness"] != "not_ready":
+            _fail("cutover readiness requires observed and live evidence")
 
     expected_missing = sorted(
         set(evidence_coverage["required_families"])

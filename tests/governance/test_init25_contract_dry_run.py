@@ -39,6 +39,15 @@ def test_init25_contract_cases_emit_expected_decisions(case):
     else:
         assert set(artifacts) == {"context_agent.policy_handoff.v1"}
     assert report["recommendation"] == case["expected_recommendation"]
+    assert report["assessment"] == {
+        "contract_recommendation": case["expected_recommendation"],
+        "semantic_readiness": "not_assessed",
+        "cutover_readiness": "not_ready",
+        "evidence_basis": {
+            "authoritative": "projected",
+            "candidate": "simulated",
+        },
+    }
 
 
 def test_init25_contract_runner_rejects_sensitive_candidate_fields():

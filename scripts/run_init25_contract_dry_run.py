@@ -273,6 +273,7 @@ def run_case(case: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], dict
     evidence = artifacts.get("rag.retrieval_evidence")
     evidence_items = evidence if isinstance(evidence, list) else []
     summary = {
+        "execution_mode": "contract_dry_run",
         "validation_status": decision.get("status", "unknown") if isinstance(decision, dict) else "unknown",
         "covered_evidence_families": sorted({item["family"] for item in evidence_items if isinstance(item, dict) and _non_empty_string(item.get("family"))}),
         "correlation_id": f"init25-contract-{case_id}",
@@ -281,6 +282,7 @@ def run_case(case: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], dict
         "security_findings": source.get("security_findings", []),
     }
     authoritative = {
+        "artifact_evidence": "contract_projection_not_observed",
         "validation_status": case.get("authoritative_validation_status", "accepted"),
         "required_evidence_families": _string_list(source.get("required_evidence_families")),
         "artifacts": {name: sorted(fields) for name, fields in ARTIFACT_FIELDS.items()},

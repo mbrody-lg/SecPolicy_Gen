@@ -23,5 +23,14 @@
     "has_logs_ref": true
   },
   "security_findings": [],
-  "recommendation": "continue"
+  "recommendation": "continue",
+  "assessment": {
+    "contract_recommendation": "continue",
+    "semantic_readiness": "not_assessed",
+    "cutover_readiness": "not_ready",
+    "evidence_basis": {
+      "authoritative": "unverified",
+      "candidate": "unverified"
+    }
+  }
 }

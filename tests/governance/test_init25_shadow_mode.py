@@ -108,6 +108,11 @@ def test_simulation_is_never_reported_as_live_success():
     assert candidate["provider_invoked"] is False
     assert "runtime_invocation" not in candidate
     assert report["recommendation"] == "pause"
+    assert report["assessment"]["evidence_basis"] == {
+        "authoritative": "projected",
+        "candidate": "simulated",
+    }
+    assert report["assessment"]["cutover_readiness"] == "not_ready"
     assert report["observability"]["has_runtime_invocation"] is False
 
 
@@ -125,6 +130,10 @@ def test_simulated_block_stops_downstream_agents():
     assert calls == ["context_agent"]
     assert any(error["error_code"] == "stage_blocked" for error in candidate["runtime_errors"])
     assert report["recommendation"] == "pause"
+    assert report["assessment"]["evidence_basis"] == {
+        "authoritative": "projected",
+        "candidate": "simulated",
+    }
 
 
 def test_simulated_executor_uses_bounded_stdin_and_fixed_command():
@@ -168,6 +177,10 @@ def test_correlation_mismatch_is_bounded_and_stops():
     assert calls == ["context_agent"]
     assert candidate["runtime_errors"][0]["error_code"] == "stage_identity_invalid"
     assert report["recommendation"] == "pause"
+    assert report["assessment"]["evidence_basis"] == {
+        "authoritative": "projected",
+        "candidate": "simulated",
+    }
 
 
 def test_candidate_field_drift_is_not_hidden_by_the_runner():
@@ -251,6 +264,10 @@ def test_live_fails_closed_when_sandbox_backend_is_absent(tmp_path, monkeypatch)
         for error in candidate["runtime_errors"]
     )
     assert report["recommendation"] == "pause"
+    assert report["assessment"]["evidence_basis"] == {
+        "authoritative": "projected",
+        "candidate": "live",
+    }
 
 
 def test_live_requires_an_authoritative_capture(tmp_path, monkeypatch):

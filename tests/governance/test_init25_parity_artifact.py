@@ -42,11 +42,64 @@ def _valid_report():
         },
         "security_findings": [],
         "recommendation": "continue",
+        "assessment": {
+            "contract_recommendation": "continue",
+            "semantic_readiness": "not_assessed",
+            "cutover_readiness": "not_ready",
+            "evidence_basis": {
+                "authoritative": "projected",
+                "candidate": "simulated",
+            },
+        },
     }
 
 
 def test_init25_parity_artifact_accepts_minimal_valid_report():
     validate(_valid_report())
+
+
+def test_init25_parity_artifact_accepts_legacy_contract_report():
+    report = _valid_report()
+    report.pop("assessment")
+
+    validate(report)
+
+
+def test_init25_parity_artifact_rejects_mismatched_assessment_recommendation():
+    report = _valid_report()
+    report["assessment"]["contract_recommendation"] = "narrow"
+
+    with pytest.raises(SystemExit, match="must match recommendation"):
+        validate(report)
+
+
+@pytest.mark.parametrize(
+    ("authoritative", "candidate"),
+    [("projected", "live"), ("observed", "simulated"), ("unverified", "live")],
+)
+def test_init25_parity_artifact_rejects_cutover_ready_without_live_observed_evidence(
+    authoritative, candidate
+):
+    report = _valid_report()
+    report["assessment"].update({
+        "cutover_readiness": "ready",
+        "evidence_basis": {"authoritative": authoritative, "candidate": candidate},
+    })
+
+    with pytest.raises(SystemExit, match="cutover_readiness is invalid"):
+        validate(report)
+
+
+def test_init25_parity_artifact_rejects_ready_without_semantic_evidence_contract():
+    report = _valid_report()
+    report["assessment"].update({
+        "semantic_readiness": "ready",
+        "cutover_readiness": "ready",
+        "evidence_basis": {"authoritative": "observed", "candidate": "live"},
+    })
+
+    with pytest.raises(SystemExit, match="semantic_readiness is invalid"):
+        validate(report)
 
 
 def test_init25_parity_artifact_rejects_missing_required_fields():
@@ -127,6 +180,7 @@ def test_init25_parity_artifact_rejects_narrow_when_runtime_error_requires_pause
     report["contract_compatible"] = False
     report["runtime_errors"] = [{"error_code": "candidate_failed"}]
     report["recommendation"] = "narrow"
+    report["assessment"]["contract_recommendation"] = "narrow"
 
     with pytest.raises(SystemExit, match="recommendation must be pause"):
         validate(report)
