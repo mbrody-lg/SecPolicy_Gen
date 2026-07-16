@@ -67,6 +67,8 @@ def test_batch_reports_descriptive_signals_without_readiness_claims():
     cases = load_cases()
     report = evaluate_batch(cases, [_pair(case) for case in cases])
 
+    assert report["initiative"] == "INIT-25"
+    assert report["gate"] == "paired_semantic_evidence"
     assert report["complete"] is True
     assert report["paired_case_count"] == 12
     assert report["semantic_readiness"] == "not_assessed"
