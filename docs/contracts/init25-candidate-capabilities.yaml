@@ -1,0 +1,51 @@
+schema_version: "1.0"
+status: blocked_by_init_11_and_deadline_enforcement
+authority: non_authoritative
+authentication:
+  source: init11_verified_principal
+  external_identity_headers_allowed: false
+  required_principal_fields: [identity, audience, scopes, tenant_id]
+request_headers:
+  X-Correlation-ID:
+    required: true
+    pattern: "^[A-Za-z0-9._:-]{1,128}$"
+  X-Tenant-ID:
+    required: true
+    pattern: "^[A-Za-z0-9._:-]{1,64}$"
+    invariant: equals_verified_principal_tenant
+  Idempotency-Key:
+    required: true
+    pattern: "^[A-Za-z0-9._:-]{1,128}$"
+    semantics: attempt_identity_only
+  X-Request-Deadline:
+    required: true
+    format: date-time
+    maximum_future_seconds: 300
+    semantics: admission_only_until_pr_i_enforces_cancellation
+activation:
+  requires_verified_principal: true
+  requires_deadline_enforcer: true
+limits:
+  request_bytes: 262144
+errors:
+  envelope: [success, error_type, error_code, message, details, correlation_id]
+  bounded_details: true
+capabilities:
+  - id: policy.candidate.generate
+    method: POST
+    path: /candidate/generate-policy
+    audience: policy-agent
+    scope: policy:candidate:generate
+    input_contract: policy_generation_payload
+    writes: []
+    output_authoritative: false
+  - id: policy.candidate.validate
+    method: POST
+    path: /candidate/validate-policy
+    audience: validator-agent
+    scope: policy:candidate:validate
+    input_contract: policy_validation_payload
+    writes: []
+    maximum_rounds: 1
+    policy_revision_callback: false
+    output_authoritative: false

@@ -348,7 +348,7 @@ def _normalize_evidence_item(item: dict, index: int, correlation_id: str | None)
     return normalized
 
 
-def validate_policy_payload(payload: dict | None) -> dict:
+def validate_policy_payload(payload: dict | None, *, read_only: bool = False) -> dict:
     """Validate request contract, run coordinator orchestration, and normalize response."""
     correlation_id = _get_correlation_id(payload)
     data = _ensure_payload_object(payload, correlation_id)
@@ -416,7 +416,10 @@ def validate_policy_payload(payload: dict | None) -> dict:
 
     try:
         coordinator = Coordinator()
-        validation_result = coordinator.validate_policy(normalized_payload)
+        if read_only:
+            validation_result = coordinator.validate_policy(normalized_payload, read_only=True)
+        else:
+            validation_result = coordinator.validate_policy(normalized_payload)
     except PipelineStepError:
         raise
     except Exception as exc:
@@ -471,6 +474,12 @@ def validate_policy_payload(payload: dict | None) -> dict:
     }
     if "evaluator_analysis" in validation_result:
         response["evaluator_analysis"] = validation_result["evaluator_analysis"]
+    if read_only:
+        response["ownership"] = {
+            "owner_service": "validator-agent",
+            "source_of_truth": False,
+            "collection": None,
+        }
 
     log_event(
         logger,
@@ -485,10 +494,10 @@ def validate_policy_payload(payload: dict | None) -> dict:
     return _pipeline_success(stage="completed", validation=response)
 
 
-def run_validation_pipeline(payload: dict) -> dict:
+def run_validation_pipeline(payload: dict, *, read_only: bool = False) -> dict:
     """Execute validator pipeline and return structured success or error envelopes."""
     try:
-        return validate_policy_payload(payload)
+        return validate_policy_payload(payload, read_only=read_only)
     except PipelineStepError as exc:
         return _pipeline_error(exc)
 

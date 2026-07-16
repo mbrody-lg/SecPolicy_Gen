@@ -50,7 +50,7 @@ class Coordinator:
         """Return vote strategy name configured for fallback decisions."""
         return self.validation.get("vote_strategy", "majority")
 
-    def validate_policy(self, policy_input: dict) -> dict:
+    def validate_policy(self, policy_input: dict, *, read_only: bool = False) -> dict:
         """Run iterative validation rounds and produce final policy decision payload."""
         from app.services.logic import send_policy_update_to_policy_agent
 
@@ -111,6 +111,13 @@ class Coordinator:
                 round=rounds_done,
                 decision=decision,
             )
+
+            if read_only:
+                return self.build_response(
+                    decision, round_results, context_id, language, prompt, version,
+                    generated_at, evaluator_feedback, retrieval_evidence=retrieval_evidence,
+                    policy_content_hash=policy_content_hash,
+                )
 
             if decision == "accepted":
                 self.log_validation(
