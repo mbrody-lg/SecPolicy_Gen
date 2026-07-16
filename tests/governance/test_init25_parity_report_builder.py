@@ -35,8 +35,8 @@ def _candidate_summary():
         "covered_evidence_families": ["legal_norms", "sector_norms"],
         "duration_ms": 1300,
         "correlation_id": "candidate-correlation",
-        "runtime_invocation": {"mode": "dry_run"},
-        "logs_ref": "artifacts/init25/case/logs.jsonl",
+        "runtime_invocations": [{"mode": "dry_run", "logs_ref": {"path": "logs.jsonl"}}],
+        "verified_logs_ref_count": 1,
         "artifacts": {
             "context_agent.policy_handoff.v1": [
                 "version",
@@ -48,6 +48,41 @@ def _candidate_summary():
     }
 
 
+def test_init25_parity_report_builder_requires_all_runtime_logs():
+    candidate = _candidate_summary()
+    candidate["runtime_invocations"] = [{"agent": "one"}, {"agent": "two"}]
+    candidate["verified_logs_ref_count"] = 1
+
+    report = build_report("healthcare-clinic-gdpr", _authoritative_summary(), candidate)
+
+    assert report["observability"]["has_runtime_invocation"] is True
+    assert report["observability"]["has_logs_ref"] is False
+    assert report["runtime_errors"] == [
+        {"error_code": "runtime_evidence_incomplete", "stage": "shadow_runner"}
+    ]
+    assert report["recommendation"] == "pause"
+
+
+def test_init25_parity_report_builder_keeps_singular_runtime_compatibility():
+    candidate = _candidate_summary()
+    candidate.pop("runtime_invocations")
+    candidate["runtime_invocation"] = {"mode": "dry_run", "logs_ref": {"path": "logs.jsonl"}}
+
+    report = build_report("healthcare-clinic-gdpr", _authoritative_summary(), candidate)
+
+    assert report["observability"]["has_runtime_invocation"] is True
+    assert report["observability"]["has_logs_ref"] is True
+
+
+def test_init25_parity_report_builder_does_not_trust_unverified_logs_ref():
+    candidate = _candidate_summary()
+    candidate["verified_logs_ref_count"] = 0
+
+    report = build_report("healthcare-clinic-gdpr", _authoritative_summary(), candidate)
+
+    assert report["observability"]["has_logs_ref"] is False
+
+
 def test_init25_parity_report_builder_recommends_continue_for_matching_contracts():
     report = build_report("healthcare-clinic-gdpr", _authoritative_summary(), _candidate_summary())
 
@@ -55,6 +90,8 @@ def test_init25_parity_report_builder_recommends_continue_for_matching_contracts
     assert report["contract_compatible"] is True
     assert report["recommendation"] == "continue"
     assert report["validation_difference"]["changed"] is False
+    assert report["observability"]["has_runtime_invocation"] is True
+    assert report["observability"]["has_logs_ref"] is True
 
 
 def test_init25_parity_report_builder_recommends_narrow_for_missing_evidence():

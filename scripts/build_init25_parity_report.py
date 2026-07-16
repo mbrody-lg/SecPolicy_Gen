@@ -74,6 +74,28 @@ def _evidence_coverage(authoritative: dict[str, Any], candidate: dict[str, Any])
     }
 
 
+def _observability(candidate: dict[str, Any], authoritative: dict[str, Any]) -> dict[str, Any]:
+    invocations = candidate.get("runtime_invocations")
+    invocation_count = (
+        len(invocations)
+        if isinstance(invocations, list)
+        else 1 if candidate.get("runtime_invocation") else 0
+    )
+    verified_count = candidate.get("verified_logs_ref_count")
+    has_logs_ref = (
+        isinstance(verified_count, int)
+        and not isinstance(verified_count, bool)
+        and invocation_count > 0
+        and verified_count == invocation_count
+    )
+
+    return {
+        "correlation_id": candidate.get("correlation_id") or authoritative.get("correlation_id"),
+        "has_runtime_invocation": invocation_count > 0,
+        "has_logs_ref": has_logs_ref,
+    }
+
+
 def _recommendation(
     *,
     contract_compatible: bool,
@@ -93,6 +115,11 @@ def build_report(case_id: str, authoritative: dict[str, Any], candidate: dict[st
     artifact_differences = _artifact_differences(authoritative, candidate)
     evidence_coverage = _evidence_coverage(authoritative, candidate)
     runtime_errors = _object_list(candidate.get("runtime_errors"))
+    observability = _observability(candidate, authoritative)
+    if observability["has_runtime_invocation"] and not observability["has_logs_ref"]:
+        runtime_errors.append(
+            {"error_code": "runtime_evidence_incomplete", "stage": "shadow_runner"}
+        )
     authoritative_status = str(authoritative.get("validation_status") or "unknown")
     candidate_status = str(candidate.get("validation_status") or "unknown")
     security_findings = _object_list(candidate.get("security_findings"))
@@ -113,11 +140,7 @@ def build_report(case_id: str, authoritative: dict[str, Any], candidate: dict[st
             "authoritative_ms": authoritative.get("duration_ms"),
             "candidate_ms": candidate.get("duration_ms"),
         },
-        "observability": {
-            "correlation_id": candidate.get("correlation_id") or authoritative.get("correlation_id"),
-            "has_runtime_invocation": bool(candidate.get("runtime_invocation")),
-            "has_logs_ref": bool(candidate.get("logs_ref")),
-        },
+        "observability": observability,
         "security_findings": security_findings,
         "recommendation": _recommendation(
             contract_compatible=contract_compatible,

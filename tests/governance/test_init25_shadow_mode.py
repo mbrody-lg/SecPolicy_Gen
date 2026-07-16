@@ -1,9 +1,9 @@
 from copy import deepcopy
 import json
-import os
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,13 +14,10 @@ if str(ROOT) not in sys.path:
 
 from scripts.run_init25_contract_dry_run import run_case  # noqa: E402
 from scripts.run_init25_shadow_mode import (  # noqa: E402
-    ExecutionResult,
     LEAF_AGENTS,
     MAX_OUTPUT_BYTES,
     OWNED_ARTIFACTS,
     _coerce_execution,
-    detect_runtime_version,
-    execute_subprocess,
     parse_stage_output,
     run_shadow_mode,
 )
@@ -52,6 +49,36 @@ def _stage(agent, case, *, status="completed", correlation_id=None):
     if agent == "validator_agent":
         stage["validation_status"] = baseline["validation_status"]
     return stage
+
+
+def _authoritative_summary(case):
+    _, baseline, _ = run_case(case)
+    return {
+        "schema_version": "1.0",
+        "case_id": case["case_id"],
+        "required_evidence_families": list(
+            case["input"]["required_evidence_families"]
+        ),
+        "baseline_type": "live_authoritative_service_capture",
+        "live_service_parity": False,
+        "input_alignment": "unverified",
+        "artifact_evidence": "contract_projection_not_observed",
+        "validation_status": baseline["validation_status"],
+        "correlation_id": baseline["correlation_id"],
+        "artifacts": baseline["artifacts"],
+        "duration_ms": 10,
+        "source": {
+            "smoke_run_id": "smoke-runtime-1",
+            "context_id": "context-1",
+            "mode": "runtime",
+        },
+        "runtime_errors": [
+            {
+                "error_code": "authoritative_input_unverified",
+                "stage": "authoritative_capture",
+            }
+        ],
+    }
 
 
 def test_parser_accepts_only_expected_agent_choice():
@@ -115,7 +142,7 @@ def test_simulated_executor_uses_bounded_stdin_and_fixed_command():
     for command, request in calls:
         assert command[:3] == ["docker", "agent", "run"]
         assert Path(command[3]) == ROOT / "agents" / "secpolicy_contract_dry_run.yaml"
-        assert command[-3:] == ["--exec", "--json", "-"]
+        assert command[-5:] == ["--exec", "--json", "--sandbox", "--no-kit", "-"]
         assert not {"--yolo", "--record", "--env-from-file", "--hooks"} & set(command)
         serialized = json.dumps(request)
         assert case["input"]["refined_context"] not in serialized
@@ -170,25 +197,16 @@ def test_provider_quota_error_is_redacted_to_bounded_code():
 
 
 def test_timeout_and_oversized_output_are_bounded():
-    stage, error = _coerce_execution(ExecutionResult(error_code="runtime_timeout", returncode=1), "context_agent")
+    stage, error = _coerce_execution(
+        SimpleNamespace(error_code="runtime_timeout", returncode=1),
+        "context_agent",
+    )
     assert stage is None
     assert error == "runtime_timeout"
 
     stage, error = _coerce_execution("x" * (MAX_OUTPUT_BYTES + 1), "context_agent")
     assert stage is None
     assert error == "runtime_failed"
-
-
-def test_subprocess_timeout_includes_blocked_stdin():
-    result = execute_subprocess(
-        [sys.executable, "-c", "import time; time.sleep(5)"],
-        input="x" * MAX_OUTPUT_BYTES,
-        env=dict(os.environ),
-        timeout=0.05,
-        max_output_bytes=MAX_OUTPUT_BYTES,
-    )
-
-    assert result.error_code == "runtime_timeout"
 
 
 @pytest.mark.parametrize("timeout", [0, -1, float("inf"), float("nan")])
@@ -203,7 +221,6 @@ def test_live_without_credentials_does_not_claim_provider_attempt(monkeypatch):
     _, candidate, report = run_shadow_mode(
         _case(),
         mode="live",
-        version_detector=lambda: "v1.88.1",
     )
 
     assert candidate["provider_attempted"] is False
@@ -211,18 +228,41 @@ def test_live_without_credentials_does_not_claim_provider_attempt(monkeypatch):
     assert report["recommendation"] == "pause"
 
 
-def test_runtime_version_detection_keeps_home(monkeypatch):
-    captured = {}
+def test_live_fails_closed_when_sandbox_backend_is_absent(tmp_path, monkeypatch):
+    case = _case()
+    monkeypatch.setenv("OPENAI_API_KEY", "test-only-key")
+    monkeypatch.setattr(
+        "scripts.init25_runtime_adapter.shutil.which", lambda *_args, **_kwargs: None
+    )
 
-    def executor(command, **kwargs):
-        captured.update(kwargs["env"])
-        return ExecutionResult(stdout="docker agent version v1.88.1\n")
+    _, candidate, report = run_shadow_mode(
+        case,
+        mode="live",
+        authoritative_summary=_authoritative_summary(case),
+        output_dir=tmp_path,
+    )
 
-    monkeypatch.setenv("HOME", "/tmp/example-home")
-    monkeypatch.setattr("scripts.run_init25_shadow_mode.execute_subprocess", executor)
+    assert candidate["provider_attempted"] is False
+    assert candidate["provider_invoked"] is False
+    assert candidate["verified_logs_ref_count"] == 1
+    assert candidate["runtime_invocations"][0]["exit_status"] == "failed"
+    assert any(
+        error["error_code"] == "sbx_unavailable"
+        for error in candidate["runtime_errors"]
+    )
+    assert report["recommendation"] == "pause"
 
-    assert detect_runtime_version() == "v1.88.1"
-    assert captured["HOME"] == "/tmp/example-home"
+
+def test_live_requires_an_authoritative_capture(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    _, candidate, report = run_shadow_mode(_case(), mode="live", output_dir=tmp_path)
+
+    assert any(
+        error["error_code"] == "authoritative_capture_missing"
+        for error in candidate["runtime_errors"]
+    )
+    assert report["recommendation"] == "pause"
 
 
 def test_cli_persists_only_bounded_summaries(tmp_path):
