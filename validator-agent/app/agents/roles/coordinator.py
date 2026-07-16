@@ -1,5 +1,6 @@
 """Coordinator orchestration for multi-round validator decisions."""
 
+import hashlib
 import logging
 import os
 from collections import Counter
@@ -99,6 +100,7 @@ class Coordinator:
 
             evaluator_feedback = self.evaluator.evaluate(round_results, context_id)
             decision = evaluator_feedback.get("status", "review")
+            policy_content_hash = self.hash_policy_content(prompt)
             log_event(
                 logger,
                 logging.INFO,
@@ -110,17 +112,48 @@ class Coordinator:
                 decision=decision,
             )
 
+            if decision == "accepted":
+                self.log_validation(
+                    context_id, round_results, decision, rounds_done, True,
+                    all_rounds=all_rounds, evaluator_result=evaluator_feedback,
+                    correlation_id=correlation_id, retrieval_evidence=retrieval_evidence,
+                    policy_content_hash=policy_content_hash,
+                )
+                return self.build_response(
+                    "accepted", round_results, context_id, language, prompt, version,
+                    generated_at, evaluator_feedback, retrieval_evidence=retrieval_evidence,
+                    policy_content_hash=policy_content_hash,
+                )
+
+            if rounds_done == self.max_rounds:
+                final_decision = self.vote(round_results)
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="validator.validation.final_vote_started",
+                    stage="validation",
+                    context_id=context_id,
+                    correlation_id=correlation_id,
+                    round=rounds_done,
+                )
+                self.log_validation(
+                    context_id, round_results, final_decision, rounds_done, False,
+                    all_rounds=all_rounds, evaluator_result=evaluator_feedback,
+                    correlation_id=correlation_id, retrieval_evidence=retrieval_evidence,
+                    policy_content_hash=policy_content_hash,
+                )
+                return self.build_response(
+                    final_decision, round_results, context_id, language, prompt, version,
+                    generated_at, evaluator_feedback, retrieval_evidence=retrieval_evidence,
+                    policy_content_hash=policy_content_hash,
+                )
+
             self.log_validation(
                 context_id, round_results, decision, rounds_done, True,
                 all_rounds=all_rounds, evaluator_result=evaluator_feedback,
-                correlation_id=correlation_id, retrieval_evidence=retrieval_evidence
+                correlation_id=correlation_id, retrieval_evidence=retrieval_evidence,
+                policy_content_hash=policy_content_hash,
             )
-
-            if decision == "accepted":
-                return self.build_response(
-                    "accepted", round_results, context_id, language, prompt, version,
-                    generated_at, evaluator_feedback, retrieval_evidence=retrieval_evidence
-                )
 
             if decision in ["rejected", "review"]:
                 log_event(
@@ -153,31 +186,6 @@ class Coordinator:
                 prompt = update_response.get("policy_text", prompt)
                 version = update_response.get("policy_agent_version", version)
                 generated_at = update_response.get("generated_at", datetime.now(timezone.utc).isoformat())
-
-        log_event(
-            logger,
-            logging.INFO,
-            event="validator.validation.final_vote_started",
-            stage="validation",
-            context_id=context_id,
-            correlation_id=correlation_id,
-            round=self.max_rounds,
-        )
-
-        last_round = all_rounds[-1]
-        final_decision = self.vote(last_round)
-        evaluator_feedback = self.evaluator.evaluate(last_round, context_id)
-
-        self.log_validation(
-            context_id, last_round, final_decision, self.max_rounds, False,
-            all_rounds=all_rounds, evaluator_result=evaluator_feedback,
-            correlation_id=correlation_id, retrieval_evidence=retrieval_evidence
-        )
-
-        return self.build_response(
-            final_decision, last_round, context_id, language, prompt, version,
-            generated_at, evaluator_feedback, retrieval_evidence=retrieval_evidence
-        )
 
 
     def format_response(self, decision: str, last_round_results: List[Dict]) -> Dict:
@@ -260,6 +268,7 @@ class Coordinator:
         evaluator_result: Optional[Dict] = None,
         correlation_id: str | None = None,
         retrieval_evidence: Optional[List[Dict]] = None,
+        policy_content_hash: str | None = None,
     ):
         """Persist validation trace and metadata in MongoDB."""
         try:
@@ -289,6 +298,9 @@ class Coordinator:
                 }
             }
 
+            if policy_content_hash:
+                log_data["policy_content_hash"] = policy_content_hash
+
             if all_rounds:
                 log_data["all_rounds"] = all_rounds
             if evaluator_result:
@@ -316,6 +328,7 @@ class Coordinator:
         generated_at: str,
         evaluator_feedback: Dict,
         retrieval_evidence: Optional[List[Dict]] = None,
+        policy_content_hash: str | None = None,
     ) -> Dict:
         """Build final API response payload for accepted/review/rejected outcomes."""
         response = {
@@ -329,6 +342,7 @@ class Coordinator:
             "reasons": [],
             "recommendations": [],
             "retrieval_evidence": retrieval_evidence or [],
+            "policy_content_hash": policy_content_hash or self.hash_policy_content(policy_text),
         }
 
         if decision == "accepted":
@@ -343,6 +357,11 @@ class Coordinator:
             )
 
         return response
+
+    @staticmethod
+    def hash_policy_content(policy_text: str) -> str:
+        """Return the stable hash used to bind a decision to policy content."""
+        return hashlib.sha256(policy_text.encode("utf-8")).hexdigest()
 
     @staticmethod
     def summarize_retrieval_evidence(retrieval_evidence: List[Dict]) -> Dict:
