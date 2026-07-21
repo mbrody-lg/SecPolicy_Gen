@@ -1,0 +1,214 @@
+{
+  "generation": {
+    "configured_output_token_ceiling": 55000,
+    "invocations": [
+      {
+        "failure_category": null,
+        "index": 1,
+        "latency_ms": 6.0,
+        "messages": [
+          {
+            "content_length": 524,
+            "content_sha256": "c920bc72919a03d1ce0358c6346ccf59292a9023f9d9fb57a299c0c2f7d119b4",
+            "role": "system"
+          },
+          {
+            "content_length": 191,
+            "content_sha256": "274c98c3a3480312c4b1e9e3b33abee83560ef3cd49d7602879ba1e4b7d375d9",
+            "role": "user"
+          }
+        ],
+        "model": "gpt-4o-mini",
+        "response_length": 12,
+        "response_sha256": "fb642ce4da59bade00372725a3ccbb936ea553dce96db5d58b05a663604a8e00",
+        "settings": {
+          "max_tokens": 10000,
+          "temperature": 0.7
+        },
+        "usage": {
+          "cached_tokens": 0,
+          "input_tokens": 101,
+          "output_tokens": 51,
+          "total_tokens": 152
+        }
+      },
+      {
+        "failure_category": null,
+        "index": 2,
+        "latency_ms": 7.0,
+        "messages": [
+          {
+            "content_length": 524,
+            "content_sha256": "c920bc72919a03d1ce0358c6346ccf59292a9023f9d9fb57a299c0c2f7d119b4",
+            "role": "system"
+          },
+          {
+            "content_length": 191,
+            "content_sha256": "274c98c3a3480312c4b1e9e3b33abee83560ef3cd49d7602879ba1e4b7d375d9",
+            "role": "user"
+          }
+        ],
+        "model": "gpt-4o-mini",
+        "response_length": 12,
+        "response_sha256": "96ed3d0a9a7889ee20ee0e5fd144be67c68b880ffe701e8e8547f7a9c72b334a",
+        "settings": {
+          "max_tokens": 10000,
+          "temperature": 0.7
+        },
+        "usage": {
+          "cached_tokens": 0,
+          "input_tokens": 102,
+          "output_tokens": 52,
+          "total_tokens": 154
+        }
+      },
+      {
+        "failure_category": null,
+        "index": 3,
+        "latency_ms": 8.0,
+        "messages": [
+          {
+            "content_length": 524,
+            "content_sha256": "c920bc72919a03d1ce0358c6346ccf59292a9023f9d9fb57a299c0c2f7d119b4",
+            "role": "system"
+          },
+          {
+            "content_length": 191,
+            "content_sha256": "274c98c3a3480312c4b1e9e3b33abee83560ef3cd49d7602879ba1e4b7d375d9",
+            "role": "user"
+          }
+        ],
+        "model": "gpt-4o-mini",
+        "response_length": 14,
+        "response_sha256": "4c76db854227c215cb86daa28257a787aa3b81bdde5addc8a17b3bb8bbd87677",
+        "settings": {
+          "max_tokens": 10000,
+          "temperature": 0.7
+        },
+        "usage": {
+          "cached_tokens": 0,
+          "input_tokens": 103,
+          "output_tokens": 53,
+          "total_tokens": 156
+        }
+      },
+      {
+        "failure_category": null,
+        "index": 4,
+        "latency_ms": 9.0,
+        "messages": [
+          {
+            "content_length": 354,
+            "content_sha256": "54c298e937d58a71f649129d00b874e4412cfd7b94f9d65487fe5a1403f9c71c",
+            "role": "system"
+          },
+          {
+            "content_length": 105,
+            "content_sha256": "0a9cd0bbd11c8b5f0280c785ebba6122d240a254f8b3bf110e20612a2d2b5b73",
+            "role": "user"
+          }
+        ],
+        "model": "gpt-4o-mini",
+        "response_length": 8,
+        "response_sha256": "8a92bcdd6dbdaa6ec99d4a31687e1492a9cd038ec3bcd570a1b1eb29dc6c8ac7",
+        "settings": {
+          "max_tokens": 10000,
+          "temperature": 0.5
+        },
+        "usage": {
+          "cached_tokens": 0,
+          "input_tokens": 104,
+          "output_tokens": 54,
+          "total_tokens": 158
+        }
+      },
+      {
+        "failure_category": null,
+        "index": 5,
+        "latency_ms": 10.0,
+        "messages": [
+          {
+            "content_length": 1973,
+            "content_sha256": "3436561dde3e8edddcfbb4a0ee78b987ba6285fa95bd8d5c2e7866bc16e0b688",
+            "role": "system"
+          },
+          {
+            "content_length": 8,
+            "content_sha256": "8a92bcdd6dbdaa6ec99d4a31687e1492a9cd038ec3bcd570a1b1eb29dc6c8ac7",
+            "role": "user"
+          }
+        ],
+        "model": "gpt-4o-mini",
+        "response_length": 12,
+        "response_sha256": "d80520759e4fc8e3f61c693d04bf20e4704a38adf01eaa25e2b8d30ed0122c00",
+        "settings": {
+          "max_tokens": 15000,
+          "temperature": 0.6
+        },
+        "usage": {
+          "cached_tokens": 0,
+          "input_tokens": 105,
+          "output_tokens": 55,
+          "total_tokens": 160
+        }
+      }
+    ],
+    "logical_calls": 5,
+    "usage": {
+      "cached_tokens": 0,
+      "input_tokens": 515,
+      "output_tokens": 265,
+      "total_tokens": 780
+    }
+  },
+  "schema_version": "policy_execution_baseline.v1",
+  "source": {
+    "agent_type": "openai",
+    "config": "app/config/policy_agent.yaml",
+    "global_model": "gpt-4o-mini",
+    "latency_mode": "deterministic_fake",
+    "usage_mode": "deterministic_fake"
+  },
+  "update": {
+    "configured_output_token_ceiling": 15000,
+    "invocations": [
+      {
+        "failure_category": null,
+        "index": 1,
+        "latency_ms": 6.0,
+        "messages": [
+          {
+            "content_length": 1973,
+            "content_sha256": "3436561dde3e8edddcfbb4a0ee78b987ba6285fa95bd8d5c2e7866bc16e0b688",
+            "role": "system"
+          },
+          {
+            "content_length": 51,
+            "content_sha256": "fad93732df2b1207627c939b5eb4c9a0822efcd47caeeed56a9f54e60fab696e",
+            "role": "user"
+          }
+        ],
+        "model": "gpt-4o-mini",
+        "response_length": 14,
+        "response_sha256": "356923a588ddf4851d63cefd39f4fa4e8e39db67b8e519266c3485a671ad3b9c",
+        "settings": {
+          "max_tokens": 15000,
+          "temperature": 0.6
+        },
+        "usage": {
+          "cached_tokens": 0,
+          "input_tokens": 101,
+          "output_tokens": 51,
+          "total_tokens": 152
+        }
+      }
+    ],
+    "logical_calls": 1,
+    "usage": {
+      "cached_tokens": 0,
+      "input_tokens": 101,
+      "output_tokens": 51,
+      "total_tokens": 152
+    }
+  }
+}
