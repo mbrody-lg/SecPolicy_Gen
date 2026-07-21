@@ -3,6 +3,9 @@
 This contract pack defines the target SecPolicyGen agent team before Docker
 Agent/cagent migration work continues.
 
+The protocol role and bounded adoption gates are defined in the
+[A2A and MCP protocol profile](./a2a-mcp-protocol-profile.md).
+
 The product goal is an agent-based system that creates security policies from
 enterprise context, applicable regulation, retrieved evidence, policy
 generation, and validation feedback. Runtime tooling must serve that workflow;
@@ -38,6 +41,9 @@ runtime, unless a different project reference is supplied.
 | Policy Agent | Policy draft generation from approved context and evidence | `policy_agent.policy_draft` |
 | Validator Agent | Grounding, completeness, consistency, and regeneration feedback | `validator.validation_payload`, `validator.validation_decision` |
 | Runtime Adapter | Docker Agent/cagent invocation, permissions, logs, correlation, shadow execution | `runtime_invocation`, `parity_report` |
+
+The Application Workflow Coordinator is a logical orchestration responsibility,
+not an LLM agent or an externally discoverable A2A agent.
 
 ## Artifact Contracts
 
