@@ -1,3 +1,4 @@
+import hashlib
 from unittest.mock import MagicMock, patch
 
 from app.agents.roles import coordinator as coordinator_module
@@ -50,11 +51,13 @@ def test_validate_policy_returns_accepted_without_policy_update():
 
     assert result["status"] == "accepted"
     assert result["text"] == "accepted policy"
+    assert result["policy_content_hash"] == hashlib.sha256(b"initial policy").hexdigest()
     assert coordinator.agent.run.call_count == 1
     assert coordinator.evaluator.evaluate.call_count == 1
     assert coordinator.log_validation.call_count == 1
     assert coordinator.log_validation.call_args.args[3] == 1
     assert coordinator.log_validation.call_args.args[4] is True
+    assert coordinator.log_validation.call_args.kwargs["policy_content_hash"] == result["policy_content_hash"]
     update_policy.assert_not_called()
 
 
@@ -124,7 +127,7 @@ def test_validate_policy_review_flow_rejects_invalid_update_payload():
         {"role": "AWT", "status": "accepted"},
     ]
     evaluator_results = [{"status": "review", "notes": "needs update"}]
-    coordinator = _build_coordinator([round_one], evaluator_results, rounds=1)
+    coordinator = _build_coordinator([round_one], evaluator_results, rounds=2)
 
     policy_input = {
         "context_id": "ctx-invalid-update",
@@ -157,11 +160,7 @@ def test_validate_policy_uses_final_vote_when_no_consensus():
         {"role": "AWL", "status": "rejected", "reason": "Logic conflicts", "recommendations": ["Resolve conflicts"]},
         {"role": "AWT", "status": "review", "reason": "Tone unclear", "recommendations": ["Clarify tone"]},
     ]
-    evaluator_results = [
-        {"status": "review"},
-        {"status": "review"},
-        {"status": "review", "source": "final"},
-    ]
+    evaluator_results = [{"status": "review"}, {"status": "review"}]
     coordinator = _build_coordinator([round_one, round_two], evaluator_results, rounds=2)
 
     policy_input = {
@@ -180,28 +179,60 @@ def test_validate_policy_uses_final_vote_when_no_consensus():
                 "policy_agent_version": "0.2.0",
                 "generated_at": "2026-03-05T01:00:00+00:00",
             },
-            {
-                "policy_text": "revised after round two",
-                "policy_agent_version": "0.3.0",
-                "generated_at": "2026-03-05T02:00:00+00:00",
-            },
         ],
     ) as update_policy:
         result = coordinator.validate_policy(policy_input)
 
     assert result["status"] == "rejected"
-    assert result["policy_text"] == "revised after round two"
+    assert result["policy_text"] == "revised after round one"
+    assert result["policy_content_hash"] == hashlib.sha256(
+        result["policy_text"].encode("utf-8")
+    ).hexdigest()
+    assert coordinator.agent.run.call_args_list[-1].args[0] == result["policy_text"]
     assert result["reasons"] == ["Control gaps", "Logic conflicts"]
     assert result["recommendations"] == ["Add controls", "Resolve conflicts"]
     assert coordinator.agent.run.call_count == 2
-    assert coordinator.evaluator.evaluate.call_count == 3
-    assert update_policy.call_count == 2
+    assert coordinator.evaluator.evaluate.call_count == 2
+    assert update_policy.call_count == 1
     assert update_policy.call_args_list[0].kwargs["policy_text"] == "policy without consensus"
-    assert update_policy.call_args_list[1].kwargs["policy_text"] == "revised after round one"
 
     final_log_call = coordinator.log_validation.call_args_list[-1]
     assert final_log_call.args[3] == coordinator.max_rounds
     assert final_log_call.args[4] is False
+    assert final_log_call.kwargs["policy_content_hash"] == result["policy_content_hash"]
+
+
+def test_validate_policy_does_not_request_unattested_terminal_revision():
+    round_results = [[
+        {"role": "AWC", "status": "review", "reason": "Needs detail"},
+        {"role": "AWL", "status": "review", "reason": "Needs scope"},
+        {"role": "AWT", "status": "accepted"},
+    ]]
+    coordinator = _build_coordinator(
+        round_results,
+        [{"status": "review"}],
+        rounds=1,
+    )
+    policy_input = {
+        "context_id": "ctx-terminal-review",
+        "policy_text": "last evaluated policy",
+        "language": "en",
+        "policy_agent_version": "0.1.0",
+        "generated_at": "2026-03-05T00:00:00+00:00",
+    }
+
+    with patch("app.services.logic.send_policy_update_to_policy_agent") as update_policy:
+        result = coordinator.validate_policy(policy_input)
+
+    assert result["status"] == "review"
+    assert result["policy_text"] == "last evaluated policy"
+    assert result["policy_content_hash"] == hashlib.sha256(
+        b"last evaluated policy"
+    ).hexdigest()
+    assert coordinator.agent.run.call_args.args[0] == result["policy_text"]
+    update_policy.assert_not_called()
+    coordinator.evaluator.evaluate.assert_called_once()
+    assert coordinator.log_validation.call_args.kwargs["policy_content_hash"] == result["policy_content_hash"]
 
 
 def test_validate_policy_returns_dependency_error_when_policy_update_fails():
