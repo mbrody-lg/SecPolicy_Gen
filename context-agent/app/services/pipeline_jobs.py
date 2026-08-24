@@ -81,6 +81,7 @@ def _sanitize_pipeline_error(error: dict | None) -> dict | None:
 
 def append_pipeline_event(
     *,
+    organization_id: str,
     job_id: str,
     context_id: str,
     correlation_id: str,
@@ -94,6 +95,7 @@ def append_pipeline_event(
     now = datetime.now(timezone.utc)
     event = {
         "_id": str(uuid4()),
+        "organization_id": organization_id,
         "job_id": job_id,
         "context_id": context_id,
         "correlation_id": correlation_id,
@@ -120,6 +122,7 @@ def append_pipeline_event(
 
 def create_pipeline_job(
     *,
+    organization_id: str,
     context_id: str,
     command: str = "generate_policy",
     correlation_id: str | None = None,
@@ -130,6 +133,7 @@ def create_pipeline_job(
     resolved_correlation_id = correlation_id or get_request_correlation_id() or str(uuid4())
     job = {
         "_id": job_id,
+        "organization_id": organization_id,
         "job_id": job_id,
         "context_id": str(context_id),
         "correlation_id": resolved_correlation_id,
@@ -149,6 +153,7 @@ def create_pipeline_job(
     }
     _pipeline_jobs_collection().insert_one(job)
     append_pipeline_event(
+        organization_id=organization_id,
         job_id=job_id,
         context_id=str(context_id),
         correlation_id=resolved_correlation_id,
@@ -160,9 +165,12 @@ def create_pipeline_job(
     return _serialize_pipeline_document(job)
 
 
-def find_active_pipeline_job(context_id: str, *, command: str = "generate_policy") -> dict | None:
+def find_active_pipeline_job(
+    context_id: str, *, organization_id: str, command: str = "generate_policy"
+) -> dict | None:
     """Return the active job for a context/command when one is still running."""
     query = {
+        "organization_id": organization_id,
         "context_id": str(context_id),
         "command": command,
         "status": {"$in": sorted(PIPELINE_JOB_ACTIVE_STATUSES)},
@@ -177,10 +185,12 @@ def find_active_pipeline_job(context_id: str, *, command: str = "generate_policy
     return None
 
 
-def find_latest_pipeline_job(context_id: str, *, command: str = "generate_policy") -> dict | None:
+def find_latest_pipeline_job(
+    context_id: str, *, organization_id: str, command: str = "generate_policy"
+) -> dict | None:
     """Return the latest pipeline job for dashboard and detail status views."""
     job = _pipeline_jobs_collection().find_one(
-        {"context_id": str(context_id), "command": command},
+        {"organization_id": organization_id, "context_id": str(context_id), "command": command},
         sort=[("created_at", -1)],
     )
     if job and job.get("status") in PIPELINE_JOB_ACTIVE_STATUSES and _is_pipeline_job_stale(job):
@@ -188,22 +198,24 @@ def find_latest_pipeline_job(context_id: str, *, command: str = "generate_policy
     return _serialize_pipeline_document(job)
 
 
-def get_pipeline_job(job_id: str) -> dict | None:
+def get_pipeline_job(job_id: str, *, organization_id: str) -> dict | None:
     """Return a pipeline job by id."""
-    job = _pipeline_jobs_collection().find_one({"job_id": job_id})
+    job = _pipeline_jobs_collection().find_one(
+        {"organization_id": organization_id, "job_id": job_id}
+    )
     if job and job.get("status") in PIPELINE_JOB_ACTIVE_STATUSES and _is_pipeline_job_stale(job):
         return _mark_pipeline_job_stale(job)
     return _serialize_pipeline_document(job)
 
 
-def list_pipeline_events(job_id: str, *, limit: int = 50) -> list[dict]:
+def list_pipeline_events(job_id: str, *, organization_id: str, limit: int = 50) -> list[dict]:
     """Return recent bounded events for one pipeline job."""
     safe_limit = min(max(int(limit or 50), 1), 100)
     return [
         _serialize_pipeline_document(event)
         for event in (
             _pipeline_events_collection()
-            .find({"job_id": job_id})
+            .find({"organization_id": organization_id, "job_id": job_id})
             .sort("created_at", -1)
             .limit(safe_limit)
         )
@@ -212,6 +224,7 @@ def list_pipeline_events(job_id: str, *, limit: int = 50) -> list[dict]:
 
 def update_pipeline_job_state(
     *,
+    organization_id: str,
     job_id: str,
     status: str,
     stage: str | None = None,
@@ -222,7 +235,8 @@ def update_pipeline_job_state(
     if status not in PIPELINE_JOB_STATUSES:
         raise ValueError(f"Unsupported pipeline job status: {status}")
 
-    existing = _pipeline_jobs_collection().find_one({"job_id": job_id})
+    query = {"organization_id": organization_id, "job_id": job_id}
+    existing = _pipeline_jobs_collection().find_one(query)
     if not existing:
         return None
 
@@ -243,8 +257,9 @@ def update_pipeline_job_state(
     if safe_error:
         set_fields["last_error"] = safe_error
 
-    _pipeline_jobs_collection().update_one({"job_id": job_id}, {"$set": set_fields})
+    _pipeline_jobs_collection().update_one(query, {"$set": set_fields})
     append_pipeline_event(
+        organization_id=organization_id,
         job_id=job_id,
         context_id=existing["context_id"],
         correlation_id=existing["correlation_id"],
@@ -261,11 +276,12 @@ def update_pipeline_job_state(
         if status in PIPELINE_JOB_TERMINAL_STATUSES
         else None,
     )
-    return get_pipeline_job(job_id)
+    return get_pipeline_job(job_id, organization_id=organization_id)
 
 
 def update_pipeline_job_progress(
     *,
+    organization_id: str,
     job_id: str,
     stage: str,
     current: int,
@@ -278,7 +294,8 @@ def update_pipeline_job_progress(
     event_type: str = "job_progress_updated",
 ) -> dict | None:
     """Persist bounded execution progress without changing the job lifecycle."""
-    existing = _pipeline_jobs_collection().find_one({"job_id": job_id})
+    query = {"organization_id": organization_id, "job_id": job_id}
+    existing = _pipeline_jobs_collection().find_one(query)
     if not existing:
         return None
     resolved_status = status or existing.get("status") or "running"
@@ -306,8 +323,9 @@ def update_pipeline_job_progress(
     if resolved_status != "queued" and not existing.get("started_at"):
         set_fields["started_at"] = now
 
-    _pipeline_jobs_collection().update_one({"job_id": job_id}, {"$set": set_fields})
+    _pipeline_jobs_collection().update_one(query, {"$set": set_fields})
     append_pipeline_event(
+        organization_id=organization_id,
         job_id=job_id,
         context_id=existing["context_id"],
         correlation_id=existing["correlation_id"],
@@ -317,7 +335,7 @@ def update_pipeline_job_progress(
         progress=progress,
     )
     record_pipeline_job_transition(status=resolved_status, stage=stage)
-    return get_pipeline_job(job_id)
+    return get_pipeline_job(job_id, organization_id=organization_id)
 
 
 def _initial_pipeline_progress() -> dict:
@@ -394,6 +412,7 @@ def _mark_pipeline_job_stale(job: dict) -> dict | None:
     """Move one stale active pipeline job to a bounded terminal failure."""
     stage = job.get("current_stage", "pipeline")
     return update_pipeline_job_state(
+        organization_id=job["organization_id"],
         job_id=job["job_id"],
         status="failed",
         stage=stage,

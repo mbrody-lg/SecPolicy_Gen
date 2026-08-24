@@ -38,6 +38,25 @@ python manage_identity.py \
   --role admin
 ```
 
+## Existing data
+
+Tenant ownership is mandatory for contexts, interactions, pipeline jobs, events,
+and diagnostics. Audit a legacy single-tenant installation before assignment:
+
+```bash
+python scripts/migrate_tenant_scope.py example-organization
+```
+
+Review the JSON counts, back up MongoDB, then apply the explicit assignment:
+
+```bash
+python scripts/migrate_tenant_scope.py example-organization --apply
+```
+
+The migration never infers ownership from email domains or identity-provider
+claims. Fixture imports also require `CONTEXT_IMPORT_ORGANIZATION_ID` (or
+`--organization-id`) and only replace data owned by that organization.
+
 The command is idempotent. Provider groups and roles are never imported as
 SecPolicyGen permissions.
 

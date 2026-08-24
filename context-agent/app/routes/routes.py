@@ -5,7 +5,7 @@ import logging
 import os
 
 from bson import ObjectId
-from flask import Blueprint, current_app, render_template, request, redirect, url_for, abort, flash, jsonify
+from flask import Blueprint, current_app, g, render_template, request, redirect, url_for, abort, flash, jsonify
 from markupsafe import escape
 
 from app import mongo
@@ -63,6 +63,7 @@ from app.services.pipeline_jobs import (
     list_pipeline_events,
 )
 from app.services.pipeline_worker import start_pipeline_job_worker
+from app.tenant_scope import tenant_document, tenant_query
 
 main = Blueprint("main", __name__)
 logger = logging.getLogger(__name__)
@@ -385,7 +386,7 @@ def index():
     except RouteInputError as exc:
         return route_input_error_response(exc)
 
-    query = {}
+    query = tenant_query()
     if status_filter:
         query["status"] = status_filter
 
@@ -429,7 +430,7 @@ def _attach_policy_process_summaries(contexts: list[dict]) -> None:
     """Add latest policy pipeline process state to dashboard context rows."""
     for context in contexts:
         context["policy_process"] = _policy_process_summary_for_job(
-            find_latest_pipeline_job(str(context["_id"]))
+            find_latest_pipeline_job(str(context["_id"]), organization_id=g.organization_id)
         )
 
 
@@ -557,7 +558,7 @@ def create():
         }
         stored_context_plan = context_plan_with_review if full_prompt and full_prompt.strip() else context_plan
 
-        mongo.db.contexts.insert_one({
+        mongo.db.contexts.insert_one(tenant_document({
             **data,
             "_id": context_id,
             "version": 1,
@@ -571,40 +572,40 @@ def create():
                 else "planning"
             ),
             "created_at": created_at
-        })
+        }))
 
         # Store questions and answers as separate agent/user interactions
         questions = load_questions()
         for q in questions:
-            mongo.db.interactions.insert_one({
+            mongo.db.interactions.insert_one(tenant_document({
                 "context_id": context_id,
                 "question_id": f"q_{q['id']}",
                 "question_text": q["question"],
                 "answer": "",
                 "timestamp": created_at,
                 "origin": "agent"
-            })
-            mongo.db.interactions.insert_one({
+            }))
+            mongo.db.interactions.insert_one(tenant_document({
                 "context_id": context_id,
                 "question_id": q["id"],
                 "question_text": q["question"],
                 "answer": data.get(q["id"]).strip() if data.get(q["id"]) else "",
                 "timestamp": created_at,
                 "origin": "user"
-            })
+            }))
 
         if not full_prompt or not full_prompt.strip():
             flash("An initial response could not be generated. Please try again.", "warning")
             return redirect(url_for("main.context_detail", context_id=context_id))
 
-        mongo.db.interactions.insert_one({
+        mongo.db.interactions.insert_one(tenant_document({
             "context_id": context_id,
             "question_id": "response_initial",
             "question_text": "Agent response",
             "answer": full_prompt.strip(),
             "timestamp": datetime.now(timezone.utc),
             "origin": "agent"
-        })
+        }))
 
         mongo.db.contexts.update_one(
             {"_id": context_id},
@@ -672,8 +673,10 @@ def context_detail(context_id):
         context=context,
         interactions=interactions,
         system_status=get_system_status(),
-        latest_pipeline_job=find_latest_pipeline_job(str(context_obj_id)),
-        latest_context_plan_job=find_latest_pipeline_job(str(context_obj_id), command="execute_context_plan"),
+        latest_pipeline_job=find_latest_pipeline_job(str(context_obj_id), organization_id=g.organization_id),
+        latest_context_plan_job=find_latest_pipeline_job(
+            str(context_obj_id), command="execute_context_plan", organization_id=g.organization_id
+        ),
         developer_diagnostics_enabled=_developer_diagnostics_enabled(),
         context_agent_response=context_agent_response,
     )
@@ -770,22 +773,22 @@ def answer_context_building_questions(context_id):
         if answer.strip():
             question = questions_by_id.get(str(question_id), {})
             question_text = question.get("question") or "Context building question"
-            mongo.db.interactions.insert_one({
+            mongo.db.interactions.insert_one(tenant_document({
                 "context_id": context_obj_id,
                 "question_id": f"{question_id}_question",
                 "question_text": question_text,
                 "answer": "",
                 "timestamp": datetime.now(timezone.utc),
                 "origin": "agent",
-            })
-            mongo.db.interactions.insert_one({
+            }))
+            mongo.db.interactions.insert_one(tenant_document({
                 "context_id": context_obj_id,
                 "question_id": question_id,
                 "question_text": question_text,
                 "answer": answer.strip(),
                 "timestamp": datetime.now(timezone.utc),
                 "origin": "user",
-            })
+            }))
 
     flash("Context building answers saved and security context updated.", "success")
     return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-intake"))
@@ -896,21 +899,21 @@ def continue_context(context_id):
     if not new_prompt:
         return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-intake"))
 
-    count = mongo.db.interactions.count_documents({
+    count = mongo.db.interactions.count_documents(tenant_query({
         "context_id": context_obj_id,
         "question_id": {"$regex": "^need"}
-    })
+    }))
     new_question_id = f"need_{count + 1}"
 
     # 1. Save user interaction
-    mongo.db.interactions.insert_one({
+    mongo.db.interactions.insert_one(tenant_document({
         "context_id": context_obj_id,
         "question_id": new_question_id,
         "question_text": "Add more information or questions...",
         "answer": new_prompt,
         "timestamp": datetime.now(timezone.utc),
         "origin": "user"
-    })
+    }))
 
     # 2. Execute agent with a phase-specific context-update prompt
     context_update_prompt = generate_context_update_prompt(context, new_prompt)
@@ -931,14 +934,14 @@ def continue_context(context_id):
         return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-intake"))
 
     # 4. Save agent response
-    mongo.db.interactions.insert_one({
+    mongo.db.interactions.insert_one(tenant_document({
         "context_id": context_obj_id,
         "question_id": f"response_{count + 1}",
         "question_text": "Agent response",
         "answer": response.strip(),
         "timestamp": datetime.now(timezone.utc),
         "origin": "agent"
-    })
+    }))
 
     security_context = build_context_security_context(
         context,
@@ -1017,14 +1020,14 @@ def approve_context_plan(context_id):
         },
     )
 
-    mongo.db.interactions.insert_one({
+    mongo.db.interactions.insert_one(tenant_document({
         "context_id": context_obj_id,
         "question_id": "context_plan_approved",
         "question_text": "Context intelligence plan approval",
         "answer": feedback.strip() or "Context intelligence plan approved.",
         "timestamp": datetime.now(timezone.utc),
         "origin": "user",
-    })
+    }))
 
     flash("Context intelligence plan approved. Task execution can start next.", "success")
     return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-execution"))
@@ -1055,7 +1058,9 @@ def trigger_context_plan_execution(context_id):
         flash(payload["message"], "warning")
         return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-execution"))
 
-    active_job = find_active_pipeline_job(context_id, command="execute_context_plan")
+    active_job = find_active_pipeline_job(
+        context_id, command="execute_context_plan", organization_id=g.organization_id
+    )
     if active_job:
         payload = {
             "success": True,
@@ -1069,6 +1074,7 @@ def trigger_context_plan_execution(context_id):
         return redirect(url_for("main.context_detail", context_id=context_id, _anchor="workflow-tab-execution"))
 
     job = create_pipeline_job(
+        organization_id=g.organization_id,
         context_id=context_id,
         command="execute_context_plan",
         correlation_id=request.headers.get("X-Correlation-ID"),
@@ -1222,8 +1228,8 @@ def delete_context(context_id):
     """Delete a context and its interaction history."""
     try:
         context_obj_id = parse_object_id(context_id)
-        result = mongo.db.contexts.delete_one({"_id": context_obj_id})
-        mongo.db.interactions.delete_many({"context_id": context_obj_id})
+        result = mongo.db.contexts.delete_one(tenant_query({"_id": context_obj_id}))
+        mongo.db.interactions.delete_many(tenant_query({"context_id": context_obj_id}))
         if result.deleted_count == 1:
             flash("Context successfully removed.", "success")
         else:
@@ -1303,7 +1309,7 @@ def trigger_policy_generation(context_id):
         flash(payload["message"], "danger")
         return redirect(url_for("main.context_detail", context_id=context_id))
 
-    active_job = find_active_pipeline_job(context_id)
+    active_job = find_active_pipeline_job(context_id, organization_id=g.organization_id)
     if active_job:
         payload = {
             "success": True,
@@ -1320,6 +1326,7 @@ def trigger_policy_generation(context_id):
         return redirect(url_for("main.context_detail", context_id=context_id))
 
     job = create_pipeline_job(
+        organization_id=g.organization_id,
         context_id=context_id,
         command="generate_policy",
         correlation_id=request.headers.get("X-Correlation-ID"),
@@ -1513,7 +1520,7 @@ def get_pipeline_job_status(job_id):
         job_id = parse_bounded_token(job_id, field="job_id", pattern=PIPELINE_JOB_ID_PATTERN)
     except RouteInputError as exc:
         return route_input_error_response(exc)
-    job = get_pipeline_job(job_id)
+    job = get_pipeline_job(job_id, organization_id=g.organization_id)
     if not job:
         return jsonify({
             "success": False,
@@ -1532,7 +1539,7 @@ def get_pipeline_job_events(job_id):
         job_id = parse_bounded_token(job_id, field="job_id", pattern=PIPELINE_JOB_ID_PATTERN)
     except RouteInputError as exc:
         return route_input_error_response(exc)
-    job = get_pipeline_job(job_id)
+    job = get_pipeline_job(job_id, organization_id=g.organization_id)
     if not job:
         return jsonify({
             "success": False,
@@ -1541,7 +1548,7 @@ def get_pipeline_job_events(job_id):
             "message": "Pipeline job not found.",
             "details": {"job_id": job_id},
         }), 404
-    events = list_pipeline_events(job_id)
+    events = list_pipeline_events(job_id, organization_id=g.organization_id)
     return jsonify({
         "success": True,
         "job_id": job_id,
@@ -1562,7 +1569,9 @@ def get_active_pipeline_job_status(context_id):
         )
     except RouteInputError as exc:
         return route_input_error_response(exc)
-    job = find_active_pipeline_job(context_id, command=command)
+    job = find_active_pipeline_job(
+        context_id, command=command, organization_id=g.organization_id
+    )
     if not job:
         return jsonify({
             "success": False,
@@ -1585,7 +1594,7 @@ def get_diagnostics(correlation_id):
         )
     except RouteInputError as exc:
         return route_input_error_response(exc)
-    diagnostic = get_pipeline_diagnostic(correlation_id)
+    diagnostic = get_pipeline_diagnostic(correlation_id, organization_id=g.organization_id)
     if not diagnostic:
         return jsonify({
             "success": False,

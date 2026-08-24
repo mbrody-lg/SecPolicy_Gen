@@ -259,6 +259,12 @@ def create_app():
 
         return authorize_principal_membership()
 
+    @app.before_request
+    def authorize_organization_resource():
+        from app.tenant_scope import authorize_tenant_resource
+
+        return authorize_tenant_resource()
+
     @app.after_request
     def apply_security_headers(response):
         record_request_metrics(response)
