@@ -25,6 +25,20 @@ os.environ.setdefault("DEBUG", "false")
 os.environ.setdefault("FLASK_SECRET_KEY", "test-only-secret-key")
 os.environ.setdefault("MONGO_URI", "mongodb://mongo:27017/context-testdb")
 
+TEST_PRINCIPAL = {
+    "issuer": "https://identity.test/tenant/secpolicygen",
+    "subject": "test-operator",
+    "email": "operator@example.test",
+    "name": "Test Operator",
+}
+
+
+def authenticate_test_client(test_client):
+    """Establish the minimal signed session produced by the OIDC callback."""
+    with test_client.session_transaction() as session:
+        session["principal"] = TEST_PRINCIPAL
+    return test_client
+
 
 @pytest.fixture(autouse=True)
 def mock_environment(monkeypatch):
@@ -40,7 +54,7 @@ def client():
         with patch.object(mongo, "db", mongomock.MongoClient().db):
             app = create_app()
             app.config["TESTING"] = True
-            yield app.test_client()
+            yield authenticate_test_client(app.test_client())
 
 
 @pytest.fixture

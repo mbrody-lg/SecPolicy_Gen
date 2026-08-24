@@ -11,6 +11,11 @@ def _set_common_env(monkeypatch):
     monkeypatch.setenv("MONGO_URI", "mongodb://mongo:27017/contextdb")
     monkeypatch.setenv("POLICY_AGENT_URL", "http://policy-agent:5000")
     monkeypatch.setenv("VALIDATOR_AGENT_URL", "http://validator-agent:5000")
+    monkeypatch.setenv("OIDC_ISSUER_URL", "https://identity.example.test/tenant/secpolicygen")
+    monkeypatch.setenv("OIDC_CLIENT_ID", "secpolicygen-test")
+    monkeypatch.setenv("OIDC_CLIENT_SECRET", "configured-oidc-secret")
+    monkeypatch.setenv("OIDC_REDIRECT_URI", "http://localhost:5003/auth/callback")
+    monkeypatch.setenv("OIDC_SCOPES", "openid profile email")
 
 
 def test_create_app_requires_secret_key_outside_testing(monkeypatch):
@@ -29,6 +34,10 @@ def test_create_app_requires_secret_key_outside_testing(monkeypatch):
         "MONGO_URI",
         "POLICY_AGENT_URL",
         "VALIDATOR_AGENT_URL",
+        "OIDC_ISSUER_URL",
+        "OIDC_CLIENT_ID",
+        "OIDC_CLIENT_SECRET",
+        "OIDC_REDIRECT_URI",
     ],
 )
 def test_create_app_requires_runtime_config_outside_testing(monkeypatch, missing_variable):
@@ -47,6 +56,12 @@ def test_create_app_requires_runtime_config_outside_testing(monkeypatch, missing
         ("MONGO_URI", "not-a-mongo-uri", "MONGO_URI must be a MongoDB URI"),
         ("POLICY_AGENT_URL", "policy-agent:5000", "POLICY_AGENT_URL must be an http"),
         ("VALIDATOR_AGENT_URL", "validator-agent:5000", "VALIDATOR_AGENT_URL must be an http"),
+        ("OIDC_ISSUER_URL", "identity.example.test", "OIDC_ISSUER_URL must be an http"),
+        ("OIDC_ISSUER_URL", "http://identity.example.test/tenant", "OIDC_ISSUER_URL must use HTTPS"),
+        ("OIDC_ISSUER_URL", "https://identity.example.test/tenant?x=1", "must not include a query"),
+        ("OIDC_REDIRECT_URI", "/auth/callback", "OIDC_REDIRECT_URI must be an http"),
+        ("OIDC_REDIRECT_URI", "http://app.example.test/auth/callback", "must use HTTPS"),
+        ("OIDC_SCOPES", "profile email", "OIDC_SCOPES must include openid"),
         ("POLICY_AGENT_TIMEOUT_SECONDS", "0", "POLICY_AGENT_TIMEOUT_SECONDS must be a positive number"),
         ("POLICY_AGENT_TIMEOUT_SECONDS", "not-a-number", "POLICY_AGENT_TIMEOUT_SECONDS must be a positive number"),
         ("VALIDATOR_AGENT_TIMEOUT_SECONDS", "-1", "VALIDATOR_AGENT_TIMEOUT_SECONDS must be a positive number"),
@@ -152,6 +167,17 @@ def test_create_app_reads_timeout_and_trusted_host_overrides(monkeypatch):
     assert app.config["MAX_CONTENT_LENGTH"] == 4096
     assert app.config["SESSION_COOKIE_SECURE"] is True
     assert app.config["TRUSTED_HOSTS"] == ["localhost", "context-agent.internal"]
+
+
+def test_create_app_defaults_to_secure_cookie_for_https_callback(monkeypatch):
+    _set_common_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "true")
+    monkeypatch.setenv("OIDC_REDIRECT_URI", "https://app.example.test/auth/callback")
+    monkeypatch.delenv("SESSION_COOKIE_SECURE", raising=False)
+
+    app = app_module.create_app()
+
+    assert app.config["SESSION_COOKIE_SECURE"] is True
 
 
 def test_request_hook_preserves_inbound_correlation_id(monkeypatch):

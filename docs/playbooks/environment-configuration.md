@@ -40,6 +40,11 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | Variable | Class | Default policy | Used by | Validation expectation |
 |----------|-------|----------------|---------|------------------------|
 | `FLASK_SECRET_KEY` | `secret`, `required` | Required outside `TESTING`; fake local only in examples | Flask session signing | App init fails safely when missing outside tests |
+| `OIDC_ISSUER_URL` | `required` | Required outside `TESTING` | Provider-neutral OIDC discovery | HTTPS outside localhost; no query or fragment |
+| `OIDC_CLIENT_ID` | `required` | Required outside `TESTING` | OIDC relying-party identifier | Reject blank values |
+| `OIDC_CLIENT_SECRET` | `secret`, `required` | Required outside `TESTING`; fake local only in examples | Confidential OIDC client authentication | Never expose through logs or responses |
+| `OIDC_REDIRECT_URI` | `required` | Required outside `TESTING` | Exact OIDC callback URI | HTTPS outside localhost; register exact value at the provider |
+| `OIDC_SCOPES` | `runtime knob` | `openid profile email` | Requested identity claims | Must contain `openid` |
 | `TESTING` | `safe default` | Defaults to `false` | App factory/tests | Parse as explicit truthy flag |
 | `DEBUG` | `runtime knob` | Defaults to `false` | App factory/log behavior | Example defaults to `false`; dev override only |
 | `MONGO_URI` | `required` | Local Docker default may be documented | Flask-PyMongo | Missing/malformed handling should be deterministic |

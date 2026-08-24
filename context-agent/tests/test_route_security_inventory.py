@@ -8,6 +8,7 @@ from app.routes.route_security import (
 
 
 ALLOWED_CATEGORIES = {
+    "authenticated_read",
     "public_read",
     "operator_ui_mutation",
     "service_to_service_callback",
@@ -56,6 +57,6 @@ def test_policy_callback_is_not_classified_as_operator_ui_mutation():
     assert policy_callback.next_control == "service_to_service_auth"
 
 
-def test_mutation_boundary_decision_defers_behavior_change_until_routes_are_classified():
-    assert MUTATION_BOUNDARY_DECISION["decision"] == "inventory_gate_first"
-    assert "service-auth" in MUTATION_BOUNDARY_DECISION["reason"]
+def test_mutation_boundary_decision_tracks_the_next_security_boundary():
+    assert MUTATION_BOUNDARY_DECISION["decision"] == "identity_first_then_resource_authorization"
+    assert "resource authorization" in MUTATION_BOUNDARY_DECISION["reason"]
