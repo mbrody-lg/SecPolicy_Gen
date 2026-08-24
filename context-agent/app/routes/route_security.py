@@ -244,8 +244,8 @@ ROUTE_SECURITY_CLASSIFICATIONS = (
         rule="/context/<context_id>/policy",
         method="POST",
         category=SERVICE_CALLBACK,
-        current_guard=BODY_CONTRACT_GUARD,
-        next_control="service_to_service_auth",
+        current_guard="workload_bearer_token_and_body_contract",
+        next_control="callback_producer_contract",
         rationale="Internal callback that persists validated policy payloads.",
     ),
     RouteSecurityClassification(

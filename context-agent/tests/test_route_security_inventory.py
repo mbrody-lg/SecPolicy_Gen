@@ -54,7 +54,8 @@ def test_policy_callback_is_not_classified_as_operator_ui_mutation():
 
     assert policy_callback.category == SERVICE_CALLBACK
     assert policy_callback.category != OPERATOR_UI_MUTATION
-    assert policy_callback.next_control == "service_to_service_auth"
+    assert policy_callback.current_guard == "workload_bearer_token_and_body_contract"
+    assert policy_callback.next_control == "callback_producer_contract"
 
 
 def test_mutation_boundary_decision_tracks_the_next_security_boundary():

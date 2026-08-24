@@ -45,6 +45,7 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | `OIDC_CLIENT_SECRET` | `secret`, `required` | Required outside `TESTING`; fake local only in examples | Confidential OIDC client authentication | Never expose through logs or responses |
 | `OIDC_REDIRECT_URI` | `required` | Required outside `TESTING` | Exact OIDC callback URI | HTTPS outside localhost; register exact value at the provider |
 | `OIDC_SCOPES` | `runtime knob` | `openid profile email` | Requested identity claims | Must contain `openid` |
+| `POLICY_CALLBACK_TOKEN` | `secret`, `required` | Required outside `TESTING` | Policy Agent workload authentication for the Context Agent callback | Send only as `Authorization: Bearer`; rotate independently from browser/OIDC secrets |
 | `CONTEXT_IMPORT_ORGANIZATION_ID` | `operation input` | Required by fixture import | Organization owning imported contexts | Must reference an active, locally provisioned organization |
 | `TESTING` | `safe default` | Defaults to `false` | App factory/tests | Parse as explicit truthy flag |
 | `DEBUG` | `runtime knob` | Defaults to `false` | App factory/log behavior | Example defaults to `false`; dev override only |
