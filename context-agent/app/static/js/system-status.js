@@ -238,6 +238,7 @@
           headers: {
             Accept: "application/json",
             "X-Requested-With": "XMLHttpRequest",
+            "X-CSRFToken": window.secPolicyCsrfToken(),
           },
         })
           .then(function (response) {
@@ -277,6 +278,7 @@
           headers: {
             Accept: "application/json",
             "X-Requested-With": "XMLHttpRequest",
+            "X-CSRFToken": window.secPolicyCsrfToken(),
           },
         })
           .then(function (response) {
@@ -347,6 +349,7 @@
           headers: {
             Accept: "application/json",
             "X-Requested-With": "XMLHttpRequest",
+            "X-CSRFToken": window.secPolicyCsrfToken(),
           },
         })
           .then(function (response) {
