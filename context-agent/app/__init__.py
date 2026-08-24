@@ -2,6 +2,7 @@
 
 import os
 import re
+from datetime import timedelta
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -87,12 +88,34 @@ def _validate_http_url(name: str, value: str) -> str:
     return value
 
 
+def _validate_oidc_url(name: str, value: str, *, issuer: bool = False) -> str:
+    """Require HTTPS for OIDC, with HTTP limited to loopback development hosts."""
+    parsed = urlparse(value)
+    hostname = (parsed.hostname or "").lower()
+    local_http = hostname in {"localhost", "127.0.0.1", "::1"} or hostname.endswith(".localhost")
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(f"{name} must be an http(s) URL.")
+    if parsed.scheme != "https" and not local_http:
+        raise ValueError(f"{name} must use HTTPS outside localhost.")
+    if parsed.fragment or (issuer and parsed.query):
+        raise ValueError(f"{name} must not include a query or fragment.")
+    return value
+
+
 def _validate_mongo_uri(name: str, value: str) -> str:
     """Validate a MongoDB URI without exposing the raw value."""
     parsed = urlparse(value)
     if parsed.scheme not in {"mongodb", "mongodb+srv"} or not parsed.netloc:
         raise ValueError(f"{name} must be a MongoDB URI.")
     return value
+
+
+def _get_oidc_scopes() -> str:
+    """Return normalized OIDC scopes and require the identity scope."""
+    scopes = " ".join(os.getenv("OIDC_SCOPES", "openid profile email").split())
+    if "openid" not in scopes.split():
+        raise ValueError("OIDC_SCOPES must include openid.")
+    return scopes
 
 
 def get_request_correlation_id() -> str | None:
@@ -119,6 +142,7 @@ def _is_json_response(response) -> bool:
     content_type = (response.content_type or "").split(";", 1)[0].strip().lower()
     return response.is_json or content_type == "application/json"
 
+
 def create_app():
     """Create and configure the Flask application instance."""
     load_dotenv()
@@ -132,6 +156,34 @@ def create_app():
     )
 
     app.config["SECRET_KEY"] = secret_key
+    app.config["OIDC_ISSUER_URL"] = _validate_oidc_url(
+        "OIDC_ISSUER_URL",
+        _get_required_env(
+            "OIDC_ISSUER_URL",
+            is_testing=is_testing,
+            test_default="https://identity.test/tenant/secpolicygen",
+        ),
+        issuer=True,
+    )
+    app.config["OIDC_CLIENT_ID"] = _get_required_env(
+        "OIDC_CLIENT_ID",
+        is_testing=is_testing,
+        test_default="secpolicygen-test",
+    )
+    app.config["OIDC_CLIENT_SECRET"] = _get_required_env(
+        "OIDC_CLIENT_SECRET",
+        is_testing=is_testing,
+        test_default="test-only-oidc-client-secret",
+    )
+    app.config["OIDC_REDIRECT_URI"] = _validate_oidc_url(
+        "OIDC_REDIRECT_URI",
+        _get_required_env(
+            "OIDC_REDIRECT_URI",
+            is_testing=is_testing,
+            test_default="http://localhost/auth/callback",
+        ),
+    )
+    app.config["OIDC_SCOPES"] = _get_oidc_scopes()
     app.config["TESTING"] = is_testing
     app.config["DEBUG"] = _get_env_bool("DEBUG", default=False)
     app.config["MONGO_URI"] = _validate_mongo_uri(
@@ -169,7 +221,11 @@ def create_app():
     app.config["MAX_CONTENT_LENGTH"] = _get_env_int("MAX_CONTENT_LENGTH", 256 * 1024)
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-    app.config["SESSION_COOKIE_SECURE"] = _get_env_bool("SESSION_COOKIE_SECURE", default=False)
+    app.config["SESSION_COOKIE_SECURE"] = _get_env_bool(
+        "SESSION_COOKIE_SECURE",
+        default=urlparse(app.config["OIDC_REDIRECT_URI"]).scheme == "https",
+    )
+    app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=8)
     trusted_hosts = _get_env_list("TRUSTED_HOSTS")
     if trusted_hosts is not None:
         app.config["TRUSTED_HOSTS"] = trusted_hosts
@@ -182,13 +238,20 @@ def create_app():
         config = load_agent_config(app.config["CONFIG_PATH"])
         return {"agent_type": config.get("type", "unknown")}
 
+    from app.identity import identity, init_identity, require_authenticated_principal
     from app.routes.routes import main
+    init_identity(app)
+    app.register_blueprint(identity)
     app.register_blueprint(main)
 
     @app.before_request
     def bind_correlation_id():
         g.correlation_id = _ensure_correlation_id()
         start_request_timer()
+
+    @app.before_request
+    def authenticate_human_principal():
+        return require_authenticated_principal()
 
     @app.after_request
     def apply_security_headers(response):

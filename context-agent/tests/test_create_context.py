@@ -8,6 +8,11 @@ def client():
     app = create_app()
     app.config["TESTING"] = True
     with app.test_client() as client:
+        with client.session_transaction() as session:
+            session["principal"] = {
+                "issuer": "https://identity.test/tenant/secpolicygen",
+                "subject": "test-operator",
+            }
         with app.app_context():
             yield client
 

@@ -22,6 +22,11 @@ Create a `.env` file in the `infrastructure/` directory:
 # Required for all agents
 OPENAI_API_KEY=fake-local-openai-key
 FLASK_SECRET_KEY=fake-local-flask-secret
+OIDC_ISSUER_URL=https://identity.example.com/tenant/secpolicygen
+OIDC_CLIENT_ID=secpolicygen-context-agent
+OIDC_CLIENT_SECRET=fake-local-oidc-client-secret
+OIDC_REDIRECT_URI=http://localhost:5003/auth/callback
+OIDC_SCOPES=openid profile email
 FLASK_ENV=development
 FLASK_RUN_DEBUG=0
 DEBUG=false
@@ -48,7 +53,7 @@ make up
 This starts:
 - **MongoDB** - Data persistence for all agents
 - **Chroma** - Vector database for regulatory documents
-- **Context Agent** - Web/API service at http://localhost:5003
+- **Context Agent** - OIDC-authenticated Web/API service at http://localhost:5003
 - **Policy Agent** - API at http://localhost:5002
 - **Validator Agent** - API at http://localhost:5001
 - **Grafana** - Local observability UI at http://localhost:3000
@@ -303,8 +308,9 @@ for local iteration and deterministic smoke evidence:
 
 Production should provide immutable build artifacts, managed or operationally
 backed data stores, secret-manager backed credentials, `DEBUG=false`, secure
-cookies, and TLS/reverse proxy termination. Service-to-service authentication is
-not defined by this local stack; it belongs to INIT-11.
+cookies, and TLS/reverse proxy termination. Context Agent delegates human
+authentication to a configured OIDC provider; per-service identities and token
+rotation remain owned by INIT-11.
 
 ## Production Deployment
 

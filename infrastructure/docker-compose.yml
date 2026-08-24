@@ -28,7 +28,7 @@ services:
     build: ../context-agent
     container_name: context_agent_web
     ports:
-      - "5003:5000"
+      - "127.0.0.1:5003:5000"
     volumes:
       - ../context-agent:/context-agent
       - ../migration:/migration
@@ -40,6 +40,11 @@ services:
       - DEBUG=${DEBUG:-false}
       - TESTING=${TESTING:-false}
       - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
+      - OIDC_ISSUER_URL=${OIDC_ISSUER_URL}
+      - OIDC_CLIENT_ID=${OIDC_CLIENT_ID}
+      - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET}
+      - OIDC_REDIRECT_URI=${OIDC_REDIRECT_URI}
+      - OIDC_SCOPES=${OIDC_SCOPES:-openid profile email}
       - MONGO_URI=${MONGO_URI}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_API_URL=${OPENAI_API_URL:-https://api.openai.com/v1/}

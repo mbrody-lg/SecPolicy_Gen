@@ -33,6 +33,11 @@ Create a `.env` file in the `context-agent/` directory:
 OPENAI_API_KEY=sk-your-key-here
 MONGO_URI=mongodb://mongodb:27017/context-agent-db
 FLASK_SECRET_KEY=your-secret-key-here
+OIDC_ISSUER_URL=https://identity.example.com/tenant/secpolicygen
+OIDC_CLIENT_ID=secpolicygen-context-agent
+OIDC_CLIENT_SECRET=your-oidc-client-secret
+OIDC_REDIRECT_URI=http://localhost:5003/auth/callback
+OIDC_SCOPES=openid profile email
 FLASK_ENV=development
 CONFIG_PATH=config/context-agent.yaml
 POLICY_AGENT_URL=http://policy-agent:5000
@@ -58,6 +63,16 @@ python run.py
 ```
 
 The service runs on `http://localhost:5000`
+
+The browser authenticates through the configured OpenID Connect provider.
+SecPolicyGen uses standard discovery and does not depend on a provider-specific
+SDK. `/health`, `/ready`, and `/metrics` remain unauthenticated for runtime
+probes.
+
+The provider must expose OpenID Connect Discovery at
+`${OIDC_ISSUER_URL}/.well-known/openid-configuration`. Authorization is based
+on SecPolicyGen memberships and permissions, not provider-specific group or
+role claims.
 
 Each request now has a stable correlation boundary:
 - inbound `X-Correlation-ID` is preserved when present and valid
