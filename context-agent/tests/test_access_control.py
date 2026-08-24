@@ -169,8 +169,8 @@ def test_human_principal_cannot_use_workload_callback(app, monkeypatch):
 
     response = client.post("/context/507f1f77bcf86cd799439011/policy", json={"policy": "test"})
 
-    assert response.status_code == 403
-    assert response.get_json()["error_code"] == "permission_denied"
+    assert response.status_code == 401
+    assert response.get_json()["error_code"] == "workload_authentication_required"
 
 
 def test_every_protected_route_has_an_explicit_permission(app):
@@ -181,4 +181,9 @@ def test_every_protected_route_has_an_explicit_permission(app):
         for method in rule.methods - {"HEAD", "OPTIONS"}
     }
 
-    assert set(ROUTE_PERMISSIONS) == protected_routes
+    human_route_permissions = {
+        route for route, permission in ROUTE_PERMISSIONS.items()
+        if permission != "workload:callback"
+    }
+    assert human_route_permissions == protected_routes
+    assert ROUTE_PERMISSIONS[("POST", "/context/<context_id>/policy")] == "workload:callback"
