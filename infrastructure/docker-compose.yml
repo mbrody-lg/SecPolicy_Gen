@@ -46,6 +46,8 @@ services:
       - POLICY_CALLBACK_TOKEN=${POLICY_CALLBACK_TOKEN}
       - OIDC_REDIRECT_URI=${OIDC_REDIRECT_URI}
       - OIDC_SCOPES=${OIDC_SCOPES:-openid profile email}
+      - OIDC_CA_BUNDLE=${OIDC_CA_BUNDLE:-}
+      - OIDC_ALLOW_INSECURE_HTTP=${OIDC_ALLOW_INSECURE_HTTP:-false}
       - MONGO_URI=${MONGO_URI}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_API_URL=${OPENAI_API_URL:-https://api.openai.com/v1/}
@@ -59,7 +61,7 @@ services:
       - MAX_CONTENT_LENGTH=${MAX_CONTENT_LENGTH:-262144}
       - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
       - TRUSTED_HOSTS=${TRUSTED_HOSTS:-localhost,127.0.0.1,context-agent,policy-agent,validator-agent}
-      - CONFIG_PATH=/context-agent/app/config/context_agent.yaml
+      - CONFIG_PATH=${CONTEXT_CONFIG_PATH:-/context-agent/app/config/context_agent.yaml}
       - QUESTIONS_CONFIG_PATH=/context-agent/app/config/context_questions.yaml
     depends_on:
       mongo:
@@ -117,7 +119,7 @@ services:
       - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
       - TRUSTED_HOSTS=${TRUSTED_HOSTS:-localhost,127.0.0.1,context-agent,policy-agent,validator-agent}
       - RAG_SOURCES_PATH=/policy-agent/app/config/rag_sources.yaml
-      - CONFIG_PATH=/policy-agent/app/config/policy_agent.yaml
+      - CONFIG_PATH=${POLICY_CONFIG_PATH:-/policy-agent/app/config/policy_agent.yaml}
     depends_on:
       mongo:
         condition: service_healthy
@@ -154,7 +156,7 @@ services:
       - MAX_CONTENT_LENGTH=${MAX_CONTENT_LENGTH:-262144}
       - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
       - TRUSTED_HOSTS=${TRUSTED_HOSTS:-localhost,127.0.0.1,context-agent,policy-agent,validator-agent}
-      - CONFIG_PATH=/validator-agent/app/config/validator_agent.yaml
+      - CONFIG_PATH=${VALIDATOR_CONFIG_PATH:-/validator-agent/app/config/validator_agent.yaml}
     volumes:
       - ../validator-agent:/validator-agent
     depends_on:

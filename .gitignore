@@ -73,5 +73,6 @@ htmlcov/
 /.local-workspace/
 /tasks/
 /migration/
+/infrastructure/.local-certs/
 AGENTS.md
 RTK.md

@@ -63,3 +63,35 @@ SecPolicyGen permissions.
 Keycloak, Entra ID, Okta, Auth0, Dex, and other conforming providers can be used
 without changing application code. Any local provider added to Docker is a test
 fixture only, not a production dependency.
+
+## Local interoperability fixture
+
+The Docker stack includes a disposable Keycloak realm to prove the same OIDC
+contract over development HTTP and trusted local HTTPS. It uses fixed fake
+credentials and generated, ignored TLS keys; do not promote either to another
+environment.
+
+```bash
+make local-oidc-http-smoke
+make local-oidc-https-smoke
+# Or run the complete INIT-26 regression gate:
+make init-26-security-gate
+```
+
+Both commands start the provider and Context Agent, provision the provider
+subject into a local SecPolicyGen organization, and exercise the browser login
+through Playwright inside Docker. The application still consumes only Discovery
+metadata and standard OIDC claims; no Keycloak SDK or provider role mapping is
+used.
+
+The HTTP issuer mode requires `OIDC_ALLOW_INSECURE_HTTP=true` and is rejected
+outside development. HTTPS uses the generated local CA only for OIDC requests;
+public API clients retain the platform trust store. The browser fixture pins the
+generated certificate SPKI instead of disabling TLS validation globally.
+The local runner aligns the disposable Keycloak process UID with the owner of
+its `0600` leaf key so bind-mounted permissions behave consistently on Linux
+and Docker Desktop; no container receives the CA private key.
+
+The complete gate also runs the advisory reverse PoC and asserts that anonymous,
+membership-less, and cross-tenant read/write/delete attempts leave persistence
+unchanged.

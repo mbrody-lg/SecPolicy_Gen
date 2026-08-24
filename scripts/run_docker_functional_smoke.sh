@@ -13,11 +13,6 @@ CONTEXT_CONTAINER="context_agent_web"
 POLICY_CONTAINER="policy_agent_service"
 VALIDATOR_CONTAINER="validator_agent_service"
 COMPOSE_FILE="${INFRA_DIR}/docker-compose.yml"
-POLICY_MOCK_CONFIG="/policy-agent/app/config/examples/policy_agent.example.mock.yaml"
-CONTEXT_MOCK_CONFIG="/context-agent/app/config/examples/context_agent.example.mock.yaml"
-CONTEXT_CONTAINER_CONFIG=""
-POLICY_CONTAINER_CONFIG=""
-VALIDATOR_CONTAINER_CONFIG=""
 
 MOCK_MODE="${MIGRATION_SMOKE_MOCK:-1}"
 CLEAN_DB="${MIGRATION_SMOKE_CLEAN_DB:-1}"
@@ -31,7 +26,6 @@ PIPELINE_JOB_TIMEOUT_SECONDS="${MIGRATION_SMOKE_PIPELINE_JOB_TIMEOUT_SECONDS:-18
 PIPELINE_JOB_POLL_SECONDS="${MIGRATION_SMOKE_PIPELINE_JOB_POLL_SECONDS:-2}"
 CHROMA_BACKUP_FILE="${MIGRATION_SMOKE_CHROMA_BACKUP_FILE:-}"
 CHROMA_BACKUP_AFTER_REFRESH="${MIGRATION_SMOKE_CHROMA_BACKUP_AFTER_REFRESH:-0}"
-TMP_BACKUP_DIR=""
 GOLDEN_DIR="${MIGRATION_SMOKE_GOLDEN_DIR:-/migration/golden-contexts}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 PROBE_MAX_ATTEMPTS="${MIGRATION_SMOKE_PROBE_ATTEMPTS:-60}"
@@ -70,11 +64,6 @@ validate_rag_mode() {
   esac
 }
 
-resolve_service_config_path() {
-  local container_name=$1
-  docker exec "$container_name" python -c "from app import create_app; app=create_app(); print(app.config['CONFIG_PATH'])"
-}
-
 collect_probe_diagnostics() {
   local service_name=$1
   local base_url=$2
@@ -104,23 +93,6 @@ else
 fi
 
 restore_and_cleanup() {
-  if [[ -n "$TMP_BACKUP_DIR" && -d "$TMP_BACKUP_DIR" ]]; then
-    if docker inspect "$CONTEXT_CONTAINER" >/dev/null 2>&1; then
-      if [[ -f "$TMP_BACKUP_DIR/context_agent.yaml" ]]; then
-        docker cp "$TMP_BACKUP_DIR/context_agent.yaml" "$CONTEXT_CONTAINER:$CONTEXT_CONTAINER_CONFIG" || true
-      fi
-      if [[ -f "$TMP_BACKUP_DIR/policy_agent.yaml" ]]; then
-        docker exec "$POLICY_CONTAINER" mkdir -p /config
-        docker cp "$TMP_BACKUP_DIR/policy_agent.yaml" "$POLICY_CONTAINER:$POLICY_CONTAINER_CONFIG" || true
-      fi
-      if [[ -f "$TMP_BACKUP_DIR/validator_agent.yaml" ]]; then
-        docker cp "$TMP_BACKUP_DIR/validator_agent.yaml" "$VALIDATOR_CONTAINER:/validator-agent/app/config/validator_agent.yaml" || true
-      fi
-    fi
-
-    rm -rf "$TMP_BACKUP_DIR"
-  fi
-
   if [[ "$TMP_ENV_TEMP_CREATED" -eq 1 && -n "$TMP_ENV_FILE" && -f "$TMP_ENV_FILE" ]]; then
     rm -f "$TMP_ENV_FILE"
   fi
@@ -566,6 +538,11 @@ mkdir -p "$(dirname "$RAG_PREFLIGHT_FILE")"
 rm -f "$RAG_PREFLIGHT_FILE"
 
 log "starting docker stack for functional smoke tests"
+if is_mock_mode; then
+  export CONTEXT_CONFIG_PATH=/context-agent/app/config/examples/context_agent.example.mock.yaml
+  export POLICY_CONFIG_PATH=/policy-agent/app/config/examples/policy_agent.example.mock.yaml
+  export VALIDATOR_CONFIG_PATH=/validator-agent/app/config/examples/validator_agent.example.mock.yaml
+fi
 "${DOCKER_COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$TMP_ENV_FILE" up --build -d
 STACK_STARTED=1
 
@@ -597,17 +574,7 @@ PY
 fi
 
 if is_mock_mode; then
-  CONTEXT_CONTAINER_CONFIG="$(resolve_service_config_path "$CONTEXT_CONTAINER")"
-  POLICY_CONTAINER_CONFIG="$(resolve_service_config_path "$POLICY_CONTAINER")"
-  VALIDATOR_CONTAINER_CONFIG="$(resolve_service_config_path "$VALIDATOR_CONTAINER")"
-  TMP_BACKUP_DIR="$(mktemp -d)"
-  docker cp "$CONTEXT_CONTAINER:$CONTEXT_CONTAINER_CONFIG" "$TMP_BACKUP_DIR/context_agent.yaml"
-  docker cp "$POLICY_CONTAINER:$POLICY_CONTAINER_CONFIG" "$TMP_BACKUP_DIR/policy_agent.yaml"
-  docker cp "$VALIDATOR_CONTAINER:$VALIDATOR_CONTAINER_CONFIG" "$TMP_BACKUP_DIR/validator_agent.yaml"
   log "using mock agent configs for deterministic execution"
-  docker exec "$CONTEXT_CONTAINER" sh -lc "mkdir -p \"$(dirname "$CONTEXT_CONTAINER_CONFIG")\" && cp \"$CONTEXT_MOCK_CONFIG\" \"$CONTEXT_CONTAINER_CONFIG\""
-  docker exec "$POLICY_CONTAINER" sh -lc "mkdir -p \"$(dirname "$POLICY_CONTAINER_CONFIG")\" && cp \"$POLICY_MOCK_CONFIG\" \"$POLICY_CONTAINER_CONFIG\""
-  docker exec "$VALIDATOR_CONTAINER" sh -lc "mkdir -p \"$(dirname "$VALIDATOR_CONTAINER_CONFIG")\" && cp /validator-agent/app/config/examples/validator_agent.example.mock.yaml \"$VALIDATOR_CONTAINER_CONFIG\""
 else
   log "using existing service configs (requires production-like API keys for model calls)"
 fi
@@ -621,7 +588,12 @@ log "validating RAG runtime readiness contract"
 wait_for_rag_ready
 
 log "loading golden fixtures into context-agent"
-docker exec "$CONTEXT_CONTAINER" python generate_context_from_yaml.py "$GOLDEN_DIR"
+SMOKE_ORGANIZATION_ID="functional-smoke"
+SMOKE_SUBJECT="functional-smoke-operator"
+docker exec "$CONTEXT_CONTAINER" sh -lc \
+  'python manage_identity.py --issuer "$OIDC_ISSUER_URL" --subject functional-smoke-operator --organization-id functional-smoke --organization-name "Functional Smoke" --role admin'
+docker exec -e CONTEXT_IMPORT_ORGANIZATION_ID="$SMOKE_ORGANIZATION_ID" \
+  "$CONTEXT_CONTAINER" python generate_context_from_yaml.py --auto-approve-plan "$GOLDEN_DIR"
 
 RESULT_FILE="$ROOT_DIR/migration/functional-smoke-result.json"
 ERROR_FILE="$ROOT_DIR/migration/functional-smoke-error.log"
@@ -645,12 +617,27 @@ import time
 from uuid import uuid4
 from datetime import datetime, timezone
 from bson import ObjectId
+from flask import session
+from flask_wtf.csrf import generate_csrf
 from pymongo import MongoClient
 from app import create_app, mongo
 import requests
 
 app = create_app()
 app.app_context().push()
+
+SMOKE_PRINCIPAL = {
+    "issuer": app.config["OIDC_ISSUER_URL"],
+    "subject": "functional-smoke-operator",
+}
+with app.test_request_context("/"):
+    session["principal"] = SMOKE_PRINCIPAL
+    csrf_token = generate_csrf()
+    session_cookie = app.session_interface.get_signing_serializer(app).dumps(dict(session))
+AUTH_HEADERS = {
+    "Cookie": f"{app.config['SESSION_COOKIE_NAME']}={session_cookie}",
+    "X-CSRFToken": csrf_token,
+}
 
 SERVICE_ENDPOINTS = {
     "context-agent": "http://localhost:5000",
@@ -725,7 +712,7 @@ def lookup_diagnostics(correlation_id):
         try:
             diagnostics_response = requests.get(
                 f"http://localhost:5000/diagnostics/{correlation_id}",
-                headers={"X-Correlation-ID": correlation_id},
+                headers={**AUTH_HEADERS, "X-Correlation-ID": correlation_id},
                 timeout=30,
             )
             last_result["status_code"] = diagnostics_response.status_code
@@ -760,7 +747,7 @@ def poll_pipeline_job(job_id):
         try:
             response = requests.get(
                 f"http://localhost:5000/pipeline/jobs/{job_id}",
-                headers={"Accept": "application/json"},
+                headers={**AUTH_HEADERS, "Accept": "application/json"},
                 timeout=15,
             )
             last_result["status_code"] = response.status_code
@@ -803,10 +790,40 @@ observability_by_context = {}
 
 for context_id in context_ids:
     correlation_id = f"smoke-{context_id}-{uuid4().hex[:8]}"
+    preparation = {}
     try:
+        execution_response = requests.post(
+            f"http://localhost:5000/context/{context_id}/context-plan/execute",
+            headers={
+                **AUTH_HEADERS,
+                "Accept": "application/json",
+                "X-Requested-With": "XMLHttpRequest",
+                "X-Correlation-ID": f"{correlation_id}-context-plan",
+            },
+            timeout=30,
+        )
+        preparation["execution_status"] = execution_response.status_code
+        execution_payload = execution_response.json()
+        execution_job = execution_payload.get("job") if isinstance(execution_payload, dict) else None
+        if isinstance(execution_job, dict) and execution_job.get("job_id"):
+            preparation["execution_job"] = poll_pipeline_job(execution_job["job_id"])
+
+        synthesis_response = requests.post(
+            f"http://localhost:5000/context/{context_id}/final-context/synthesize",
+            headers={
+                **AUTH_HEADERS,
+                "Accept": "application/json",
+                "X-Requested-With": "XMLHttpRequest",
+                "X-Correlation-ID": f"{correlation_id}-final-context",
+            },
+            timeout=30,
+        )
+        preparation["synthesis_status"] = synthesis_response.status_code
+
         response = requests.post(
             f"http://localhost:5000/context/{context_id}/generate_policy",
             headers={
+                **AUTH_HEADERS,
                 "Accept": "application/json",
                 "X-Requested-With": "XMLHttpRequest",
                 "X-Correlation-ID": correlation_id,
@@ -836,6 +853,7 @@ for context_id in context_ids:
         {
             "requested_correlation_id": correlation_id,
             "generate_response_correlation_id": response_correlation_id,
+            "context_preparation": preparation,
         }
     )
     observability_by_context[context_id].update(lookup_diagnostics(correlation_id))

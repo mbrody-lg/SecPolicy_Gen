@@ -83,6 +83,39 @@ def test_create_app_rejects_malformed_runtime_config(monkeypatch, variable, valu
         app_module.create_app()
 
 
+def test_create_app_rejects_missing_oidc_ca_bundle(monkeypatch):
+    _set_common_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "true")
+    monkeypatch.setenv("FLASK_SECRET_KEY", "configured-test-secret")
+    monkeypatch.setenv("OIDC_CA_BUNDLE", "/missing/provider-ca.crt")
+
+    with pytest.raises(ValueError, match="OIDC_CA_BUNDLE must reference a readable CA bundle"):
+        app_module.create_app()
+
+
+def test_create_app_allows_explicit_local_http_oidc_fixture(monkeypatch):
+    _set_common_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "true")
+    monkeypatch.setenv("FLASK_SECRET_KEY", "configured-test-secret")
+    monkeypatch.setenv("OIDC_ISSUER_URL", "http://identity.test:8080/realms/secpolicygen")
+    monkeypatch.setenv("OIDC_ALLOW_INSECURE_HTTP", "true")
+
+    app = app_module.create_app()
+
+    assert app.config["OIDC_ALLOW_INSECURE_HTTP"] is True
+
+
+def test_create_app_rejects_insecure_oidc_http_outside_development(monkeypatch):
+    _set_common_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "false")
+    monkeypatch.setenv("FLASK_ENV", "production")
+    monkeypatch.setenv("FLASK_SECRET_KEY", "configured-secret")
+    monkeypatch.setenv("OIDC_ALLOW_INSECURE_HTTP", "true")
+
+    with pytest.raises(ValueError, match="limited to development"):
+        app_module.create_app()
+
+
 def test_create_app_allows_placeholder_secret_in_testing(monkeypatch):
     _set_common_env(monkeypatch)
     monkeypatch.setenv("TESTING", "true")
@@ -232,7 +265,11 @@ def test_agent_type_context_processor_uses_config_path(monkeypatch):
     monkeypatch.setattr("app.agents.factory.load_agent_config", fake_load_agent_config)
 
     app = app_module.create_app()
-    agent_type_context_processor = app.template_context_processors[None][-1]
+    agent_type_context_processor = next(
+        processor
+        for processor in app.template_context_processors[None]
+        if processor.__name__ == "inject_agent_type"
+    )
 
     assert agent_type_context_processor() == {"agent_type": "mock"}
     assert captured["config_path"] == "/config/custom-context-agent.yaml"

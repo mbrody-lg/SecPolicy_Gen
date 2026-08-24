@@ -1,0 +1,49 @@
+{
+  "realm": "secpolicygen",
+  "enabled": true,
+  "displayName": "SecPolicyGen Local Identity",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "rememberMe": false,
+  "clients": [
+    {
+      "clientId": "secpolicygen-context-agent",
+      "name": "SecPolicyGen Context Agent",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "fake-local-oidc-client-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "publicClient": false,
+      "redirectUris": [
+        "http://localhost:5003/auth/callback",
+        "https://context-agent.test/auth/callback"
+      ],
+      "webOrigins": [
+        "http://localhost:5003",
+        "https://context-agent.test"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
+    }
+  ],
+  "users": [
+    {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "username": "developer",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "developer@local.invalid",
+      "firstName": "Local",
+      "lastName": "Developer",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "fake-local-developer-password",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

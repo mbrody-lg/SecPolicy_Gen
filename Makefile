@@ -8,7 +8,25 @@ FRONTEND_DIR=context-agent/frontend
 PNPM?=pnpm
 PNPM_COMMAND=$(PNPM) --pm-on-fail=ignore
 
-.PHONY: all docker-preflight up down clean rebuild logs observability-urls shell-context context-tests context-evals context-browser-smoke context-live-provider-smoke context-import frontend-pnpm-check frontend-install frontend-build frontend-check policy-shell policy-tests policy-vectorize policy-rag-validate policy-rag-backup policy-rag-restore validator-shell validator-tests governance-tests functional-smoke functional-smoke-real functional-smoke-real-full functional-smoke-real-backup critical-path-validation bootstrap-test-env host-fast-tests lint help
+.PHONY: all docker-preflight local-oidc-tls local-oidc-up local-oidc-http-smoke local-oidc-https-smoke local-oidc-smoke init-26-security-gate up down clean rebuild logs observability-urls shell-context context-tests context-evals context-browser-smoke context-live-provider-smoke context-import frontend-pnpm-check frontend-install frontend-build frontend-check policy-shell policy-tests policy-vectorize policy-rag-validate policy-rag-backup policy-rag-restore validator-shell validator-tests governance-tests functional-smoke functional-smoke-real functional-smoke-real-full functional-smoke-real-backup critical-path-validation bootstrap-test-env host-fast-tests lint help
+
+## Generate ignored local TLS material for the OIDC fixture
+local-oidc-tls:
+	bash scripts/generate_local_oidc_tls.sh
+
+local-oidc-up: docker-preflight local-oidc-tls
+	LOCAL_OIDC_CERT_UID=$$(id -u) $(COMPOSE) -f $(INFRA_DIR)/docker-compose.local-oidc.yml --profile local-oidc up --build -d
+
+local-oidc-http-smoke: docker-preflight local-oidc-tls
+	bash scripts/run_local_oidc_interoperability.sh http
+
+local-oidc-https-smoke: docker-preflight local-oidc-tls
+	bash scripts/run_local_oidc_interoperability.sh https
+
+local-oidc-smoke: local-oidc-http-smoke local-oidc-https-smoke
+
+init-26-security-gate: governance-tests local-oidc-smoke
+	docker run --rm -v $(CURDIR)/context-agent:/context-agent -w /context-agent infrastructure-context-agent pytest -q tests/test_advisory_reverse_poc.py
 
 ## Verify docker and compose prerequisites
 docker-preflight:
@@ -44,13 +62,15 @@ observability-urls:
 shell-context: 
 	docker exec -it context_agent_web bash
 
-## Run tests for agent-context
-context-tests: 
-	docker exec context_agent_web pytest
+## Run Context Agent tests in an isolated Docker runner
+context-tests: docker-preflight
+	$(COMPOSE) build context-agent
+	docker run --rm -v $(CURDIR)/context-agent:/context-agent -w /context-agent infrastructure-context-agent pytest
 
 ## Run deterministic Context Agent evaluation release gate
-context-evals:
-	docker exec context_agent_web pytest -q tests/test_context_evaluation_release_gate.py
+context-evals: docker-preflight
+	$(COMPOSE) build context-agent
+	docker run --rm -v $(CURDIR)/context-agent:/context-agent -w /context-agent infrastructure-context-agent pytest -q tests/test_context_evaluation_release_gate.py
 
 ## Run Docker-encapsulated Context Agent browser release gate
 context-browser-smoke:
@@ -170,6 +190,9 @@ help:
 	@echo "Makefile for multi-agent project"
 	@echo ""
 	@echo "make docker-preflight -> Verify Docker and Compose prerequisites"
+	@echo "make local-oidc-smoke -> Prove local OIDC login over HTTP and HTTPS"
+	@echo "make local-oidc-up -> Start the stack with the optional local OIDC provider"
+	@echo "make init-26-security-gate -> Run advisory reverse PoC and OIDC interoperability gates"
 	@echo "make up 			-> Start all infrastructure"
 	@echo "make down 		-> Stop and remove containers"
 	@echo "make clean 		-> Stop + remove volumes"

@@ -53,3 +53,55 @@ class MockAgent(Agent):
             )
 
         return final_output
+
+    def run_structured(
+        self,
+        _prompt: str,
+        *,
+        schema_name: str,
+        json_schema: dict,
+        context_id: str = None,
+    ) -> dict:
+        """Return compact deterministic fixtures for structured workflow phases."""
+        _ = json_schema, context_id
+        empty_hints = {
+            "collection_families": [],
+            "jurisdictions": [],
+            "sectors": [],
+            "methodologies": [],
+            "query_terms": [],
+        }
+        if schema_name == "context_agent_task_result":
+            return {
+                "task_id": "mock-context-task",
+                "status": "completed",
+                "findings": ["The approved security-context task was assessed."],
+                "assumptions": [],
+                "missing_details": [],
+                "risks": ["Control implementation should be verified during policy review."],
+                "policy_implications": ["Define ownership, evidence, and review cadence."],
+                "rag_retrieval_hints": {
+                    **empty_hints,
+                    "collection_families": ["controls"],
+                    "query_terms": ["security controls"],
+                },
+            }
+        if schema_name == "context_agent_planning_review":
+            return {
+                "plan_summary": "The deterministic context plan is ready for review.",
+                "tasks": [],
+                "missing_context_questions": [],
+                "approval_recommendation": "review_required",
+            }
+        if schema_name == "context_agent_context_building_review":
+            return {
+                "summary": "The deterministic security context was reviewed.",
+                "explicit_facts": [],
+                "assumptions": [],
+                "missing_information": [],
+                "follow_up_questions": [],
+                "security_domains": [],
+                "rag_retrieval_hints": empty_hints,
+                "next_action": "review_required",
+            }
+        raise ValueError(f"Unsupported mock structured schema: {schema_name}")
