@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+import yaml
 from flask import g, jsonify
 
 import app as app_module
@@ -128,6 +129,45 @@ def test_create_app_reads_trusted_hosts_and_cookie_secure_from_env(monkeypatch):
     assert app.config["TRUSTED_HOSTS"] == ["localhost", "policy-agent.internal"]
     assert app.config["SESSION_COOKIE_SECURE"] is True
     assert app.config["MAX_CONTENT_LENGTH"] == 4096
+
+
+def test_create_app_rejects_invalid_policy_config_at_startup(monkeypatch, tmp_path):
+    _set_common_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "true")
+    monkeypatch.setenv("FLASK_SECRET_KEY", "configured-test-secret")
+    config_path = tmp_path / "policy_agent.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "type": "openai",
+                "name": "Policy Agent",
+                "instructions": "Generate policy.",
+                "model": "configured-model",
+                "roles": [
+                    {
+                        "IMQ": "Incremental query",
+                        "instructions": "Return policy.",
+                        "model": "different-model",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CONFIG_PATH", str(config_path))
+
+    with pytest.raises(ValueError, match="model must match"):
+        app_module.create_app()
+
+
+def test_create_app_caches_validated_policy_config(monkeypatch):
+    _set_common_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "true")
+    monkeypatch.setenv("FLASK_SECRET_KEY", "configured-test-secret")
+
+    app = app_module.create_app()
+
+    assert app.config["POLICY_AGENT_CONFIG"]["model"] == "gpt-4o-mini"
 
 
 def test_create_app_preserves_incoming_correlation_id(monkeypatch):

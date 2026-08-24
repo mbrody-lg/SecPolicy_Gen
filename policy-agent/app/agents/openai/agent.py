@@ -2,7 +2,7 @@
 
 import logging
 
-from app.agents.base import Agent
+from app.agents.base import Agent, get_role_name
 from app.agents.openai.client import OpenAIClient
 from app.agents.roles.rag import RAGProcessor
 from app.rag.evidence import serialize_evidence
@@ -10,6 +10,10 @@ from flask import current_app
 from app.observability import build_log_event, log_event
 
 logger = logging.getLogger(__name__)
+
+
+class ProviderResponseError(ValueError):
+    """Raised when a provider response does not contain usable policy text."""
 
 
 class OpenAIAgent(Agent):
@@ -34,7 +38,7 @@ class OpenAIAgent(Agent):
         retrieval_evidence = []
 
         for role in self.roles:
-            role_key = next(iter(role.keys()))
+            role_key = get_role_name(role)
             instructions = role.get("instructions")
             temperature = role.get("temperature", 0.7)
             max_tokens = role.get("max_tokens", 1000)
@@ -144,13 +148,22 @@ class OpenAIAgent(Agent):
             )
             raise
 
+        choices = getattr(response, "choices", None)
+        if not isinstance(choices, (list, tuple)) or not choices:
+            raise ProviderResponseError("Provider response does not contain choices.")
+
+        message = getattr(choices[0], "message", None)
+        content = getattr(message, "content", None)
+        if not isinstance(content, str) or not content.strip():
+            raise ProviderResponseError("Provider response does not contain text content.")
+
         if current_app.config["DEBUG"]:
             log_event(
                 logger,
                 logging.DEBUG,
                 event="policy.openai.chat_completed",
                 stage="policy_generation",
-                choice_count=len(getattr(response, "choices", []) or []),
+                choice_count=len(choices),
             )
 
-        return response.choices[0].message.content.strip()
+        return content.strip()

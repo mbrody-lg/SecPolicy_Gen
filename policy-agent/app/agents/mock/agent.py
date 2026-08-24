@@ -2,7 +2,7 @@
 
 import logging
 
-from app.agents.base import Agent
+from app.agents.base import Agent, get_role_name
 from app.agents.mock.roles.rag import MockRAGRetriever
 from app.agents.mock.roles.multi_path import MockMultiPathPlanner
 from app.agents.mock.roles.reflection import MockSelfReflection
@@ -34,7 +34,7 @@ class MockAgent(Agent):
         plans = ""
 
         for role in self.roles:
-            role_key = next(iter(role.keys()))
+            role_key = get_role_name(role)
             log_event(
                 logger,
                 logging.INFO,

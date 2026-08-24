@@ -14,7 +14,7 @@ import yaml
 from flask import current_app
 
 from app import CORRELATION_ID_HEADER, get_request_correlation_id, mongo
-from app.agents.factory import create_agent_from_config
+from app.agents.factory import create_agent_from_config, load_agent_config, validate_agent_config
 from app.agents.vector.chroma.config import get_chroma_host, get_chroma_port
 from app.agents.vector.model_loader import (
     LocalSentenceTransformerEmbeddingFunction,
@@ -297,12 +297,9 @@ def _require_string_list(
 
 def load_policy_config() -> dict:
     """Load policy-agent YAML configuration from configured path."""
-    config_path = current_app.config["CONFIG_PATH"]
-
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Configuration file not found: {config_path}")
-    with open(config_path, "r", encoding="utf-8") as config_file:
-        return yaml.safe_load(config_file)
+    return current_app.config.get("POLICY_AGENT_CONFIG") or load_agent_config(
+        current_app.config["CONFIG_PATH"]
+    )
 
 
 def get_health_status() -> dict:
@@ -339,16 +336,8 @@ def _collect_chroma_vector_entries(config: dict) -> list[dict]:
 
 
 def _validate_readiness_config(config: dict) -> None:
-    """Validate the minimal configuration shape required for safe startup."""
-    if not isinstance(config, dict):
-        raise ValueError("Configuration root must be a mapping.")
-
-    missing_keys = [key for key in ("type", "name", "model", "roles") if key not in config]
-    if missing_keys:
-        raise ValueError(f"Configuration missing required keys: {', '.join(missing_keys)}")
-
-    if not isinstance(config.get("roles"), list):
-        raise ValueError("Configuration field 'roles' must be a list.")
+    """Validate readiness with the same contract enforced at startup."""
+    validate_agent_config(config)
 
 
 def _chroma_readiness_mode() -> str:
@@ -1130,12 +1119,31 @@ def validate_policy_update_payload(payload: dict | None, path_context_id: str) -
     return normalized_payload, policy
 
 
-def _store_policy_config(model_version: str, config: dict) -> None:
+def _provider_provenance(config: dict) -> dict:
+    return {
+        "provider": config["type"].strip().lower(),
+        "model": config["model"].strip(),
+    }
+
+
+def _validate_agent_result(result: dict, config: dict) -> dict:
+    if not isinstance(result, dict):
+        raise ValueError("Agent result must be a mapping.")
+    text = result.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("Agent result must contain non-empty text.")
+    result["text"] = text.strip()
+    result["provider_provenance"] = _provider_provenance(config)
+    return result
+
+
+def _store_policy_config(model_version: str | None, config: dict) -> None:
     mongo.db.policy_configs.update_one(
         {"model_version": model_version},
         {
             "$set": {
                 "model_version": model_version,
+                "provider_provenance": _provider_provenance(config),
                 "yaml_content": config,
                 "updated_at": datetime.now(timezone.utc),
             }
@@ -1152,8 +1160,6 @@ def run_with_agent(
 ) -> dict:
     """Run full policy-agent role pipeline for initial policy generation."""
     config = load_policy_config()
-    _store_policy_config(model_version, config)
-
     agent = create_agent_from_config(config)
     retrieval_plan = build_retrieval_plan(
         build_retrieval_context(
@@ -1177,7 +1183,12 @@ def run_with_agent(
         correlation_id=correlation_id,
         model_version=model_version,
     )
-    return agent.run(prompt=refined_prompt, context_id=context_id, retrieval_plan=retrieval_plan)
+    result = _validate_agent_result(
+        agent.run(prompt=refined_prompt, context_id=context_id, retrieval_plan=retrieval_plan),
+        config,
+    )
+    _store_policy_config(model_version, config)
+    return result
 
 
 def update_with_agent(prompt: str, context_id: str | None = None, model_version: str | None = None) -> dict:
@@ -1200,7 +1211,9 @@ def update_with_agent(prompt: str, context_id: str | None = None, model_version:
         model_version=model_version,
         role_count=len(last_role),
     )
-    return agent.run(prompt, context_id)
+    result = _validate_agent_result(agent.run(prompt, context_id), config)
+    _store_policy_config(model_version, config)
+    return result
 
 
 def generate_policy_payload(payload: dict | None) -> dict:
@@ -1286,6 +1299,7 @@ def generate_policy_payload(payload: dict | None) -> dict:
         "structured_plan": result_object.get("structured_plan", []),
         "retrieval_evidence": result_object.get("retrieval_evidence", []),
         "model_version": data["model_version"],
+        "provider_provenance": result_object.get("provider_provenance"),
         "policy_agent_version": "0.1.0",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "lifecycle_status": "generated",
@@ -1415,6 +1429,9 @@ def update_policy_payload(payload: dict | None, path_context_id: str) -> dict:
         "structured_plan": policy.get("structured_plan", []),
         "retrieval_evidence": policy.get("retrieval_evidence", []),
         "model_version": policy.get("model_version"),
+        "provider_provenance": result_object.get(
+            "provider_provenance", policy.get("provider_provenance")
+        ),
         "policy_agent_version": data["policy_agent_version"],
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "lifecycle_status": "revised",
@@ -1441,6 +1458,7 @@ def update_policy_payload(payload: dict | None, path_context_id: str) -> dict:
                 "structured_plan": result["structured_plan"],
                 "retrieval_evidence": result["retrieval_evidence"],
                 "model_version": result["model_version"],
+                "provider_provenance": result["provider_provenance"],
                 "correlation_id": result["correlation_id"],
                 "policy_agent_version": result["policy_agent_version"],
                 "generated_at": result["generated_at"],

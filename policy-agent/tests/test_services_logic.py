@@ -7,6 +7,23 @@ from app import mongo
 from app.services import logic
 
 
+def _readiness_config(vector: list[dict]) -> dict:
+    return {
+        "type": "openai",
+        "name": "OpenAI-Policy",
+        "instructions": "Generate policy.",
+        "model": "gpt-4o-mini",
+        "roles": [
+            {
+                "RAG": "Retrieval",
+                "instructions": "Retrieve evidence.",
+                "model": "gpt-4o-mini",
+                "vector": vector,
+            }
+        ],
+    }
+
+
 def test_get_health_status_returns_lightweight_payload():
     assert logic.get_health_status() == {
         "status": "ok",
@@ -27,22 +44,9 @@ def test_get_readiness_status_returns_ready_when_dependencies_are_available(app,
     monkeypatch.setattr(
         logic,
         "load_policy_config",
-        lambda: {
-            "type": "openai",
-            "name": "OpenAI-Policy",
-            "model": "gpt-4o-mini",
-            "roles": [
-                {
-                    "vector": [
-                        {
-                            "chroma": {
-                                "collection": ["legal_norms"],
-                            }
-                        }
-                    ]
-                }
-            ],
-        },
+        lambda: _readiness_config(
+            [{"chroma": {"collection": ["legal_norms"]}}]
+        ),
     )
     monkeypatch.setattr(mongo, "cx", FakeMongoClient())
     monkeypatch.setenv("CHROMA_HOST", "chroma")
@@ -76,22 +80,9 @@ def test_get_readiness_status_reports_controlled_failure(app, monkeypatch):
     monkeypatch.setattr(
         logic,
         "load_policy_config",
-        lambda: {
-            "type": "openai",
-            "name": "OpenAI-Policy",
-            "model": "gpt-4o-mini",
-            "roles": [
-                {
-                    "vector": [
-                        {
-                            "chroma": {
-                                "collection": ["legal_norms"],
-                            }
-                        }
-                    ]
-                }
-            ],
-        },
+        lambda: _readiness_config(
+            [{"chroma": {"collection": ["legal_norms"]}}]
+        ),
     )
     monkeypatch.setattr(mongo, "cx", FailingMongoClient())
     monkeypatch.setenv("CHROMA_PORT", "not-a-number")
@@ -123,22 +114,9 @@ def test_get_readiness_status_rejects_empty_chroma_host(app, monkeypatch):
     monkeypatch.setattr(
         logic,
         "load_policy_config",
-        lambda: {
-            "type": "openai",
-            "name": "OpenAI-Policy",
-            "model": "gpt-4o-mini",
-            "roles": [
-                {
-                    "vector": [
-                        {
-                            "chroma": {
-                                "collection": ["legal_norms"],
-                            }
-                        }
-                    ]
-                }
-            ],
-        },
+        lambda: _readiness_config(
+            [{"chroma": {"collection": ["legal_norms"]}}]
+        ),
     )
     monkeypatch.setattr(mongo, "cx", FakeMongoClient())
     monkeypatch.setenv("CHROMA_HOST", " ")
@@ -174,22 +152,9 @@ def test_get_readiness_status_can_run_live_chroma_check(app, monkeypatch):
     monkeypatch.setattr(
         logic,
         "load_policy_config",
-        lambda: {
-            "type": "openai",
-            "name": "OpenAI-Policy",
-            "model": "gpt-4o-mini",
-            "roles": [
-                {
-                    "vector": [
-                        {
-                            "chroma": {
-                                "collection": ["legal_norms"],
-                            }
-                        }
-                    ]
-                }
-            ],
-        },
+        lambda: _readiness_config(
+            [{"chroma": {"collection": ["legal_norms"]}}]
+        ),
     )
     monkeypatch.setattr(mongo, "cx", FakeMongoClient())
     monkeypatch.setattr(logic, "_get_chroma_http_client", lambda: FakeChromaClient())
@@ -222,22 +187,9 @@ def test_get_readiness_status_rejects_invalid_chroma_readiness_mode(app, monkeyp
     monkeypatch.setattr(
         logic,
         "load_policy_config",
-        lambda: {
-            "type": "openai",
-            "name": "OpenAI-Policy",
-            "model": "gpt-4o-mini",
-            "roles": [
-                {
-                    "vector": [
-                        {
-                            "chroma": {
-                                "collection": ["legal_norms"],
-                            }
-                        }
-                    ]
-                }
-            ],
-        },
+        lambda: _readiness_config(
+            [{"chroma": {"collection": ["legal_norms"]}}]
+        ),
     )
     monkeypatch.setattr(mongo, "cx", FakeMongoClient())
     monkeypatch.setenv("CHROMA_HOST", "chroma")
@@ -269,27 +221,20 @@ def test_get_readiness_status_reads_yaml_style_chroma_vector_entry(app, monkeypa
     monkeypatch.setattr(
         logic,
         "load_policy_config",
-        lambda: {
-            "type": "openai",
-            "name": "OpenAI-Policy",
-            "model": "gpt-4o-mini",
-            "roles": [
+        lambda: _readiness_config(
+            [
                 {
-                    "vector": [
-                        {
-                            "chroma": "Chroma Vector Database",
-                            "collection": [
-                                "legal_norms",
-                                "sector_norms",
-                                "security_frameworks",
-                                "risk_methodologies",
-                                "implementation_guides",
-                            ],
-                        }
-                    ]
+                    "chroma": "Chroma Vector Database",
+                    "collection": [
+                        "legal_norms",
+                        "sector_norms",
+                        "security_frameworks",
+                        "risk_methodologies",
+                        "implementation_guides",
+                    ],
                 }
-            ],
-        },
+            ]
+        ),
     )
     monkeypatch.setattr(mongo, "cx", FakeMongoClient())
     monkeypatch.setenv("CHROMA_PORT", "8000")

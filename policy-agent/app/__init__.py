@@ -139,6 +139,10 @@ def create_app():
     if trusted_hosts is not None:
         app.config["TRUSTED_HOSTS"] = trusted_hosts
 
+    from app.agents.factory import load_agent_config
+
+    app.config["POLICY_AGENT_CONFIG"] = load_agent_config(app.config["CONFIG_PATH"])
+
     # Initialize Mongo with app
     mongo.init_app(app)
 
