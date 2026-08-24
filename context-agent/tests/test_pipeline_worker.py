@@ -1,16 +1,20 @@
 from types import SimpleNamespace
 
 import pytest
+from bson import ObjectId
 
 from test_base import *
 from app.services import pipeline_jobs, pipeline_worker
+
+ORGANIZATION_ID = "test-organization"
+CONTEXT_ID = "507f1f77bcf86cd799439011"
 
 
 class FakeCollection:
     def __init__(self, docs=None):
         self.docs = list(docs or [])
 
-    def find_one(self, query):
+    def find_one(self, query, projection=None):
         for doc in self.docs:
             if all(doc.get(key) == value for key, value in query.items()):
                 return doc
@@ -33,13 +37,17 @@ class FakeDB:
     def __init__(self):
         self.pipeline_jobs = FakeCollection()
         self.pipeline_events = FakeCollection()
+        self.contexts = FakeCollection(
+            [{"_id": ObjectId(CONTEXT_ID), "organization_id": ORGANIZATION_ID}]
+        )
 
 
 def test_run_pipeline_job_completes_successful_pipeline(app, monkeypatch):
     fake_db = FakeDB()
     monkeypatch.setattr(pipeline_jobs.mongo, "db", fake_db, raising=False)
     job = pipeline_jobs.create_pipeline_job(
-        context_id="ctx-1",
+        organization_id=ORGANIZATION_ID,
+        context_id=CONTEXT_ID,
         correlation_id="corr-1",
     )
     captured = {}
@@ -62,13 +70,15 @@ def test_run_pipeline_job_completes_successful_pipeline(app, monkeypatch):
         fake_generate_full_policy_pipeline,
     )
 
-    updated = pipeline_worker.run_pipeline_job(app=app, job_id=job["job_id"])
+    updated = pipeline_worker.run_pipeline_job(
+        app=app, job_id=job["job_id"], organization_id=ORGANIZATION_ID
+    )
 
-    assert captured["context_id"] == "ctx-1"
+    assert captured["context_id"] == CONTEXT_ID
     assert updated["status"] == "completed"
     assert updated["current_stage"] == "completed"
     assert updated["result_refs"] == {
-        "context_id": "ctx-1",
+        "context_id": CONTEXT_ID,
         "validated_interaction_id": "interaction-1",
         "validation_status": "accepted",
     }
@@ -84,7 +94,8 @@ def test_run_pipeline_job_persists_bounded_failure(app, monkeypatch):
     fake_db = FakeDB()
     monkeypatch.setattr(pipeline_jobs.mongo, "db", fake_db, raising=False)
     job = pipeline_jobs.create_pipeline_job(
-        context_id="ctx-1",
+        organization_id=ORGANIZATION_ID,
+        context_id=CONTEXT_ID,
         correlation_id="corr-1",
     )
     monkeypatch.setattr(
@@ -104,7 +115,9 @@ def test_run_pipeline_job_persists_bounded_failure(app, monkeypatch):
         },
     )
 
-    updated = pipeline_worker.run_pipeline_job(app=app, job_id=job["job_id"])
+    updated = pipeline_worker.run_pipeline_job(
+        app=app, job_id=job["job_id"], organization_id=ORGANIZATION_ID
+    )
 
     assert updated["status"] == "failed"
     assert updated["current_stage"] == "policy_generation"
@@ -125,7 +138,8 @@ def test_run_pipeline_job_dispatches_execute_context_plan_command(app, monkeypat
     fake_db = FakeDB()
     monkeypatch.setattr(pipeline_jobs.mongo, "db", fake_db, raising=False)
     job = pipeline_jobs.create_pipeline_job(
-        context_id="ctx-1",
+        organization_id=ORGANIZATION_ID,
+        context_id=CONTEXT_ID,
         command="execute_context_plan",
         correlation_id="corr-1",
     )
@@ -163,14 +177,16 @@ def test_run_pipeline_job_dispatches_execute_context_plan_command(app, monkeypat
         lambda context_id: pytest.fail("must not run policy pipeline"),
     )
 
-    updated = pipeline_worker.run_pipeline_job(app=app, job_id=job["job_id"])
+    updated = pipeline_worker.run_pipeline_job(
+        app=app, job_id=job["job_id"], organization_id=ORGANIZATION_ID
+    )
 
-    assert captured["context_id"] == "ctx-1"
+    assert captured["context_id"] == CONTEXT_ID
     assert captured["has_progress_callback"] is True
     assert updated["status"] == "completed"
     assert updated["current_stage"] == "context_plan_completed"
     assert updated["result_refs"] == {
-        "context_id": "ctx-1",
+        "context_id": CONTEXT_ID,
         "plan_revision_id": "plan-rev-1",
         "task_count": 2,
     }
@@ -189,7 +205,8 @@ def test_run_pipeline_job_persists_safe_context_plan_failure(app, monkeypatch):
     fake_db = FakeDB()
     monkeypatch.setattr(pipeline_jobs.mongo, "db", fake_db, raising=False)
     job = pipeline_jobs.create_pipeline_job(
-        context_id="ctx-1",
+        organization_id=ORGANIZATION_ID,
+        context_id=CONTEXT_ID,
         command="execute_context_plan",
         correlation_id="corr-1",
     )
@@ -207,7 +224,9 @@ def test_run_pipeline_job_persists_safe_context_plan_failure(app, monkeypatch):
         },
     )
 
-    updated = pipeline_worker.run_pipeline_job(app=app, job_id=job["job_id"])
+    updated = pipeline_worker.run_pipeline_job(
+        app=app, job_id=job["job_id"], organization_id=ORGANIZATION_ID
+    )
 
     assert updated["status"] == "failed"
     assert updated["current_stage"] == "context_plan_execution"
@@ -225,7 +244,8 @@ def test_run_pipeline_job_rejects_unknown_command(app, monkeypatch):
     fake_db = FakeDB()
     monkeypatch.setattr(pipeline_jobs.mongo, "db", fake_db, raising=False)
     job = pipeline_jobs.create_pipeline_job(
-        context_id="ctx-1",
+        organization_id=ORGANIZATION_ID,
+        context_id=CONTEXT_ID,
         command="unknown",
         correlation_id="corr-1",
     )
@@ -240,7 +260,9 @@ def test_run_pipeline_job_rejects_unknown_command(app, monkeypatch):
         lambda context_id: pytest.fail("must not run context plan"),
     )
 
-    updated = pipeline_worker.run_pipeline_job(app=app, job_id=job["job_id"])
+    updated = pipeline_worker.run_pipeline_job(
+        app=app, job_id=job["job_id"], organization_id=ORGANIZATION_ID
+    )
 
     assert updated["status"] == "failed"
     assert updated["last_error"]["error_code"] == "unsupported_pipeline_command"
@@ -250,4 +272,6 @@ def test_run_pipeline_job_returns_none_for_missing_job(app, monkeypatch):
     fake_db = FakeDB()
     monkeypatch.setattr(pipeline_jobs.mongo, "db", fake_db, raising=False)
 
-    assert pipeline_worker.run_pipeline_job(app=app, job_id="missing") is None
+    assert pipeline_worker.run_pipeline_job(
+        app=app, job_id="missing", organization_id=ORGANIZATION_ID
+    ) is None

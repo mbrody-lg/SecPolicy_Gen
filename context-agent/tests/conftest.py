@@ -5,13 +5,8 @@ from unittest.mock import patch
 
 import mongomock
 import pytest
-from pathlib import Path
-from types import SimpleNamespace
-
-import mongomock
 
 from test_base import *
-import app as app_module
 from app import create_app
 from app import mongo
 
@@ -31,6 +26,28 @@ TEST_PRINCIPAL = {
     "email": "operator@example.test",
     "name": "Test Operator",
 }
+TEST_ORGANIZATION_ID = "test-organization"
+
+
+def _stamp_tenant_test_inserts(db):
+    """Keep legacy route fixtures explicit to the authenticated test tenant."""
+    for collection_name in ("contexts", "interactions", "pipeline_jobs", "pipeline_events", "pipeline_diagnostics"):
+        collection = getattr(db, collection_name)
+        original_insert_one = collection.insert_one
+
+        def insert_one(document, *args, _insert=original_insert_one, **kwargs):
+            document.setdefault("organization_id", TEST_ORGANIZATION_ID)
+            return _insert(document, *args, **kwargs)
+
+        collection.insert_one = insert_one
+        original_insert_many = collection.insert_many
+
+        def insert_many(documents, *args, _insert=original_insert_many, **kwargs):
+            for document in documents:
+                document.setdefault("organization_id", TEST_ORGANIZATION_ID)
+            return _insert(documents, *args, **kwargs)
+
+        collection.insert_many = insert_many
 
 
 def authenticate_test_client(test_client):
@@ -67,19 +84,23 @@ def mock_environment(monkeypatch):
 
 @pytest.fixture
 def client():
-    with patch.object(mongo, "cx", mongomock.MongoClient()):
-        with patch.object(mongo, "db", mongomock.MongoClient().db):
-            app = create_app()
-            app.config["TESTING"] = True
+    app = create_app()
+    app.config["TESTING"] = True
+    mock_client = mongomock.MongoClient()
+    with patch.object(mongo, "cx", mock_client):
+        with patch.object(mongo, "db", mock_client.db):
+            _stamp_tenant_test_inserts(mock_client.db)
             yield authenticate_test_client(app.test_client())
 
 
 @pytest.fixture
 def app():
-    with patch.object(mongo, "cx", mongomock.MongoClient()):
-        with patch.object(mongo, "db", mongomock.MongoClient().db):
-            flask_app = create_app()
-            flask_app.config["TESTING"] = True
+    flask_app = create_app()
+    flask_app.config["TESTING"] = True
+    mock_client = mongomock.MongoClient()
+    with patch.object(mongo, "cx", mock_client):
+        with patch.object(mongo, "db", mock_client.db):
+            _stamp_tenant_test_inserts(mock_client.db)
             yield flask_app
 
 

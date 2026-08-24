@@ -67,7 +67,10 @@ class FakeCursor:
 
 class FakeContextsCollection:
     def __init__(self, docs=None):
-        self.docs = list(docs or [])
+        self.docs = [
+            {"organization_id": "test-organization", **doc}
+            for doc in (docs or [])
+        ]
 
     def count_documents(self, query):
         return len(list(self._matching_docs(query)))
@@ -101,7 +104,10 @@ class FakeContextsCollection:
 
 class FakeInteractionsCollection:
     def __init__(self, docs=None):
-        self.docs = list(docs or [])
+        self.docs = [
+            {"organization_id": "test-organization", **doc}
+            for doc in (docs or [])
+        ]
 
     def find(self, query):
         return FakeCursor(
@@ -827,7 +833,7 @@ def test_trigger_context_plan_execution_starts_job(client, monkeypatch):
     monkeypatch.setattr(
         routes_module,
         "find_active_pipeline_job",
-        lambda current_context_id, command="generate_policy": None,
+        lambda current_context_id, command="generate_policy", organization_id=None: None,
     )
 
     def fake_create_pipeline_job(**kwargs):
@@ -864,7 +870,7 @@ def test_trigger_context_plan_execution_returns_json_job_payload(client, monkeyp
     monkeypatch.setattr(
         routes_module,
         "find_active_pipeline_job",
-        lambda current_context_id, command="generate_policy": None,
+        lambda current_context_id, command="generate_policy", organization_id=None: None,
     )
     monkeypatch.setattr(
         routes_module,
@@ -938,7 +944,7 @@ def test_trigger_context_plan_execution_reuses_active_job(client, monkeypatch):
     monkeypatch.setattr(
         routes_module,
         "find_active_pipeline_job",
-        lambda current_context_id, command="generate_policy": {
+        lambda current_context_id, command="generate_policy", organization_id=None: {
             "job_id": "job-active",
             "context_id": current_context_id,
             "correlation_id": "corr-active",
@@ -2026,7 +2032,7 @@ def test_trigger_policy_generation_redirects_after_starting_job(client, monkeypa
     monkeypatch.setattr(
         routes_module,
         "find_active_pipeline_job",
-        lambda current_context_id: None,
+        lambda current_context_id, organization_id=None: None,
     )
 
     def fake_create_pipeline_job(**kwargs):
@@ -2069,7 +2075,7 @@ def test_trigger_policy_generation_reuses_active_job(client, monkeypatch):
     monkeypatch.setattr(
         routes_module,
         "find_active_pipeline_job",
-        lambda current_context_id: {
+        lambda current_context_id, organization_id=None: {
             "job_id": "job-active",
             "context_id": current_context_id,
             "correlation_id": "corr-active",
@@ -2104,7 +2110,11 @@ def test_trigger_policy_generation_returns_json_accepted_job(client, monkeypatch
         "get_system_status",
         lambda: {"status": "ready", "services": [], "rag": {"status": "ready"}},
     )
-    monkeypatch.setattr(routes_module, "find_active_pipeline_job", lambda current_context_id: None)
+    monkeypatch.setattr(
+        routes_module,
+        "find_active_pipeline_job",
+        lambda current_context_id, organization_id=None: None,
+    )
     monkeypatch.setattr(
         routes_module,
         "create_pipeline_job",
@@ -2846,7 +2856,7 @@ def test_get_pipeline_job_status_returns_public_job(client, monkeypatch):
     monkeypatch.setattr(
         routes_module,
         "get_pipeline_job",
-        lambda job_id: {
+        lambda job_id, organization_id=None: {
             "job_id": job_id,
             "context_id": "ctx-1",
             "correlation_id": "corr-1",
@@ -2889,7 +2899,7 @@ def test_get_pipeline_job_status_returns_public_job(client, monkeypatch):
 def test_get_pipeline_job_status_rejects_invalid_job_id(client, monkeypatch):
     called = False
 
-    def fake_get_pipeline_job(job_id):
+    def fake_get_pipeline_job(job_id, organization_id=None):
         nonlocal called
         called = True
         return None
@@ -2907,12 +2917,12 @@ def test_get_pipeline_job_events_returns_bounded_events(client, monkeypatch):
     monkeypatch.setattr(
         routes_module,
         "get_pipeline_job",
-        lambda job_id: {"job_id": job_id, "context_id": "ctx-1"},
+        lambda job_id, organization_id=None: {"job_id": job_id, "context_id": "ctx-1"},
     )
     monkeypatch.setattr(
         routes_module,
         "list_pipeline_events",
-        lambda job_id: [
+        lambda job_id, organization_id=None: [
             {
                 "job_id": job_id,
                 "correlation_id": "corr-1",
@@ -2951,7 +2961,11 @@ def test_get_pipeline_job_events_returns_bounded_events(client, monkeypatch):
 
 
 def test_get_active_pipeline_job_status_returns_404_when_missing(client, monkeypatch):
-    monkeypatch.setattr(routes_module, "find_active_pipeline_job", lambda context_id, command="generate_policy": None)
+    monkeypatch.setattr(
+        routes_module,
+        "find_active_pipeline_job",
+        lambda context_id, command="generate_policy", organization_id=None: None,
+    )
     context_id = str(ObjectId())
 
     response = client.get(f"/context/{context_id}/pipeline/jobs/active")
@@ -2966,7 +2980,7 @@ def test_get_active_pipeline_job_status_accepts_command_query(client, monkeypatc
     monkeypatch.setattr(
         routes_module,
         "find_active_pipeline_job",
-        lambda context_id, command="generate_policy": captured.update({
+        lambda context_id, command="generate_policy", organization_id=None: captured.update({
             "context_id": context_id,
             "command": command,
         }) or {
@@ -2989,7 +3003,7 @@ def test_get_active_pipeline_job_status_accepts_command_query(client, monkeypatc
 def test_get_active_pipeline_job_status_rejects_invalid_command(client, monkeypatch):
     called = False
 
-    def fake_find_active_pipeline_job(context_id, command="generate_policy"):
+    def fake_find_active_pipeline_job(context_id, command="generate_policy", organization_id=None):
         nonlocal called
         called = True
         return None
@@ -3024,7 +3038,7 @@ def test_get_diagnostics_route_returns_document(client, monkeypatch):
     monkeypatch.setattr(
         routes_module,
         "get_pipeline_diagnostic",
-        lambda correlation_id: {
+        lambda correlation_id, organization_id=None: {
             "_id": "diag-1",
             "correlation_id": correlation_id,
             "context_id": "ctx-1",
@@ -3064,7 +3078,7 @@ def test_get_diagnostics_route_returns_document(client, monkeypatch):
 def test_get_diagnostics_route_rejects_invalid_correlation_id(client, monkeypatch):
     called = False
 
-    def fake_get_pipeline_diagnostic(correlation_id):
+    def fake_get_pipeline_diagnostic(correlation_id, organization_id=None):
         nonlocal called
         called = True
         return None
@@ -3079,7 +3093,11 @@ def test_get_diagnostics_route_rejects_invalid_correlation_id(client, monkeypatc
 
 
 def test_get_diagnostics_route_returns_404_when_missing(client, monkeypatch):
-    monkeypatch.setattr(routes_module, "get_pipeline_diagnostic", lambda correlation_id: None)
+    monkeypatch.setattr(
+        routes_module,
+        "get_pipeline_diagnostic",
+        lambda correlation_id, organization_id=None: None,
+    )
 
     response = client.get("/diagnostics/corr-missing")
 

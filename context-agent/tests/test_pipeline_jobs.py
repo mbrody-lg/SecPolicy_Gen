@@ -5,6 +5,8 @@ import pytest
 
 from app.services import pipeline_jobs
 
+ORGANIZATION_ID = "test-organization"
+
 
 class FakeCollection:
     def __init__(self, docs=None):
@@ -61,8 +63,12 @@ class FakeCursor:
 
 class FakeDB:
     def __init__(self, pipeline_jobs_docs=None, pipeline_events_docs=None):
-        self.pipeline_jobs = FakeCollection(pipeline_jobs_docs)
-        self.pipeline_events = FakeCollection(pipeline_events_docs)
+        self.pipeline_jobs = FakeCollection(_tenant_docs(pipeline_jobs_docs))
+        self.pipeline_events = FakeCollection(_tenant_docs(pipeline_events_docs))
+
+
+def _tenant_docs(docs):
+    return [{"organization_id": ORGANIZATION_ID, **doc} for doc in (docs or [])]
 
 
 def test_create_pipeline_job_persists_job_and_initial_event(monkeypatch):
@@ -76,12 +82,14 @@ def test_create_pipeline_job_persists_job_and_initial_event(monkeypatch):
     )
 
     job = pipeline_jobs.create_pipeline_job(
+        organization_id=ORGANIZATION_ID,
         context_id="ctx-1",
         command="generate_policy",
         correlation_id="corr-1",
     )
 
     assert job["context_id"] == "ctx-1"
+    assert job["organization_id"] == ORGANIZATION_ID
     assert job["correlation_id"] == "corr-1"
     assert job["command"] == "generate_policy"
     assert job["status"] == "queued"
@@ -101,6 +109,7 @@ def test_create_pipeline_job_persists_job_and_initial_event(monkeypatch):
     event = fake_db.pipeline_events.docs[0]
     assert event["event_type"] == "job_created"
     assert event["job_id"] == job["job_id"]
+    assert event["organization_id"] == ORGANIZATION_ID
     assert event["ownership"]["source_of_truth"] is False
     assert captured_metrics == [
         {
@@ -120,6 +129,7 @@ def test_create_pipeline_job_accepts_execute_context_plan_command(monkeypatch):
     )
 
     job = pipeline_jobs.create_pipeline_job(
+        organization_id=ORGANIZATION_ID,
         context_id="ctx-1",
         command="execute_context_plan",
         correlation_id="corr-1",
@@ -153,6 +163,7 @@ def test_update_pipeline_job_progress_persists_public_progress_event_and_metrics
     )
 
     job = pipeline_jobs.update_pipeline_job_progress(
+        organization_id=ORGANIZATION_ID,
         job_id="job-1",
         status="context_task_running",
         stage="context_plan_execution",
@@ -195,7 +206,9 @@ def test_list_pipeline_events_returns_recent_events(monkeypatch):
     )
     monkeypatch.setattr(pipeline_jobs.mongo, "db", fake_db, raising=False)
 
-    events = pipeline_jobs.list_pipeline_events("job-1", limit=2)
+    events = pipeline_jobs.list_pipeline_events(
+        "job-1", organization_id=ORGANIZATION_ID, limit=2
+    )
 
     assert [event["event_type"] for event in events] == ["new", "old"]
 
@@ -219,7 +232,9 @@ def test_find_active_pipeline_job_ignores_terminal_jobs(monkeypatch):
     )
     monkeypatch.setattr(pipeline_jobs.mongo, "db", fake_db, raising=False)
 
-    job = pipeline_jobs.find_active_pipeline_job("ctx-1")
+    job = pipeline_jobs.find_active_pipeline_job(
+        "ctx-1", organization_id=ORGANIZATION_ID
+    )
 
     assert job["job_id"] == "job-active"
 
@@ -243,7 +258,9 @@ def test_find_active_pipeline_job_scopes_by_command(monkeypatch):
     )
     monkeypatch.setattr(pipeline_jobs.mongo, "db", fake_db, raising=False)
 
-    job = pipeline_jobs.find_active_pipeline_job("ctx-1", command="execute_context_plan")
+    job = pipeline_jobs.find_active_pipeline_job(
+        "ctx-1", command="execute_context_plan", organization_id=ORGANIZATION_ID
+    )
 
     assert job["job_id"] == "job-context-plan"
 
@@ -267,7 +284,9 @@ def test_find_active_pipeline_job_marks_stale_job_failed(monkeypatch):
     monkeypatch.setattr(pipeline_jobs.mongo, "db", fake_db, raising=False)
     monkeypatch.setattr(pipeline_jobs, "_pipeline_job_stale_after_seconds", lambda: 60.0)
 
-    job = pipeline_jobs.find_active_pipeline_job("ctx-1")
+    job = pipeline_jobs.find_active_pipeline_job(
+        "ctx-1", organization_id=ORGANIZATION_ID
+    )
 
     assert job is None
     stale_job = fake_db.pipeline_jobs.docs[0]
@@ -303,7 +322,9 @@ def test_get_pipeline_job_marks_stale_active_job_failed(monkeypatch):
     monkeypatch.setattr(pipeline_jobs.mongo, "db", fake_db, raising=False)
     monkeypatch.setattr(pipeline_jobs, "_pipeline_job_stale_after_seconds", lambda: 60.0)
 
-    job = pipeline_jobs.get_pipeline_job("job-stale")
+    job = pipeline_jobs.get_pipeline_job(
+        "job-stale", organization_id=ORGANIZATION_ID
+    )
 
     assert job["status"] == "failed"
     assert job["last_error"]["error_code"] == "pipeline_job_stale"
@@ -319,12 +340,14 @@ def test_update_pipeline_job_state_records_event_and_sanitizes_error(monkeypatch
         lambda **kwargs: captured_metrics.append(kwargs),
     )
     job = pipeline_jobs.create_pipeline_job(
+        organization_id=ORGANIZATION_ID,
         context_id="ctx-1",
         command="generate_policy",
         correlation_id="corr-1",
     )
 
     updated = pipeline_jobs.update_pipeline_job_state(
+        organization_id=ORGANIZATION_ID,
         job_id=job["job_id"],
         status="failed",
         stage="policy_generation",
@@ -387,6 +410,7 @@ def test_update_pipeline_job_state_handles_naive_started_at(monkeypatch):
     )
 
     updated = pipeline_jobs.update_pipeline_job_state(
+        organization_id=ORGANIZATION_ID,
         job_id="job-naive-start",
         status="failed",
         stage="policy_generation",
@@ -407,4 +431,24 @@ def test_update_pipeline_job_state_rejects_unknown_status(monkeypatch):
     monkeypatch.setattr(pipeline_jobs.mongo, "db", fake_db, raising=False)
 
     with pytest.raises(ValueError, match="Unsupported pipeline job status"):
-        pipeline_jobs.update_pipeline_job_state(job_id="job-1", status="sleeping")
+        pipeline_jobs.update_pipeline_job_state(
+            organization_id=ORGANIZATION_ID, job_id="job-1", status="sleeping"
+        )
+
+
+def test_pipeline_job_lookup_does_not_cross_organization(monkeypatch):
+    fake_db = FakeDB(
+        pipeline_jobs_docs=[
+            {
+                "job_id": "job-1",
+                "context_id": "ctx-1",
+                "command": "generate_policy",
+                "status": "completed",
+            }
+        ]
+    )
+    monkeypatch.setattr(pipeline_jobs.mongo, "db", fake_db, raising=False)
+
+    assert pipeline_jobs.get_pipeline_job(
+        "job-1", organization_id="another-organization"
+    ) is None
