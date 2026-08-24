@@ -35,6 +35,23 @@ TEST_PRINCIPAL = {
 
 def authenticate_test_client(test_client):
     """Establish the minimal signed session produced by the OIDC callback."""
+    from app.access_control import provision_membership, provision_organization, sync_principal
+
+    with test_client.application.app_context():
+        principal = sync_principal(
+            issuer=TEST_PRINCIPAL["issuer"],
+            subject=TEST_PRINCIPAL["subject"],
+        )
+        organization = provision_organization(
+            organization_id="test-organization",
+            name="Test Organization",
+        )
+        provision_membership(
+            principal_id=principal["_id"],
+            organization_id=organization["organization_id"],
+            roles=["admin"],
+            is_default=True,
+        )
     with test_client.session_transaction() as session:
         session["principal"] = TEST_PRINCIPAL
     return test_client

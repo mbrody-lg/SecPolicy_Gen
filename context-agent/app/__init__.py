@@ -253,6 +253,12 @@ def create_app():
     def authenticate_human_principal():
         return require_authenticated_principal()
 
+    @app.before_request
+    def authorize_human_principal():
+        from app.access_control import authorize_principal_membership
+
+        return authorize_principal_membership()
+
     @app.after_request
     def apply_security_headers(response):
         record_request_metrics(response)

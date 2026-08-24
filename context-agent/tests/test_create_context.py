@@ -8,6 +8,23 @@ def client():
     app = create_app()
     app.config["TESTING"] = True
     with app.test_client() as client:
+        from app.access_control import provision_membership, provision_organization, sync_principal
+
+        with app.app_context():
+            principal = sync_principal(
+                issuer="https://identity.test/tenant/secpolicygen",
+                subject="test-operator",
+            )
+            organization = provision_organization(
+                organization_id="test-organization",
+                name="Test Organization",
+            )
+            provision_membership(
+                principal_id=principal["_id"],
+                organization_id=organization["organization_id"],
+                roles=["admin"],
+                is_default=True,
+            )
         with client.session_transaction() as session:
             session["principal"] = {
                 "issuer": "https://identity.test/tenant/secpolicygen",
