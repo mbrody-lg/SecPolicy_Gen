@@ -4,6 +4,15 @@ from abc import ABC, abstractmethod
 
 # Global dictionary used to auto-register all subclasses
 AGENT_REGISTRY = {}
+ROLE_NAMES = {"RAG", "MPG", "SRFL", "IMQ"}
+
+
+def get_role_name(role: dict) -> str:
+    """Return the single supported role identifier in a role mapping."""
+    role_names = ROLE_NAMES.intersection(role)
+    if len(role_names) != 1:
+        raise ValueError("Each role must contain exactly one supported role identifier.")
+    return role_names.pop()
 
 class Agent(ABC):
     """Abstract policy generation agent interface."""
@@ -41,9 +50,7 @@ class Agent(ABC):
             raise ValueError("The YAML must contain a list of 'roles'.")
 
         for role in roles:
-            role_key = next(iter(role.keys()), None)
-            if role_key is None:
-                raise ValueError("One of the 'roles' does not have an identifying key (ex: RAG, MPG, etc.)")
+            role_key = get_role_name(role)
             
             if "instructions" not in role:
                 raise ValueError(f"Role '{role_key}' does not have the required key 'instructions'.")

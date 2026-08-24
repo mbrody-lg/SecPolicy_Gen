@@ -1,6 +1,6 @@
 import os
 import glob
-from app.agents.factory import create_agent_from_config
+from app.agents.factory import create_agent_from_config, load_agent_config
 
 def validate_all_configs(config_dir="configs/"):
     yaml_files = glob.glob(os.path.join(config_dir, "*.yaml"))
@@ -12,7 +12,7 @@ def validate_all_configs(config_dir="configs/"):
 
     for yaml_file in yaml_files:
         try:
-            agent = create_agent_from_config(yaml_file)
+            agent = create_agent_from_config(load_agent_config(yaml_file))
             print(f"{os.path.basename(yaml_file)} -> Valid [{agent.__class__.__name__}]")
         except Exception as e:
             print(f"{os.path.basename(yaml_file)} -> ERROR: {str(e)}")
