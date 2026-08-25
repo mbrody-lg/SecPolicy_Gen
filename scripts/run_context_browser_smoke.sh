@@ -33,4 +33,5 @@ docker exec context_agent_web python scripts/seed_browser_smoke_contexts.py > "$
 echo "[context-browser] running Playwright release-gate smoke in Docker"
 "${DOCKER_COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" --profile test run --rm \
   -e CONTEXT_BROWSER_FIXTURE_PATH="/repo/$FIXTURE_PATH" \
-  context-browser-tests
+  context-browser-tests \
+  /opt/browser-tests/node_modules/.bin/playwright test context-workflow.spec.js

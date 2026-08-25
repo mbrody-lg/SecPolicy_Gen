@@ -6,7 +6,7 @@ INFRA_DIR="$ROOT_DIR/infrastructure"
 COMPOSE_FILE="${INFRA_DIR}/docker-compose.yml"
 ENV_FILE="${MIGRATION_SMOKE_ENV_FILE:-$INFRA_DIR/.env}"
 CHROMA_CONTAINER="${CHROMA_CONTAINER:-infrastructure-chroma-1}"
-CHROMA_IMAGE="${CHROMA_IMAGE:-chromadb/chroma}"
+CHROMA_IMAGE="${CHROMA_IMAGE:-chromadb/chroma:1.5.9}"
 BACKUP_FILE="${CHROMA_BACKUP_FILE:-$ROOT_DIR/.local-workspace/chroma-backups/rag-runtime.tar.gz}"
 
 usage() {
@@ -16,7 +16,7 @@ Usage: scripts/chroma_backup.sh <backup|restore>
 Environment:
   CHROMA_BACKUP_FILE   Backup tar.gz path.
   CHROMA_CONTAINER     Chroma container name. Default: infrastructure-chroma-1
-  CHROMA_IMAGE         Local image used for volume maintenance. Default: chromadb/chroma
+  CHROMA_IMAGE         Local image used for volume maintenance. Default: chromadb/chroma:1.5.9
 EOF
 }
 

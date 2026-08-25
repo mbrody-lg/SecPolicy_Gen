@@ -1,8 +1,8 @@
-FROM mcr.microsoft.com/playwright:v1.56.1-noble
+FROM mcr.microsoft.com/playwright:v1.62.1-noble
 
 WORKDIR /opt/browser-tests
 
-RUN npm install -g pnpm@11.1.3
+RUN npm install -g pnpm@11.23.0
 
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm --pm-on-fail=ignore install --frozen-lockfile

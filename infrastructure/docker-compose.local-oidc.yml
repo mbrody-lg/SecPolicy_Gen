@@ -1,6 +1,6 @@
 services:
   identity:
-    image: quay.io/keycloak/keycloak:26.7.1
+    image: quay.io/keycloak/keycloak:26.7.2
     container_name: secpolicy_identity
     user: "${LOCAL_OIDC_CERT_UID:-1000}:0"
     profiles:
@@ -57,7 +57,7 @@ services:
         condition: service_started
 
   context-edge:
-    image: nginx:1.27-alpine
+    image: nginx:1.30.4-alpine
     profiles:
       - local-oidc
     ports:

@@ -125,6 +125,7 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | `FLASK_ENV` | `runtime knob` | Local Compose uses `development` | Flask runtime | Document as local-only until production runtime exists |
 | `FLASK_RUN_DEBUG` | `runtime knob` | Defaults to off; local override only | Flask development server | Must not be enabled by default |
 | `FLASK_APP` | `safe default` | Dockerfiles set each service app module | Local/container Flask runner | Required only for `flask run` style execution |
+| `MONGO_GLIBC_TUNABLES` | `local compatibility` | `glibc.pthread.rseq=1` while Docker Desktop uses Linux kernel `<7.0.14` | MongoDB 8.3 local container | Temporary local workaround only; remove after the Docker kernel is upgraded and never treat it as a production migration control |
 | `PYTHONDONTWRITEBYTECODE` | `safe default` | Dockerfiles set `1` | Python container runtime | Build/runtime hygiene only |
 | `PYTHONUNBUFFERED` | `safe default` | Dockerfiles set `1` | Python container logging | Keeps container logs unbuffered |
 | `PYTHONPATH` | `safe default` | Dockerfiles set service root where imports need it | Container import resolution | Required for policy/validator container imports |

@@ -21,7 +21,7 @@ The Context Agent:
 
 - Docker (recommended)
 - Python 3.11+ (for local development)
-- Node.js 22.13+ and pnpm 11.1.3 (for frontend asset changes)
+- Node.js 24 LTS and pnpm 11.23.0 (for frontend asset changes)
 - MongoDB running and accessible
 - OpenAI API key
 

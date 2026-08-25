@@ -280,7 +280,7 @@ make up
 ```
 
 Warning:
-- `make clean` removes Compose volumes, including `mongo_data` and
+- `make clean` removes Compose volumes, including `mongo_data_v8` and
   `chroma_data`. This can delete local database state and local RAG indexes.
 
 Expected evidence:
