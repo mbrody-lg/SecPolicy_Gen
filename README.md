@@ -13,11 +13,20 @@ The system consists of three specialized agents that work together in a pipeline
 ## System Architecture
 
 ```
-User Input → Context Agent → Policy Agent → Validator Agent → Approved Policy
-                  ↓               ↓              ↓
-              MongoDB         MongoDB        MongoDB
-                              Chroma (RAG)
+Browser → OIDC Provider → Context Workplace
+                              ├─ Intake and context building
+                              ├─ Planning and asynchronous execution
+                              └─ Final context
+                                      ↓
+                              Policy Agent ↔ Chroma RAG
+                                      ↓
+                              Validator Agent
+                                      ↓
+                              Validated policy
 ```
+
+All agents persist their current local state in MongoDB and expose structured
+logs and metrics through the observability stack.
 
 ## Quick Start
 
@@ -27,13 +36,21 @@ User Input → Context Agent → Policy Agent → Validator Agent → Approved P
 
 ### Running the Full System
 ```bash
-make up
+test -f infrastructure/.env || cp infrastructure/.env.example infrastructure/.env
+make local-oidc-up
 ```
+
+Then follow the [Local Application Validation](docs/playbooks/local-application-validation.md)
+playbook for user provisioning, RAG bootstrap, the manual UI workflow, regression
+levels, and failure diagnosis. Use `make up` instead when connecting to an
+external OIDC provider already configured in `infrastructure/.env`.
 
 ### Stopping the System
 ```bash
-make down
+make local-oidc-down
 ```
+
+Use `make down` for the base stack without the local OIDC profile.
 
 See [infrastructure/README.md](infrastructure/README.md) for detailed setup instructions.
 
@@ -71,20 +88,11 @@ See [infrastructure/README.md](infrastructure/README.md) for complete command re
 
 ## Recommended Validation Flow
 
-For cross-service work, use this validation ladder and stop at the smallest level that proves the change unless the task affects runtime wiring:
-
-1. `make up`
-2. `make policy-tests`
-3. `make validator-tests`
-4. `make functional-smoke`
-
-Use `make host-fast-tests` earlier in the loop when the change is host-test friendly and does not depend on Docker parity. Use the Docker-backed sequence above when the change affects container wiring, service-to-service calls, bootstrap/configuration behavior, or the full context -> policy -> validation pipeline.
-
-When you need one reproducible command for the full critical loop, run `make critical-path-validation`. It executes `context-tests`, `policy-tests`, `validator-tests`, `governance-tests`, and the end-to-end smoke path in the same order we have been using as initiative evidence.
-
-The smoke evidence artifact is `migration/functional-smoke-result.json`. For loop failures, pair that report with the context-agent diagnostics lookup at `GET /diagnostics/<correlation_id>`.
-
-The current Docker test targets are intentionally non-interactive so they work in terminal automation and CI-like environments without requiring a TTY.
+Use the validation levels and data-impact warnings in the
+[Local Application Validation](docs/playbooks/local-application-validation.md)
+playbook. `make functional-smoke` is deterministic and mock-backed;
+`make functional-smoke-real-backup` and `make functional-smoke-real-full` are
+the explicit real-provider and RAG paths.
 
 ## Project Structure
 

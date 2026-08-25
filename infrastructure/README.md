@@ -16,32 +16,16 @@ Do not treat it as a production deployment template.
 
 ### 2. Configure Environment
 
-Create a `.env` file in the `infrastructure/` directory:
+Create the ignored runtime file from the complete tracked contract:
 
-```env
-# Required for all agents
-OPENAI_API_KEY=fake-local-openai-key
-FLASK_SECRET_KEY=fake-local-flask-secret
-OIDC_ISSUER_URL=http://identity.test:8080/realms/secpolicygen
-OIDC_CLIENT_ID=secpolicygen-context-agent
-OIDC_CLIENT_SECRET=fake-local-oidc-client-secret
-OIDC_REDIRECT_URI=http://localhost:5003/auth/callback
-OIDC_SCOPES=openid profile email
-OIDC_ALLOW_INSECURE_HTTP=true
-FLASK_ENV=development
-FLASK_RUN_DEBUG=0
-DEBUG=false
-
-# Database
-MONGO_URI=mongodb://mongo:27017/policy-gen-db
-
-# Vector Database (RAG)
-CHROMA_HOST=chroma
-CHROMA_PORT=8000
-
-# Service URLs (internal Docker network)
-POLICY_AGENT_URL=http://policy-agent:5000
+```bash
+test -f infrastructure/.env || cp infrastructure/.env.example infrastructure/.env
 ```
+
+Keep visibly fake local fixture values for deterministic development. Replace
+only the provider credentials required by a real generation run. See the
+[Environment Configuration Contract](../docs/playbooks/environment-configuration.md)
+for ownership, validation, and secret-handling rules.
 
 ### 3. Start All Services
 
@@ -68,8 +52,13 @@ The base stack starts:
 - **Loki/Alloy** - Local Docker log aggregation at http://localhost:3100
 
 `make local-oidc-up` additionally starts the disposable identity provider on
-localhost ports `8080` and `8443` plus the Context Agent HTTPS edge on `5443`.
+localhost ports `8080` and `8443`. The automated interoperability smoke activates
+the separate Context Agent HTTPS test edge on `5443`.
 Its local-only login is `developer` / `fake-local-developer-password`.
+
+For the complete first-run procedure, local membership provisioning, RAG
+bootstrap, manual UI workflow, and regression levels, follow
+[Local Application Validation](../docs/playbooks/local-application-validation.md).
 
 ### 4. Stop Services
 
@@ -91,15 +80,15 @@ make clean
 - **Local kernel compatibility**: `MONGO_GLIBC_TUNABLES` defaults to the
   temporary rseq workaround required by Docker kernels 6.19 through 7.0.13;
   remove it after the Docker kernel and MongoDB runtime no longer require it
-- **Databases**: 
-  - `context-agent-db` - User contexts and Q&A history
-  - `policy-agent-db` - Generated policies and versions
-  - `validator-agent-db` - Validation rounds and decisions
+- **Current local database**: the Compose baseline injects one shared MongoDB
+  URI into the agents. Database separation remains an architectural follow-up;
+  do not infer production isolation from the local topology.
 
 ### Chroma Vector Database
 - **Port**: 8000
 - **Purpose**: Stores embedded regulatory documents for RAG
-- **Current local collections**: legal_norms, sector_norms, security_frameworks, risk_methodologies, implementation_guides
+- **Current local collections**: defined canonically by
+  `policy-agent/app/config/rag_sources.yaml`
 - **Access**: Docker internal network plus localhost `8000` for developer
   diagnostics in the local Compose stack
 
@@ -115,6 +104,7 @@ All agents run on separate ports and use internal Docker DNS:
 |---------|---------|
 | `make up` | Start all services |
 | `make local-oidc-up` | Start the stack with the optional local OIDC provider |
+| `make local-oidc-down` | Stop the stack including optional local OIDC services |
 | `make local-oidc-smoke` | Prove local OIDC issuer login over HTTP and HTTPS |
 | `make down` | Stop all services |
 | `make clean` | Stop and remove all data |
@@ -134,21 +124,9 @@ All agents run on separate ports and use internal Docker DNS:
 
 ## Recommended Docker Validation Sequence
 
-When a change affects container parity, service configuration, or cross-service orchestration, use this sequence from the repository root:
-
-```bash
-make up
-make policy-tests
-make validator-tests
-make functional-smoke
-```
-
-Notes:
-- The service test targets use non-interactive `docker exec`, so they work in automated terminal sessions and do not require `-it`.
-- `make functional-smoke` now resolves each service's effective `CONFIG_PATH` before swapping mock configs, so the smoke run exercises the same config entrypoints used by the containers themselves.
-- `make functional-smoke` also checks `/health` and `/ready` on `context-agent`, `policy-agent`, and `validator-agent`, and records minimal loop observability evidence through `X-Correlation-ID` plus a `/diagnostics/<correlation_id>` lookup.
-- For host-only logic changes, run `make host-fast-tests` before or instead of the Docker sequence when container parity is not needed.
-- For one-command evidence of the critical Context -> Policy -> Validator path, use `make critical-path-validation`; it runs `context-tests`, `policy-tests`, `validator-tests`, `governance-tests`, and then the smoke sequence.
+Use the canonical [Local Application Validation](../docs/playbooks/local-application-validation.md)
+matrix to select deterministic UI, OIDC, mock-loop, or real-provider/RAG
+evidence. It also documents which commands replace data or Compose volumes.
 
 ## Docker Compose Structure
 
@@ -304,25 +282,10 @@ All services communicate through Docker's internal network. External access poin
 
 ## Development Mode
 
-To modify and test locally:
-
-### 1. Access Agent Shell
-```bash
-make shell-context    # Enter Context Agent container
-```
-
-### 2. Install Dependencies
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Run Tests
-```bash
-pytest
-```
-
-### 4. Make Changes
-Edit code in your local editor and reload in the container.
+Use the Docker-backed `make context-tests`, `make policy-tests`,
+`make validator-tests`, and `make governance-tests` targets instead of mutating
+a running container with `pip install`. Frontend dependency and asset checks use
+the pinned pnpm contract through `make frontend-check`.
 
 ## Local Runtime Vs Production Expectations
 
