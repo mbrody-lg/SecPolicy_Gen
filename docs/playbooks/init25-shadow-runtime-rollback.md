@@ -1,5 +1,12 @@
 # INIT-25 Shadow Runtime Rollback
 
+## Runtime Pin
+
+`agents/docker-agent-runtime.lock.json` is authoritative for the Docker Agent
+version, commit, schema, and release-asset digests. Each upgrade must change the
+lock and schema reference together and pass `make init25-runtime-compat`.
+Automatic runtime and tool installation remain disabled.
+
 The INIT-25 shadow runtime is default-off. Run it only as an explicit,
 time-bounded operator action; do not install it as a service, scheduler, or
 automatic retry. Shadow output is non-authoritative and must never update the

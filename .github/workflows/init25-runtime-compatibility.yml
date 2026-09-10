@@ -1,0 +1,38 @@
+name: INIT-25 runtime compatibility
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/init25-runtime-compatibility.yml"
+      - "agents/docker-agent-runtime.lock.json"
+      - "agents/secpolicy_contract_dry_run.yaml"
+      - "Makefile"
+      - "scripts/check_init25_runtime_compatibility.py"
+      - "scripts/init25_runtime_adapter.py"
+      - "tests/governance/test_init25_runtime_adapter.py"
+      - "tests/governance/test_init25_runtime_compatibility.py"
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Prepare Docker test environment
+        run: cp infrastructure/.env.example infrastructure/.env
+      - name: Run governance tests in Docker
+        run: make governance-tests
+      - name: Download pinned Docker Agent
+        run: |
+          curl -fsSL \
+            -o /tmp/docker-agent \
+            https://github.com/docker/docker-agent/releases/download/v1.110.0/docker-agent-linux-amd64
+          echo "6ba922b5878438139b636e8daf9e925882a813e480c9592375960f56615189f0  /tmp/docker-agent" \
+            | sha256sum -c -
+          chmod +x /tmp/docker-agent
+      - name: Initialize pinned agent config
+        run: make init25-runtime-compat DOCKER_AGENT_BIN=/tmp/docker-agent

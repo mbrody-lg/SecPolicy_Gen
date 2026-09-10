@@ -8,7 +8,7 @@ FRONTEND_DIR=context-agent/frontend
 PNPM?=pnpm
 PNPM_COMMAND=$(PNPM) --pm-on-fail=ignore
 
-.PHONY: all docker-preflight up down clean rebuild logs observability-urls shell-context context-tests context-evals context-browser-smoke context-live-provider-smoke context-import frontend-pnpm-check frontend-install frontend-build frontend-check policy-shell policy-tests policy-vectorize policy-rag-validate policy-rag-backup policy-rag-restore validator-shell validator-tests governance-tests functional-smoke functional-smoke-real functional-smoke-real-full functional-smoke-real-backup critical-path-validation bootstrap-test-env host-fast-tests lint help
+.PHONY: all docker-preflight up down clean rebuild logs observability-urls shell-context context-tests context-evals context-browser-smoke context-live-provider-smoke context-import frontend-pnpm-check frontend-install frontend-build frontend-check policy-shell policy-tests policy-vectorize policy-rag-validate policy-rag-backup policy-rag-restore validator-shell validator-tests governance-tests init25-runtime-compat functional-smoke functional-smoke-real functional-smoke-real-full functional-smoke-real-backup critical-path-validation bootstrap-test-env host-fast-tests lint help
 
 ## Verify docker and compose prerequisites
 docker-preflight:
@@ -127,6 +127,10 @@ validator-tests:
 governance-tests: docker-preflight
 	$(COMPOSE) build context-agent
 	docker run --rm -v $(CURDIR):/repo -w /repo infrastructure-context-agent pytest -q tests/governance
+
+## Verify the pinned Docker Agent identity and initialize the INIT-25 config
+init25-runtime-compat:
+	python3 scripts/check_init25_runtime_compatibility.py $(if $(DOCKER_AGENT_BIN),--binary $(DOCKER_AGENT_BIN),)
 
 ## Run full functional smoke in docker (end-to-end) using example fixtures
 functional-smoke:
