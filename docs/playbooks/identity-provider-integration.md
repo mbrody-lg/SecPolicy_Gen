@@ -25,6 +25,22 @@ The identity provider authenticates the human. SecPolicyGen owns organizations,
 memberships, application roles, permissions, tenant isolation, and audit events.
 Service-to-service identities are a separate INIT-11 contract.
 
+An authenticated principal has no application access until an explicit local
+membership exists. Provision the first administrator from the Context Agent
+container or an equivalent controlled administrative job:
+
+```bash
+python manage_identity.py \
+  --issuer https://identity.example.com/tenant/secpolicygen \
+  --subject verified-provider-subject \
+  --organization-id example-organization \
+  --organization-name "Example Organization" \
+  --role admin
+```
+
+The command is idempotent. Provider groups and roles are never imported as
+SecPolicyGen permissions.
+
 Keycloak, Entra ID, Okta, Auth0, Dex, and other conforming providers can be used
 without changing application code. Any local provider added to Docker is a test
 fixture only, not a production dependency.

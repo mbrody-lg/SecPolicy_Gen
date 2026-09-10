@@ -11,6 +11,32 @@ from ui_workflow_fixtures import context_document
 from ui_workflow_fixtures import interactions as ui_interactions
 
 
+@pytest.fixture(autouse=True)
+def authorize_route_contract_subject(monkeypatch):
+    """Keep route tests focused on route behavior behind an authorized boundary."""
+    monkeypatch.setattr(
+        "app.access_control.resolve_access_context",
+        lambda **principal: {
+            "principal_id": "route-contract-subject",
+            "organization_id": "test-organization",
+            "organization_name": "Test Organization",
+            "roles": ["admin"],
+            "permissions": [
+                "contexts:delete",
+                "contexts:create",
+                "contexts:execute",
+                "contexts:read",
+                "contexts:update",
+                "diagnostics:read",
+                "memberships:manage",
+                "runtime:refresh",
+                "system:read",
+                "workload:callback",
+            ],
+        },
+    )
+
+
 class FakeCursor:
     def __init__(self, docs=None):
         self.docs = list(docs or [])

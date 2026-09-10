@@ -2,6 +2,33 @@
 
 import app.identity as identity_module
 from authlib.integrations.base_client.errors import OAuthError
+import pytest
+from pymongo.errors import ServerSelectionTimeoutError
+
+
+@pytest.fixture(autouse=True)
+def isolate_access_persistence(monkeypatch):
+    monkeypatch.setattr("app.access_control.sync_principal", lambda **principal: principal)
+    monkeypatch.setattr(
+        "app.access_control.resolve_access_context",
+        lambda **principal: {
+            "principal_id": "test-principal",
+            "organization_id": "test-organization",
+            "organization_name": "Test Organization",
+            "roles": ["admin"],
+            "permissions": [
+                "contexts:delete",
+                "contexts:create",
+                "contexts:execute",
+                "contexts:read",
+                "contexts:update",
+                "diagnostics:read",
+                "memberships:manage",
+                "runtime:refresh",
+                "system:read",
+            ],
+        },
+    )
 
 
 def test_health_and_ready_remain_public(app):
@@ -116,6 +143,46 @@ def test_callback_rejects_identity_from_another_issuer(app, monkeypatch):
 
     assert response.status_code == 401
     assert response.get_json()["error_code"] == "invalid_identity"
+
+
+def test_callback_clears_session_when_principal_is_disabled(app, monkeypatch):
+    monkeypatch.setattr(
+        identity_module.oauth.oidc,
+        "authorize_access_token",
+        lambda: {"userinfo": {"iss": app.config["OIDC_ISSUER_URL"], "sub": "disabled-user"}},
+    )
+    monkeypatch.setattr(
+        "app.access_control.sync_principal",
+        lambda **principal: (_ for _ in ()).throw(PermissionError("principal_disabled")),
+    )
+    client = app.test_client()
+
+    response = client.get("/auth/callback")
+
+    assert response.status_code == 403
+    assert response.get_json()["error_code"] == "principal_disabled"
+    with client.session_transaction() as session:
+        assert not session
+
+
+def test_callback_clears_session_when_identity_store_is_unavailable(app, monkeypatch):
+    monkeypatch.setattr(
+        identity_module.oauth.oidc,
+        "authorize_access_token",
+        lambda: {"userinfo": {"iss": app.config["OIDC_ISSUER_URL"], "sub": "user-1"}},
+    )
+    monkeypatch.setattr(
+        "app.access_control.sync_principal",
+        lambda **principal: (_ for _ in ()).throw(ServerSelectionTimeoutError("unavailable")),
+    )
+    client = app.test_client()
+
+    response = client.get("/auth/callback")
+
+    assert response.status_code == 503
+    assert response.get_json()["error_code"] == "identity_store_unavailable"
+    with client.session_transaction() as session:
+        assert not session
 
 
 def test_callback_returns_bounded_error_and_clears_session_on_provider_failure(app, monkeypatch):

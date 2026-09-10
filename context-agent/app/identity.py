@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 from authlib.integrations.base_client.errors import OAuthError
 from authlib.integrations.flask_client import OAuth
 from flask import Blueprint, current_app, g, jsonify, redirect, request, session, url_for
+from pymongo.errors import PyMongoError
 
 
 identity = Blueprint("identity", __name__, url_prefix="/auth")
@@ -112,14 +113,26 @@ def callback():
         return jsonify({"success": False, "error_code": "invalid_identity"}), 401
 
     redirect_path = _safe_local_path(session.get("post_auth_redirect"))
-    session.clear()
-    session["principal"] = {
+    principal = {
         "issuer": _bounded_claim(userinfo.get("iss"), limit=2048),
         "subject": _bounded_claim(userinfo.get("sub"), limit=255),
     }
-    if session["principal"]["issuer"] != current_app.config["OIDC_ISSUER_URL"]:
+    if principal["issuer"] != current_app.config["OIDC_ISSUER_URL"]:
         session.clear()
         return jsonify({"success": False, "error_code": "invalid_identity"}), 401
+    from app.access_control import sync_principal
+
+    try:
+        sync_principal(**principal)
+    except PermissionError:
+        session.clear()
+        return jsonify({"success": False, "error_code": "principal_disabled"}), 403
+    except PyMongoError:
+        current_app.logger.exception("OIDC principal synchronization failed")
+        session.clear()
+        return jsonify({"success": False, "error_code": "identity_store_unavailable"}), 503
+    session.clear()
+    session["principal"] = principal
     session.permanent = True
     return redirect(redirect_path)
 
