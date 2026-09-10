@@ -8,11 +8,13 @@ from uuid import uuid4
 
 from flask import Flask, g, has_request_context, request
 from flask_pymongo import PyMongo
+from flask_wtf.csrf import CSRFError, CSRFProtect
 from dotenv import load_dotenv
 
 from app.metrics import record_request_metrics, start_request_timer
 
 mongo = PyMongo()
+csrf = CSRFProtect()
 
 TEST_ONLY_SECRET_KEY = "test-only-secret-key"
 CORRELATION_ID_HEADER = "X-Correlation-ID"
@@ -226,17 +228,33 @@ def create_app():
         default=urlparse(app.config["OIDC_REDIRECT_URI"]).scheme == "https",
     )
     app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=8)
+    app.config["WTF_CSRF_ENABLED"] = not is_testing
     trusted_hosts = _get_env_list("TRUSTED_HOSTS")
     if trusted_hosts is not None:
         app.config["TRUSTED_HOSTS"] = trusted_hosts
     mongo.init_app(app)
+    csrf.init_app(app)
 
+
+    @app.context_processor
+    def inject_identity_context():
+        return {
+            "current_principal": getattr(g, "principal", None),
+            "current_access": getattr(g, "access", None),
+        }
 
     @app.context_processor
     def inject_agent_type():
         from app.agents.factory import load_agent_config
         config = load_agent_config(app.config["CONFIG_PATH"])
         return {"agent_type": config.get("type", "unknown")}
+
+    @app.errorhandler(CSRFError)
+    def handle_csrf_error(error):
+        payload = {"success": False, "error_code": "csrf_validation_failed"}
+        if request.is_json or request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return payload, 400
+        return payload, 400
 
     from app.identity import identity, init_identity, require_authenticated_principal
     from app.routes.routes import main

@@ -8,7 +8,7 @@ from bson import ObjectId
 from flask import Blueprint, current_app, g, render_template, request, redirect, url_for, abort, flash, jsonify
 from markupsafe import escape
 
-from app import mongo
+from app import csrf, mongo
 from app.metrics import metrics_response
 from app.observability import log_event
 from app.routes.input_contracts import (
@@ -1242,6 +1242,7 @@ def delete_context(context_id):
     return redirect(url_for("main.index"))
 
 @main.route("/context/<context_id>/policy", methods=["POST"])
+@csrf.exempt
 def send_policy_to_context(context_id):
     """Persist a validated policy payload in context interactions."""
     try:
