@@ -1,0 +1,59 @@
+version: 2
+updates:
+  - package-ecosystem: docker
+    directories:
+      - /context-agent
+      - /infrastructure
+      - /policy-agent
+      - /tests/browser
+      - /validator-agent
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Madrid
+    groups:
+      container-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: pip
+    directories:
+      - /context-agent
+      - /policy-agent
+      - /validator-agent
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Madrid
+    groups:
+      python-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directories:
+      - /context-agent/frontend
+      - /tests/browser
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Madrid
+    groups:
+      frontend-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Madrid
+    groups:
+      actions-minor-patch:
+        update-types:
+          - minor
+          - patch

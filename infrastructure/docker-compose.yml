@@ -2,22 +2,24 @@
 # service directories for iteration; it is not a production deployment file.
 services:
   mongo:
-    image: mongo:5
+    image: mongo:8.3.8-noble
     container_name: context_mongo
+    environment:
+      - GLIBC_TUNABLES=${MONGO_GLIBC_TUNABLES:-glibc.pthread.rseq=1}
     ports:
       - "27017:27017"
     volumes:
-      - mongo_data:/data/db
+      - mongo_data_v8:/data/db
     networks:
       - internal
     healthcheck:
-      test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand('ping').ok\" | grep 1 || mongo --quiet --eval \"db.adminCommand('ping').ok\" | grep 1"]
+      test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand('ping').ok\" | grep 1"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 20s
   chroma:
-    image: chromadb/chroma
+    image: chromadb/chroma:1.5.9
     volumes:
       - chroma_data:/data
     ports:
@@ -171,7 +173,7 @@ services:
       retries: 5
       start_period: 15s
   prometheus:
-    image: prom/prometheus:v2.53.2
+    image: prom/prometheus:v3.13.0
     container_name: secpolicy_prometheus
     ports:
       - "9090:9090"
@@ -198,7 +200,7 @@ services:
       retries: 5
       start_period: 15s
   loki:
-    image: grafana/loki:3.2.1
+    image: grafana/loki:3.7.6
     container_name: secpolicy_loki
     ports:
       - "3100:3100"
@@ -208,26 +210,20 @@ services:
     command: ["-config.file=/etc/loki/local-config.yml"]
     networks:
       - internal
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3100/ready"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
-  promtail:
-    image: grafana/promtail:3.2.1
-    container_name: secpolicy_promtail
+  alloy:
+    image: grafana/alloy:v1.18.0
+    container_name: secpolicy_alloy
     volumes:
-      - ./observability/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    command: ["-config.file=/etc/promtail/config.yml"]
+    command: ["run", "--disable-reporting", "/etc/alloy/config.alloy"]
     depends_on:
       loki:
         condition: service_started
     networks:
       - internal
   grafana:
-    image: grafana/grafana:11.2.2
+    image: grafana/grafana:13.2.0
     container_name: secpolicy_grafana
     ports:
       - "3000:3000"
@@ -253,7 +249,7 @@ services:
       retries: 10
       start_period: 30s
 volumes:
-  mongo_data:
+  mongo_data_v8:
   chroma_data:
   policy_model_cache:
   prometheus_data:

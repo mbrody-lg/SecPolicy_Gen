@@ -80,6 +80,12 @@ fi
 echo "[critical-path] starting docker stack"
 make docker-preflight
 read -r -a DOCKER_COMPOSE_CMD <<< "$(scripts/docker_preflight.sh --print-compose)"
+"${DOCKER_COMPOSE_CMD[@]}" \
+  -f infrastructure/docker-compose.yml \
+  -f infrastructure/docker-compose.local-oidc.yml \
+  --env-file infrastructure/.env \
+  --profile local-oidc \
+  rm --stop --force context-edge identity >/dev/null 2>&1 || true
 "${DOCKER_COMPOSE_CMD[@]}" -f infrastructure/docker-compose.yml --env-file infrastructure/.env up --build -d
 STACK_STARTED=1
 

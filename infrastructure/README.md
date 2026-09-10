@@ -65,7 +65,7 @@ The base stack starts:
 - **Validator Agent** - API at http://localhost:5001
 - **Grafana** - Local observability UI at http://localhost:3000
 - **Prometheus** - Metrics store at http://localhost:9090
-- **Loki/Promtail** - Local Docker log aggregation at http://localhost:3100
+- **Loki/Alloy** - Local Docker log aggregation at http://localhost:3100
 
 `make local-oidc-up` additionally starts the disposable identity provider on
 localhost ports `8080` and `8443` plus the Context Agent HTTPS edge on `5443`.
@@ -87,6 +87,10 @@ make clean
 
 ### MongoDB
 - **Port**: 27017
+- **Runtime**: MongoDB 8.3 on the versioned `mongo_data_v8` volume
+- **Local kernel compatibility**: `MONGO_GLIBC_TUNABLES` defaults to the
+  temporary rseq workaround required by Docker kernels 6.19 through 7.0.13;
+  remove it after the Docker kernel and MongoDB runtime no longer require it
 - **Databases**: 
   - `context-agent-db` - User contexts and Q&A history
   - `policy-agent-db` - Generated policies and versions
@@ -157,7 +161,7 @@ docker-compose.yml services:
 ├── validator-agent    # Policy validation service
 ├── prometheus         # Metrics scraping and storage
 ├── loki               # Log storage
-├── promtail           # Docker log collector
+├── alloy              # Docker log collector
 └── grafana            # Local observability UI
 ```
 
@@ -194,8 +198,22 @@ the job is moved to `failed` with bounded error code `pipeline_job_stale` so the
 operator UI is not permanently blocked after a worker or process interruption.
 
 This observability stack is for local/development operation. It exposes ports on
-localhost and mounts the Docker socket read-only for Promtail container log
+localhost and mounts the Docker socket read-only for Alloy container log
 discovery; do not promote this Compose configuration to production as-is.
+
+## MongoDB 5 To 8 Development Migration
+
+MongoDB major versions must be upgraded sequentially. This local Compose stack
+uses a new `mongo_data_v8` volume so an existing MongoDB 5 volume is never
+modified implicitly. Before checking out this version, create a `mongodump` if
+the local data matters. Prefer an empty MongoDB 8 volume and regenerate local
+fixtures. A direct MongoDB 5 dump restore is not a supported production
+migration path, even when collection counts and indexes appear correct.
+
+Any valuable or production-like data must follow the official 5 -> 6 -> 7 -> 8
+upgrade sequence with backups, feature-compatibility checks, burn-in, and
+rollback evidence. Production MongoDB upgrades remain outside this development
+Compose contract.
 
 ## Compose Readiness Map
 
