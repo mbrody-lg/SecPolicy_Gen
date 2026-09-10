@@ -1781,10 +1781,12 @@ def test_system_refresh_redirects_with_failure_flash(client, monkeypatch):
 
 def test_send_policy_to_context_returns_400_when_required_fields_missing(client):
     context_id = str(ObjectId())
+    routes_module.mongo.db.contexts.insert_one({"_id": ObjectId(context_id)})
 
     response = client.post(
         f"/context/{context_id}/policy",
         json={"policy_text": "Validated policy text"},
+        headers={"Authorization": "Bearer test-only-policy-callback-token"},
     )
 
     assert response.status_code == 400
@@ -1804,11 +1806,15 @@ def test_send_policy_to_context_returns_400_when_required_fields_missing(client)
 
 def test_send_policy_to_context_preserves_inbound_correlation_id_in_error_body_and_header(client):
     context_id = str(ObjectId())
+    routes_module.mongo.db.contexts.insert_one({"_id": ObjectId(context_id)})
 
     response = client.post(
         f"/context/{context_id}/policy",
         json={"policy_text": "Validated policy text"},
-        headers={"X-Correlation-ID": "corr-inbound"},
+        headers={
+            "Authorization": "Bearer test-only-policy-callback-token",
+            "X-Correlation-ID": "corr-inbound",
+        },
     )
 
     assert response.status_code == 400
@@ -1818,6 +1824,7 @@ def test_send_policy_to_context_preserves_inbound_correlation_id_in_error_body_a
 
 def test_send_policy_to_context_rejects_invalid_recommendations_before_storage(client, monkeypatch):
     context_id = str(ObjectId())
+    routes_module.mongo.db.contexts.insert_one({"_id": ObjectId(context_id)})
     called = False
 
     def fake_store_validated_policy(current_context_id, current_payload):
@@ -1836,6 +1843,7 @@ def test_send_policy_to_context_rejects_invalid_recommendations_before_storage(c
             "language": "en",
             "recommendations": [{"unsafe": "shape"}],
         },
+        headers={"Authorization": "Bearer test-only-policy-callback-token"},
     )
 
     assert response.status_code == 400
@@ -1847,6 +1855,7 @@ def test_send_policy_to_context_rejects_invalid_recommendations_before_storage(c
 
 def test_send_policy_to_context_redirects_after_storage(client, monkeypatch):
     context_id = str(ObjectId())
+    routes_module.mongo.db.contexts.insert_one({"_id": ObjectId(context_id)})
     captured = {}
     payload = {
         "policy_text": "Validated policy text",
@@ -1864,7 +1873,11 @@ def test_send_policy_to_context_redirects_after_storage(client, monkeypatch):
 
     monkeypatch.setattr(routes_module, "store_validated_policy", fake_store_validated_policy)
 
-    response = client.post(f"/context/{context_id}/policy", json=payload)
+    response = client.post(
+        f"/context/{context_id}/policy",
+        json=payload,
+        headers={"Authorization": "Bearer test-only-policy-callback-token"},
+    )
 
     assert response.status_code == 302
     assert response.headers["Location"].endswith(f"/context/{context_id}")

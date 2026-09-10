@@ -16,6 +16,7 @@ def _set_common_env(monkeypatch):
     monkeypatch.setenv("OIDC_CLIENT_SECRET", "configured-oidc-secret")
     monkeypatch.setenv("OIDC_REDIRECT_URI", "http://localhost:5003/auth/callback")
     monkeypatch.setenv("OIDC_SCOPES", "openid profile email")
+    monkeypatch.setenv("POLICY_CALLBACK_TOKEN", "configured-callback-secret")
 
 
 def test_create_app_requires_secret_key_outside_testing(monkeypatch):
@@ -38,6 +39,7 @@ def test_create_app_requires_secret_key_outside_testing(monkeypatch):
         "OIDC_CLIENT_ID",
         "OIDC_CLIENT_SECRET",
         "OIDC_REDIRECT_URI",
+        "POLICY_CALLBACK_TOKEN",
     ],
 )
 def test_create_app_requires_runtime_config_outside_testing(monkeypatch, missing_variable):

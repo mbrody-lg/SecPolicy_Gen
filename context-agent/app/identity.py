@@ -78,7 +78,9 @@ def current_principal() -> dict | None:
 
 def require_authenticated_principal():
     """Protect every route except the explicit runtime and login allowlist."""
-    if request.endpoint in PUBLIC_ENDPOINTS:
+    from app.service_identity import WORKLOAD_ENDPOINTS
+
+    if request.endpoint in PUBLIC_ENDPOINTS or request.endpoint in WORKLOAD_ENDPOINTS:
         return None
 
     principal = current_principal()

@@ -186,6 +186,11 @@ def create_app():
         ),
     )
     app.config["OIDC_SCOPES"] = _get_oidc_scopes()
+    app.config["POLICY_CALLBACK_TOKEN"] = _get_required_env(
+        "POLICY_CALLBACK_TOKEN",
+        is_testing=is_testing,
+        test_default="test-only-policy-callback-token",
+    )
     app.config["TESTING"] = is_testing
     app.config["DEBUG"] = _get_env_bool("DEBUG", default=False)
     app.config["MONGO_URI"] = _validate_mongo_uri(
@@ -276,6 +281,12 @@ def create_app():
         from app.access_control import authorize_principal_membership
 
         return authorize_principal_membership()
+
+    @app.before_request
+    def authenticate_workload_principal():
+        from app.service_identity import require_workload_identity
+
+        return require_workload_identity()
 
     @app.before_request
     def authorize_organization_resource():
