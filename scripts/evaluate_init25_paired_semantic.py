@@ -89,9 +89,14 @@ def compare_pair(case: dict[str, Any], pair: dict[str, Any], index: int) -> dict
 
 
 def evaluate_batch(cases: list[dict[str, Any]], pairs: list[dict[str, Any]]) -> dict[str, Any]:
-    pairs_by_id = {pair.get("case_id"): pair for pair in pairs if isinstance(pair, dict)}
-    missing = sorted(case["case_id"] for case in cases if case["case_id"] not in pairs_by_id)
-    comparisons = [] if missing else [
+    expected_ids = {case["case_id"] for case in cases}
+    pair_ids = [pair.get("case_id") for pair in pairs if isinstance(pair, dict)]
+    duplicate_ids = sorted(case_id for case_id in set(pair_ids) if pair_ids.count(case_id) > 1)
+    unknown_ids = sorted(case_id for case_id in pair_ids if case_id not in expected_ids)
+    pairs_by_id = {pair["case_id"]: pair for pair in pairs if isinstance(pair, dict) and pair.get("case_id") in expected_ids}
+    missing = sorted(case_id for case_id in expected_ids if case_id not in pairs_by_id)
+    complete = not (missing or duplicate_ids or unknown_ids)
+    comparisons = [] if not complete else [
         compare_pair(case, pairs_by_id[case["case_id"]], index)
         for index, case in enumerate(cases)
     ]
@@ -101,8 +106,10 @@ def evaluate_batch(cases: list[dict[str, Any]], pairs: list[dict[str, Any]]) -> 
         "gate": "paired_semantic_evidence",
         "case_count": len(cases),
         "paired_case_count": len(comparisons),
-        "complete": not missing,
+        "complete": complete,
         "missing_case_ids": missing,
+        "duplicate_case_ids": duplicate_ids,
+        "unknown_case_ids": unknown_ids,
         "comparisons": comparisons,
         "semantic_readiness": "not_assessed",
         "cutover_readiness": "not_ready",

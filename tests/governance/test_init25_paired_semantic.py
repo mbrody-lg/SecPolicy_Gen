@@ -1,6 +1,12 @@
 from collections import Counter
+from pathlib import Path
+import sys
 
 import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from scripts.evaluate_init25_paired_semantic import _canonical_hash, compare_pair, evaluate_batch, load_cases
 
@@ -84,3 +90,16 @@ def test_batch_is_incomplete_when_live_pairs_are_missing():
     assert report["complete"] is False
     assert report["paired_case_count"] == 0
     assert len(report["missing_case_ids"]) == 12
+
+
+def test_batch_rejects_duplicate_or_unknown_case_ids():
+    cases = load_cases()
+    pairs = [_pair(case) for case in cases]
+    pairs[-1]["case_id"] = pairs[0]["case_id"]
+
+    report = evaluate_batch(cases, pairs + [{"case_id": "unknown"}])
+
+    assert report["complete"] is False
+    assert report["paired_case_count"] == 0
+    assert report["duplicate_case_ids"] == [cases[0]["case_id"]]
+    assert report["unknown_case_ids"] == ["unknown"]
