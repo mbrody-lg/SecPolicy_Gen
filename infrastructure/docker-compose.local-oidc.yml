@@ -42,7 +42,7 @@ services:
     environment:
       - OIDC_CA_BUNDLE=/etc/secpolicygen/local-oidc-ca.crt
       - OIDC_ALLOW_INSECURE_HTTP=${OIDC_ALLOW_INSECURE_HTTP:-false}
-      - SESSION_COOKIE_SECURE=true
+      - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
     depends_on:
       identity:
         condition: service_healthy
@@ -59,7 +59,7 @@ services:
   context-edge:
     image: nginx:1.30.4-alpine
     profiles:
-      - local-oidc
+      - local-oidc-https
     ports:
       - "127.0.0.1:5443:443"
     volumes:

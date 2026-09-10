@@ -17,6 +17,7 @@ COMPOSE_ARGS=(
   -f infrastructure/docker-compose.local-oidc.yml
   --env-file infrastructure/.env
   --profile local-oidc
+  --profile local-oidc-https
 )
 SCHEME="$MODE"
 PORT=8080
@@ -33,6 +34,7 @@ export LOCAL_OIDC_CERT_UID="$(id -u)"
 export OIDC_ISSUER_URL="$ISSUER"
 export OIDC_REDIRECT_URI="$REDIRECT_URI"
 export TRUSTED_HOSTS="localhost,127.0.0.1,context-agent,context-agent.test,identity.test"
+export SESSION_COOKIE_SECURE=true
 certificate_spki() {
   openssl x509 -in "$1" -pubkey -noout |
     openssl pkey -pubin -outform der |
