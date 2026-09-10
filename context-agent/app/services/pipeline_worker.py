@@ -2,9 +2,10 @@
 
 from threading import Thread
 
-from flask import current_app
+from bson import ObjectId
+from flask import current_app, g
 
-from app import CORRELATION_ID_HEADER
+from app import CORRELATION_ID_HEADER, mongo
 from app.services import logic, pipeline_jobs
 
 
@@ -13,21 +14,44 @@ def start_pipeline_job_worker(job: dict) -> dict:
     app = current_app._get_current_object()
     thread = Thread(
         target=run_pipeline_job,
-        kwargs={"app": app, "job_id": job["job_id"]},
+        kwargs={
+            "app": app,
+            "job_id": job["job_id"],
+            "organization_id": job["organization_id"],
+        },
         daemon=True,
     )
     thread.start()
     return {"started": True, "job_id": job["job_id"]}
 
 
-def run_pipeline_job(*, app, job_id: str) -> dict | None:
+def run_pipeline_job(*, app, job_id: str, organization_id: str) -> dict | None:
     """Execute one pipeline job and persist terminal state."""
     with app.app_context():
-        job = pipeline_jobs.get_pipeline_job(job_id)
+        job = pipeline_jobs.get_pipeline_job(job_id, organization_id=organization_id)
         if not job:
             return None
 
+        if not mongo.db.contexts.find_one(
+            {"_id": ObjectId(job["context_id"]), "organization_id": organization_id},
+            {"_id": 1},
+        ):
+            return pipeline_jobs.update_pipeline_job_state(
+                organization_id=organization_id,
+                job_id=job_id,
+                status="failed",
+                stage="tenant_validation",
+                error={
+                    "stage": "tenant_validation",
+                    "error_type": "authorization_error",
+                    "error_code": "pipeline_context_not_found",
+                    "safe_message": "Pipeline context is unavailable.",
+                    "status_code": 404,
+                },
+            )
+
         pipeline_jobs.update_pipeline_job_state(
+            organization_id=organization_id,
             job_id=job_id,
             status="running",
             stage="pipeline",
@@ -36,6 +60,7 @@ def run_pipeline_job(*, app, job_id: str) -> dict | None:
             return _run_context_plan_job(app, job_id, job)
         if job.get("command") != "generate_policy":
             return pipeline_jobs.update_pipeline_job_state(
+                organization_id=organization_id,
                 job_id=job_id,
                 status="failed",
                 stage="pipeline",
@@ -49,6 +74,7 @@ def run_pipeline_job(*, app, job_id: str) -> dict | None:
             )
 
         pipeline_jobs.update_pipeline_job_state(
+            organization_id=organization_id,
             job_id=job_id,
             status="policy_generating",
             stage="policy_generation",
@@ -56,6 +82,7 @@ def run_pipeline_job(*, app, job_id: str) -> dict | None:
         result = _execute_pipeline_with_correlation(app, job)
         if result.get("success"):
             return pipeline_jobs.update_pipeline_job_state(
+                organization_id=organization_id,
                 job_id=job_id,
                 status="completed",
                 stage="completed",
@@ -63,6 +90,7 @@ def run_pipeline_job(*, app, job_id: str) -> dict | None:
             )
 
         return pipeline_jobs.update_pipeline_job_state(
+            organization_id=organization_id,
             job_id=job_id,
             status="failed",
             stage=result.get("stage", "pipeline"),
@@ -80,27 +108,31 @@ def _execute_pipeline_with_correlation(app, job: dict) -> dict:
     """Run the existing pipeline under the job correlation id."""
     headers = {CORRELATION_ID_HEADER: job["correlation_id"]}
     with app.test_request_context("/", headers=headers):
-        app.preprocess_request()
-    return logic.generate_full_policy_pipeline(job["context_id"])
+        g.correlation_id = job["correlation_id"]
+        g.organization_id = job["organization_id"]
+        return logic.generate_full_policy_pipeline(job["context_id"])
 
 
 def _run_context_plan_job(app, job_id: str, job: dict) -> dict | None:
     """Execute an approved context plan under the job correlation id."""
     pipeline_jobs.update_pipeline_job_state(
+        organization_id=job["organization_id"],
         job_id=job_id,
         status="context_task_running",
         stage="context_plan_execution",
     )
     headers = {CORRELATION_ID_HEADER: job["correlation_id"]}
     with app.test_request_context("/", headers=headers):
-        app.preprocess_request()
+        g.correlation_id = job["correlation_id"]
+        g.organization_id = job["organization_id"]
         result = logic.execute_context_plan(
             job["context_id"],
-            on_task_progress=_context_plan_progress_callback(job_id),
+            on_task_progress=_context_plan_progress_callback(job_id, job["organization_id"]),
         )
 
     if result.get("success"):
         return pipeline_jobs.update_pipeline_job_state(
+            organization_id=job["organization_id"],
             job_id=job_id,
             status="completed",
             stage="context_plan_completed",
@@ -112,6 +144,7 @@ def _run_context_plan_job(app, job_id: str, job: dict) -> dict | None:
         )
 
     return pipeline_jobs.update_pipeline_job_state(
+        organization_id=job["organization_id"],
         job_id=job_id,
         status="failed",
         stage=result.get("stage", "context_plan_execution"),
@@ -125,10 +158,11 @@ def _run_context_plan_job(app, job_id: str, job: dict) -> dict | None:
     )
 
 
-def _context_plan_progress_callback(job_id: str):
+def _context_plan_progress_callback(job_id: str, organization_id: str):
     """Return a callback that mirrors context plan task progress to the job."""
     def _callback(progress: dict) -> None:
         pipeline_jobs.update_pipeline_job_progress(
+            organization_id=organization_id,
             job_id=job_id,
             status="context_task_running",
             stage=progress.get("stage", "context_plan_execution"),

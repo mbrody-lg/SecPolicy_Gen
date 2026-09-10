@@ -1,37 +1,6 @@
 from test_base import *
-from app import create_app, mongo
-import pytest
+from app import mongo
 import app.routes.routes as routes_module
-
-@pytest.fixture
-def client():
-    app = create_app()
-    app.config["TESTING"] = True
-    with app.test_client() as client:
-        from app.access_control import provision_membership, provision_organization, sync_principal
-
-        with app.app_context():
-            principal = sync_principal(
-                issuer="https://identity.test/tenant/secpolicygen",
-                subject="test-operator",
-            )
-            organization = provision_organization(
-                organization_id="test-organization",
-                name="Test Organization",
-            )
-            provision_membership(
-                principal_id=principal["_id"],
-                organization_id=organization["organization_id"],
-                roles=["admin"],
-                is_default=True,
-            )
-        with client.session_transaction() as session:
-            session["principal"] = {
-                "issuer": "https://identity.test/tenant/secpolicygen",
-                "subject": "test-operator",
-            }
-        with app.app_context():
-            yield client
 
 def test_create_context(client, monkeypatch):
     monkeypatch.setattr(

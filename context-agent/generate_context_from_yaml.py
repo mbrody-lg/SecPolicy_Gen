@@ -65,7 +65,7 @@ def parse_fixture(file_path):
         return parse_json_answers(file_path)
     return parse_yaml_answers(file_path)
 
-def recreate_context_from_answers(data, *, auto_approve_plan=False):
+def recreate_context_from_answers(data, *, organization_id, auto_approve_plan=False):
     """Create context records and the first reviewable context-intelligence plan."""
     created_at = datetime.now(timezone.utc)
     initial_prompt = generate_context_plan_prompt(data)
@@ -79,6 +79,7 @@ def recreate_context_from_answers(data, *, auto_approve_plan=False):
 
     context_result = mongo.db.contexts.insert_one({
         **data,
+        "organization_id": organization_id,
         "version": 1,
         "security_context_version": SECURITY_CONTEXT_VERSION,
         "security_context": security_context,
@@ -96,6 +97,7 @@ def recreate_context_from_answers(data, *, auto_approve_plan=False):
     questions = load_questions()
     for q in questions:
         mongo.db.interactions.insert_one({
+            "organization_id": organization_id,
             "context_id": context_id,
             "question_id": f"q_{q['id']}",
             "question_text": q["question"],
@@ -104,6 +106,7 @@ def recreate_context_from_answers(data, *, auto_approve_plan=False):
             "origin": "agent"
         })
         mongo.db.interactions.insert_one({
+            "organization_id": organization_id,
             "context_id": context_id,
             "question_id": q["id"],
             "question_text": q["question"],
@@ -123,6 +126,7 @@ def recreate_context_from_answers(data, *, auto_approve_plan=False):
         "provider_review": planning_review["structured_review"],
     }
     mongo.db.interactions.insert_one({
+        "organization_id": organization_id,
         "context_id": context_id,
         "question_id": "response_initial",
         "question_text": "Agent response",
@@ -174,7 +178,7 @@ def recreate_context_from_answers(data, *, auto_approve_plan=False):
         f"{data.get('sector', 'unknown')} [{status}]"
     )
 
-def process_directory(directory_path, *, auto_approve_plan=False):
+def process_directory(directory_path, *, organization_id, auto_approve_plan=False):
     """Process every fixture file in a directory and recreate its context."""
     fixtures = sorted(
         list(Path(directory_path).glob("*.yaml"))
@@ -187,7 +191,11 @@ def process_directory(directory_path, *, auto_approve_plan=False):
         print(f"Processing {file_path.name}...")
         try:
             data = parse_fixture(file_path)
-            recreate_context_from_answers(data, auto_approve_plan=auto_approve_plan)
+            recreate_context_from_answers(
+                data,
+                organization_id=organization_id,
+                auto_approve_plan=auto_approve_plan,
+            )
         except Exception as e:
             print(f"Error with {file_path.name}: {e}")
 
@@ -215,6 +223,12 @@ def parse_args(argv):
         default=_env_flag("CONTEXT_IMPORT_AUTO_APPROVE_PLAN"),
         help="Mark generated context-intelligence plans as approved after import.",
     )
+    parser.add_argument(
+        "--organization-id",
+        default=os.getenv("CONTEXT_IMPORT_ORGANIZATION_ID"),
+        required=not bool(os.getenv("CONTEXT_IMPORT_ORGANIZATION_ID")),
+        help="Existing organization that owns imported fixtures.",
+    )
     return parser.parse_args(argv)
 
 
@@ -226,9 +240,21 @@ if __name__ == "__main__":
         print(f"The path {directory} is invalid..")
         sys.exit(1)
 
-    # Clean the full database
-    mongo.db.interactions.delete_many({})
-    mongo.db.contexts.delete_many({})
-    print("Database cleaned.")
+    organization = mongo.db.organizations.find_one({
+        "organization_id": args.organization_id,
+        "status": "active",
+    })
+    if not organization:
+        print("The target organization does not exist or is inactive.")
+        sys.exit(1)
 
-    process_directory(directory, auto_approve_plan=args.auto_approve_plan)
+    tenant_filter = {"organization_id": args.organization_id}
+    mongo.db.interactions.delete_many(tenant_filter)
+    mongo.db.contexts.delete_many(tenant_filter)
+    print("Organization fixture data cleaned.")
+
+    process_directory(
+        directory,
+        organization_id=args.organization_id,
+        auto_approve_plan=args.auto_approve_plan,
+    )

@@ -26,10 +26,11 @@ def test_recreate_context_from_answers_creates_reviewable_plan(monkeypatch):
         "critical_assets": "Patient records",
         "data_categories": "health_data",
         "need": "Build a security plan",
-    })
+    }, organization_id="test-organization")
 
     context = importer.mongo.db.contexts.find_one({"country": "Spain"})
     assert context["status"] == "awaiting_task_validation"
+    assert context["organization_id"] == "test-organization"
     assert context["security_context"]["profile"]["sector"] == "Healthcare"
     assert context["context_building"]["status"] == "sufficient"
     assert context["context_intelligence_plan"]["status"] == "draft"
@@ -69,6 +70,7 @@ def test_recreate_context_from_answers_can_auto_approve_plan(monkeypatch):
             "critical_assets": "Payment flow",
             "need": "Build a security plan",
         },
+        organization_id="test-organization",
         auto_approve_plan=True,
     )
 
@@ -91,8 +93,10 @@ def test_recreate_context_from_answers_can_auto_approve_plan(monkeypatch):
 
 def test_parse_args_supports_auto_approve_env(monkeypatch):
     monkeypatch.setenv("CONTEXT_IMPORT_AUTO_APPROVE_PLAN", "true")
+    monkeypatch.setenv("CONTEXT_IMPORT_ORGANIZATION_ID", "test-organization")
 
     args = importer.parse_args(["/tmp/fixtures"])
 
     assert args.directory == "/tmp/fixtures"
     assert args.auto_approve_plan is True
+    assert args.organization_id == "test-organization"

@@ -8,6 +8,8 @@ from test_base import *
 from app.agents.openai.structured import ProviderTimeoutError
 from app.services import logic
 
+ORGANIZATION_ID = "test-organization"
+
 
 class FakeCollection:
     def __init__(self, docs=None):
@@ -1865,7 +1867,10 @@ def test_refresh_system_state_handles_unreachable_policy_agent(app_context, monk
 
 def test_store_validated_policy_inserts_agent_interaction(monkeypatch):
     context_id = ObjectId()
-    fake_db = FakeDB()
+    fake_db = FakeDB(contexts=[{
+        "_id": context_id,
+        "organization_id": ORGANIZATION_ID,
+    }])
     payload = {
         "policy_text": "Validated policy text",
         "generated_at": "2026-04-10T10:00:00+00:00",
@@ -1884,6 +1889,7 @@ def test_store_validated_policy_inserts_agent_interaction(monkeypatch):
     assert result["context_id"] == str(context_id)
     assert len(fake_db.interactions.docs) == 1
     stored = fake_db.interactions.docs[0]
+    assert stored["organization_id"] == ORGANIZATION_ID
     assert stored["context_id"] == context_id
     assert stored["question_id"] == "validated_policy"
     assert stored["answer"] == "Validated policy text"
@@ -1930,7 +1936,10 @@ def test_store_validated_policy_requires_full_payload(monkeypatch):
 
 def test_generate_full_policy_pipeline_stores_validated_policy_without_internal_http(monkeypatch):
     context_id = ObjectId()
-    fake_db = FakeDB()
+    fake_db = FakeDB(contexts=[{
+        "_id": context_id,
+        "organization_id": ORGANIZATION_ID,
+    }])
     validated_payload = {
         "policy_text": "Validated policy text",
         "generated_at": "2026-04-10T10:00:00+00:00",
@@ -2209,6 +2218,7 @@ def test_get_pipeline_diagnostic_returns_serialized_document(monkeypatch):
             {
                 "_id": ObjectId(),
                 "correlation_id": "corr-1",
+                "organization_id": ORGANIZATION_ID,
                 "context_id": "ctx-1",
                 "status": "completed",
                 "hops": [],
@@ -2217,28 +2227,34 @@ def test_get_pipeline_diagnostic_returns_serialized_document(monkeypatch):
     )
     monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
 
-    result = logic.get_pipeline_diagnostic("corr-1")
+    result = logic.get_pipeline_diagnostic(
+        "corr-1", organization_id=ORGANIZATION_ID
+    )
 
     assert result["correlation_id"] == "corr-1"
     assert result["_id"]
 
 
-def test_upsert_pipeline_diagnostic_bounds_hop_history(monkeypatch):
+def test_upsert_pipeline_diagnostic_bounds_hop_history(app, monkeypatch):
     fake_db = FakeDB()
     monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
 
-    for index in range(logic.MAX_PIPELINE_DIAGNOSTIC_HOPS + 5):
-        logic._upsert_pipeline_diagnostic(  # noqa: SLF001 - direct helper coverage
-            correlation_id="corr-bounded",
-            context_id="ctx-bounded",
-            status="in_progress",
-            hop={
-                "service": "context-agent",
-                "stage": "pipeline",
-                "operation": f"step-{index}",
-                "outcome": "success",
-            },
-        )
+    with app.test_request_context("/"):
+        from flask import g
+
+        g.organization_id = ORGANIZATION_ID
+        for index in range(logic.MAX_PIPELINE_DIAGNOSTIC_HOPS + 5):
+            logic._upsert_pipeline_diagnostic(  # noqa: SLF001 - direct helper coverage
+                correlation_id="corr-bounded",
+                context_id="ctx-bounded",
+                status="in_progress",
+                hop={
+                    "service": "context-agent",
+                    "stage": "pipeline",
+                    "operation": f"step-{index}",
+                    "outcome": "success",
+                },
+            )
 
     diagnostic = fake_db.pipeline_diagnostics.find_one({"correlation_id": "corr-bounded"})
 

@@ -11,7 +11,7 @@ from uuid import uuid4
 import requests
 import yaml
 from bson import ObjectId
-from flask import current_app, has_app_context
+from flask import current_app, g, has_app_context, has_request_context
 from markdown import markdown
 
 from app import (
@@ -2464,13 +2464,21 @@ def _upsert_pipeline_diagnostic(
     completed: bool = False,
 ) -> None:
     """Persist a bounded cross-service diagnostic view keyed by correlation id."""
-    if not correlation_id:
+    organization_id = getattr(g, "organization_id", None) if has_request_context() else None
+    if not organization_id and context_id:
+        try:
+            context_owner = mongo.db.contexts.find_one({"_id": ObjectId(context_id)})
+        except Exception:
+            context_owner = None
+        organization_id = (context_owner or {}).get("organization_id")
+    if not correlation_id or not organization_id:
         return
 
     now = datetime.now(timezone.utc)
     update_doc = {
         "$setOnInsert": {
             "correlation_id": correlation_id,
+            "organization_id": organization_id,
             "created_at": now,
             "ownership": {
                 "owner_service": "context-agent",
@@ -2494,7 +2502,7 @@ def _upsert_pipeline_diagnostic(
 
     try:
         _pipeline_diagnostics_collection().update_one(
-            {"correlation_id": correlation_id},
+            {"correlation_id": correlation_id, "organization_id": organization_id},
             update_doc,
             upsert=True,
         )
@@ -2510,9 +2518,11 @@ def _upsert_pipeline_diagnostic(
         )
 
 
-def get_pipeline_diagnostic(correlation_id: str) -> dict | None:
+def get_pipeline_diagnostic(correlation_id: str, *, organization_id: str) -> dict | None:
     """Return a persisted pipeline diagnostic document by correlation id."""
-    diagnostic = _pipeline_diagnostics_collection().find_one({"correlation_id": correlation_id})
+    diagnostic = _pipeline_diagnostics_collection().find_one(
+        {"correlation_id": correlation_id, "organization_id": organization_id}
+    )
     if not diagnostic:
         return None
     if "_id" in diagnostic:
@@ -2927,8 +2937,24 @@ def store_validated_policy(context_id: str, validated_data: dict) -> dict:
             correlation_id=correlation_id,
         ) from exc
 
+    organization_id = getattr(g, "organization_id", None) if has_request_context() else None
+    if not organization_id:
+        context_owner = mongo.db.contexts.find_one({"_id": context_obj_id})
+        organization_id = (context_owner or {}).get("organization_id")
+    if not organization_id:
+        raise PipelineStepError(
+            stage="persistence",
+            message="Context ownership is unavailable.",
+            error_type="authorization_error",
+            error_code="context_organization_missing",
+            status_code=409,
+            details={"context_id": context_id},
+            correlation_id=correlation_id,
+        )
+
     validated_at = datetime.now(timezone.utc)
     mongo.db.interactions.insert_one({
+        "organization_id": organization_id,
         "context_id": context_obj_id,
         "correlation_id": correlation_id,
         "question_id": "validated_policy",
