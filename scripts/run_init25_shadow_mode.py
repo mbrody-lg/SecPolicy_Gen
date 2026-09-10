@@ -365,6 +365,7 @@ def run_shadow_mode(
         authoritative = _deterministic_authoritative(case)
     correlation_id = authoritative["correlation_id"]
     candidate: dict[str, Any] = {
+        "execution_mode": mode,
         "validation_status": "not_run",
         "covered_evidence_families": [],
         "correlation_id": correlation_id,

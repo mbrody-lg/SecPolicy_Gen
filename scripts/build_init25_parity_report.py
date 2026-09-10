@@ -96,7 +96,7 @@ def _observability(candidate: dict[str, Any], authoritative: dict[str, Any]) -> 
     }
 
 
-def _recommendation(
+def _contract_recommendation(
     *,
     contract_compatible: bool,
     runtime_errors: list[dict[str, Any]],
@@ -109,6 +109,31 @@ def _recommendation(
     if not contract_compatible or missing_families or validation_changed:
         return "narrow"
     return "continue"
+
+
+def _evidence_basis(
+    authoritative: dict[str, Any], candidate: dict[str, Any]
+) -> dict[str, str]:
+    authoritative_basis = "unverified"
+    if (
+        authoritative.get("artifact_evidence") == "contract_projection_not_observed"
+        or authoritative.get("baseline_type") == "deterministic_contract_baseline"
+    ):
+        authoritative_basis = "projected"
+    elif authoritative.get("live_service_parity") is True:
+        authoritative_basis = "observed"
+
+    candidate_mode = candidate.get("execution_mode")
+    candidate_basis = "unverified"
+    if candidate.get("simulation_only") is True or candidate_mode in {
+        "contract_dry_run",
+        "simulated",
+    }:
+        candidate_basis = "simulated"
+    elif candidate_mode == "live":
+        candidate_basis = "live"
+
+    return {"authoritative": authoritative_basis, "candidate": candidate_basis}
 
 
 def build_report(case_id: str, authoritative: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
@@ -125,6 +150,13 @@ def build_report(case_id: str, authoritative: dict[str, Any], candidate: dict[st
     security_findings = _object_list(candidate.get("security_findings"))
     validation_changed = authoritative_status != candidate_status
     contract_compatible = not artifact_differences and not runtime_errors
+    recommendation = _contract_recommendation(
+        contract_compatible=contract_compatible,
+        runtime_errors=runtime_errors,
+        missing_families=evidence_coverage["missing_families"],
+        validation_changed=validation_changed,
+        security_findings=security_findings,
+    )
     report = {
         "case_id": case_id,
         "contract_compatible": contract_compatible,
@@ -142,13 +174,14 @@ def build_report(case_id: str, authoritative: dict[str, Any], candidate: dict[st
         },
         "observability": observability,
         "security_findings": security_findings,
-        "recommendation": _recommendation(
-            contract_compatible=contract_compatible,
-            runtime_errors=runtime_errors,
-            missing_families=evidence_coverage["missing_families"],
-            validation_changed=validation_changed,
-            security_findings=security_findings,
-        ),
+        # The current harness assesses contract shape, never cutover readiness.
+        "recommendation": recommendation,
+        "assessment": {
+            "contract_recommendation": recommendation,
+            "semantic_readiness": "not_assessed",
+            "cutover_readiness": "not_ready",
+            "evidence_basis": _evidence_basis(authoritative, candidate),
+        },
     }
     validate(report)
     return report

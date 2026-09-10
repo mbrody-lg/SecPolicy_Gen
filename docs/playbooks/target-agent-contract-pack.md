@@ -10,6 +10,9 @@ it must not become the owner of domain behavior.
 
 ## Runtime Reference
 
+Topology and ownership are governed by
+[`ADR 0001`](../adr/0001-cagent-runtime-topology-and-workflow-ownership.md).
+
 Docker Agent/cagent is evaluated as a runtime and packaging option with these
 capabilities:
 
@@ -28,7 +31,8 @@ runtime, unless a different project reference is supplied.
 
 | Agent | Owns | Produces |
 | --- | --- | --- |
-| Coordinator | Workflow routing, handoff order, run state, stop conditions | `workflow_state`, `agent_handoff`, `runtime_error` |
+| Application Workflow | Durable run state, business transitions, cancellation, retry policy, handoff order | `workflow_state`, `agent_handoff`, `runtime_error` |
+| Candidate Coordinator | Bounded non-authoritative Policy-Validator coordination | Candidate artifact references and runtime status |
 | Context Agent | Enterprise context intake, context-building updates, planning input, final context | `security_context.v1`, `context_agent.phase_output`, `context_agent.policy_handoff.v1` |
 | Regulatory/RAG Agent | Applicable source selection, retrieval planning, evidence bundle | `rag.retrieval_context`, `rag.retrieval_plan`, `rag.retrieval_evidence` |
 | Policy Agent | Policy draft generation from approved context and evidence | `policy_agent.policy_draft` |
@@ -346,7 +350,8 @@ Required fields:
 - `runtime_version`;
 - `agent_config_ref`;
 - `agent_name`;
-- `mode`: `dry_run`, `shadow`, or `cutover_candidate`;
+- `mode`: `dry_run` or `shadow`; a future contract revision may introduce a
+  cutover candidate only after the ADR gates pass;
 - `input_artifact_ids`;
 - `output_artifact_ids`;
 - `permission_profile`;
@@ -372,7 +377,21 @@ Required fields:
 - `timing`;
 - `observability`;
 - `security_findings`;
-- `recommendation`: `continue`, `narrow`, or `pause`.
+- `recommendation`: `continue`, `narrow`, or `pause`; this is contract-level
+  compatibility and never authorizes cutover.
+
+New reports also include `assessment` with:
+
+- `contract_recommendation`, equal to the legacy `recommendation` field;
+- `semantic_readiness`: `not_assessed` or `not_ready`;
+- `cutover_readiness`: currently only `not_ready`;
+- `evidence_basis.authoritative`: `projected`, `observed`, or `unverified`;
+- `evidence_basis.candidate`: `simulated`, `live`, or `unverified`.
+
+Legacy reports without `assessment` prove contract compatibility only.
+Projected, simulated, or unverified evidence cannot claim semantic or cutover
+readiness. A future contract revision may introduce `ready` only together with
+structured semantic evidence and verified observability.
 
 ### `loop.observability`
 
@@ -422,7 +441,11 @@ Required fields:
 
 ## Handoff Rules
 
-- Coordinator may route work, but it must not invent domain outputs.
+- Application Workflow owns durable state. During the pilot, Context Agent
+  pipeline jobs and events implement this logical boundary.
+- A candidate coordinator may route a bounded Policy-Validator attempt, but it
+  must not invent domain outputs, persist authoritative state, or choose retry
+  policy. Application Workflow supplies the authorized retry limit.
 - Context Agent may request more user context during context building or
   planning.
 - Regulatory/RAG Agent may retrieve and summarize evidence, but must not draft
@@ -446,13 +469,10 @@ Required fields:
 
 ## PR #16 And PR #17 Disposition
 
-PR #16 can continue only if it is rebased or replaced so the dry-run scaffold
-validates this contract pack. Prompt files and YAML are implementation assets,
-not canonical business contracts.
-
-PR #17 can continue after the PR #16 decision. Shadow-mode runners and
-summaries are useful only if they compare current authoritative execution
-against the target artifacts above.
+PRs #16 and #17 are superseded by the #109-#115 stack and must not be merged.
+Close them after the replacement disposition is accepted. Prompt files, YAML,
+shadow runners, and summaries remain implementation assets rather than
+canonical business contracts.
 
 ## INIT-25 Decision Gates
 
@@ -460,7 +480,7 @@ Use these gates before expanding Docker Agent/cagent scope.
 
 ### Continue
 
-Continue migration when:
+Continue contract evaluation when:
 
 - dry-run output validates the current service contracts or explicitly marked
   target runtime artifacts;
@@ -468,6 +488,10 @@ Continue migration when:
 - Docker Agent/cagent reduces orchestration, packaging, observability, or
   runtime-permission complexity;
 - rollback remains simpler than the migration path.
+
+This decision does not authorize cutover. Cutover additionally requires
+observed authoritative evidence, live candidate evidence, semantic readiness,
+and the operational gates below.
 
 ### Narrow
 
@@ -497,6 +521,11 @@ Before any Docker Agent/cagent cutover:
 - dry-run output validates against the contract pack;
 - shadow runs do not mutate authoritative state;
 - parity reports include evidence coverage and validation differences;
+- authoritative and candidate runs share the same canonical input hash;
+- semantic artifacts are observed rather than projected, with accepted quality
+  thresholds for applicability, evidence, citations, unsupported claims, and
+  validation decisions;
+- service identity, authorization, and tenant isolation are enforced;
 - runtime permissions are explicit and reviewed;
 - errors are observable through correlation ids and diagnostics;
 - rollback instructions exist and have been tested or reviewed.

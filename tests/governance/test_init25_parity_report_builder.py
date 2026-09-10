@@ -89,6 +89,15 @@ def test_init25_parity_report_builder_recommends_continue_for_matching_contracts
     validate(report)
     assert report["contract_compatible"] is True
     assert report["recommendation"] == "continue"
+    assert report["assessment"] == {
+        "contract_recommendation": "continue",
+        "semantic_readiness": "not_assessed",
+        "cutover_readiness": "not_ready",
+        "evidence_basis": {
+            "authoritative": "unverified",
+            "candidate": "unverified",
+        },
+    }
     assert report["validation_difference"]["changed"] is False
     assert report["observability"]["has_runtime_invocation"] is True
     assert report["observability"]["has_logs_ref"] is True
