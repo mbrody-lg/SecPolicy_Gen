@@ -77,7 +77,58 @@ def test_init25_parity_artifact_rejects_contract_success_with_runtime_errors():
     report = _valid_report()
     report["runtime_errors"] = [{"error_code": "candidate_failed"}]
 
-    with pytest.raises(SystemExit, match="contract-compatible reports must not contain runtime_errors"):
+    with pytest.raises(SystemExit, match="contract_compatible is inconsistent"):
+        validate(report)
+
+
+def test_init25_parity_artifact_rejects_continue_with_validation_drift():
+    report = _valid_report()
+    report["validation_difference"]["candidate_status"] = "review"
+    report["validation_difference"]["changed"] = True
+
+    with pytest.raises(SystemExit, match="continue requires unchanged validation status"):
+        validate(report)
+
+
+def test_init25_parity_artifact_rejects_continue_with_security_findings():
+    report = _valid_report()
+    report["security_findings"] = [{"finding_code": "unsafe_permission"}]
+
+    with pytest.raises(SystemExit, match="continue requires no security findings"):
+        validate(report)
+
+
+def test_init25_parity_artifact_rejects_continue_with_missing_coverage_shape():
+    report = _valid_report()
+    report["evidence_coverage"] = {}
+
+    with pytest.raises(SystemExit, match="required_families must be a list of strings"):
+        validate(report)
+
+
+def test_init25_parity_artifact_rejects_continue_with_missing_validation_shape():
+    report = _valid_report()
+    report["validation_difference"] = {}
+
+    with pytest.raises(SystemExit, match="authoritative_status must be a string"):
+        validate(report)
+
+
+def test_init25_parity_artifact_rejects_inconsistent_derived_coverage():
+    report = _valid_report()
+    report["evidence_coverage"]["covered_families"] = ["legal_norms"]
+
+    with pytest.raises(SystemExit, match="missing_families is inconsistent"):
+        validate(report)
+
+
+def test_init25_parity_artifact_rejects_narrow_when_runtime_error_requires_pause():
+    report = _valid_report()
+    report["contract_compatible"] = False
+    report["runtime_errors"] = [{"error_code": "candidate_failed"}]
+    report["recommendation"] = "narrow"
+
+    with pytest.raises(SystemExit, match="recommendation must be pause"):
         validate(report)
 
 

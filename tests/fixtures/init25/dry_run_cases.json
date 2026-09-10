@@ -1,0 +1,84 @@
+{
+  "cases": [
+    {
+      "case_id": "healthcare-clinic-gdpr",
+      "expected_recommendation": "continue",
+      "authoritative_validation_status": "accepted",
+      "input": {
+        "country": "ES",
+        "region": "EU",
+        "sector": "healthcare",
+        "important_assets": ["clinical systems"],
+        "critical_assets": ["patient records"],
+        "methodology": "ISO 27001",
+        "specificity": "organization-specific",
+        "need": "access control policy",
+        "language": "en",
+        "refined_context": "A clinic protects patient records and clinical systems.",
+        "context_ready_for_policy": true,
+        "required_evidence_families": ["legal_norms", "sector_norms"],
+        "evidence": [
+          {"text": "Apply data protection controls.", "source_id": "gdpr-32", "collection": "gdpr", "family": "legal_norms"},
+          {"text": "Protect health information.", "source_id": "health-1", "collection": "healthcare", "family": "sector_norms"}
+        ],
+        "policy_text": "Access to patient information is restricted and reviewed.",
+        "structured_plan": ["scope", "access_control"],
+        "validation": {"status": "accepted", "reasons": [], "recommendations": []},
+        "generated_at": "2026-07-14T00:00:00Z"
+      }
+    },
+    {
+      "case_id": "iot-startup-device-security",
+      "expected_recommendation": "narrow",
+      "authoritative_validation_status": "accepted",
+      "input": {
+        "country": "ES",
+        "region": "EU",
+        "sector": "iot",
+        "important_assets": ["device fleet"],
+        "critical_assets": ["device credentials"],
+        "methodology": "NIST CSF",
+        "specificity": "organization-specific",
+        "need": "device security policy",
+        "language": "en",
+        "refined_context": "An IoT startup manages connected devices and a cloud control plane.",
+        "context_ready_for_policy": true,
+        "required_evidence_families": ["legal_norms", "sector_norms"],
+        "evidence": [
+          {"text": "Connected products require security controls.", "source_id": "cra-1", "collection": "cra", "family": "legal_norms"}
+        ],
+        "policy_text": "Each device receives unique credentials.",
+        "structured_plan": ["device_identity"],
+        "validation": {"status": "accepted", "reasons": [], "recommendations": []},
+        "generated_at": "2026-07-14T00:00:00Z"
+      }
+    },
+    {
+      "case_id": "legal-office-confidentiality",
+      "expected_recommendation": "pause",
+      "authoritative_validation_status": "accepted",
+      "input": {
+        "country": "ES",
+        "region": "EU",
+        "sector": "legal",
+        "important_assets": ["case files"],
+        "critical_assets": ["client communications"],
+        "methodology": "ISO 27001",
+        "specificity": "organization-specific",
+        "need": "confidentiality policy",
+        "language": "en",
+        "refined_context": "A legal office protects client files and privileged communications.",
+        "context_ready_for_policy": false,
+        "required_evidence_families": ["legal_norms", "sector_norms"],
+        "evidence": [
+          {"text": "Personal data requires protection.", "source_id": "gdpr-32", "collection": "gdpr", "family": "legal_norms"},
+          {"text": "Client confidentiality must be preserved.", "source_id": "legal-1", "collection": "legal", "family": "sector_norms"}
+        ],
+        "policy_text": "Client files are restricted to assigned staff.",
+        "structured_plan": ["confidentiality"],
+        "validation": {"status": "review", "reasons": ["Context is not approved."], "recommendations": ["Approve the context before generation."]},
+        "generated_at": "2026-07-14T00:00:00Z"
+      }
+    }
+  ]
+}
