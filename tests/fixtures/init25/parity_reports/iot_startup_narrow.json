@@ -1,0 +1,33 @@
+{
+  "case_id": "iot-startup-device-security",
+  "contract_compatible": false,
+  "artifact_differences": [
+    {
+      "artifact": "rag.retrieval_evidence",
+      "field": "collection",
+      "reason": "candidate_missing_sector_norms"
+    }
+  ],
+  "evidence_coverage": {
+    "required_families": ["legal_norms", "sector_norms", "security_frameworks"],
+    "covered_families": ["legal_norms", "security_frameworks"],
+    "missing_families": ["sector_norms"]
+  },
+  "validation_difference": {
+    "authoritative_status": "review",
+    "candidate_status": "review",
+    "changed": false
+  },
+  "runtime_errors": [],
+  "timing": {
+    "authoritative_ms": 1600,
+    "candidate_ms": 1780
+  },
+  "observability": {
+    "correlation_id": "init25-iot-startup-device-security",
+    "has_runtime_invocation": true,
+    "has_logs_ref": true
+  },
+  "security_findings": [],
+  "recommendation": "narrow"
+}

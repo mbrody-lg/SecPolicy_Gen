@@ -1,0 +1,27 @@
+{
+  "case_id": "healthcare-clinic-gdpr",
+  "contract_compatible": true,
+  "artifact_differences": [],
+  "evidence_coverage": {
+    "required_families": ["legal_norms", "sector_norms", "implementation_guides"],
+    "covered_families": ["legal_norms", "sector_norms", "implementation_guides"],
+    "missing_families": []
+  },
+  "validation_difference": {
+    "authoritative_status": "accepted",
+    "candidate_status": "accepted",
+    "changed": false
+  },
+  "runtime_errors": [],
+  "timing": {
+    "authoritative_ms": 1400,
+    "candidate_ms": 1510
+  },
+  "observability": {
+    "correlation_id": "init25-healthcare-clinic-gdpr",
+    "has_runtime_invocation": true,
+    "has_logs_ref": true
+  },
+  "security_findings": [],
+  "recommendation": "continue"
+}
