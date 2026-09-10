@@ -4,17 +4,12 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import suppress
-from dataclasses import dataclass
 import json
 import math
 import os
 from pathlib import Path
 import re
-import selectors
-import subprocess
 import sys
-import tempfile
 import time
 from typing import Any, Callable
 
@@ -24,7 +19,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.build_init25_parity_report import build_report
+from scripts.init25_runtime_adapter import DockerAgentRuntimeAdapter
 from scripts.run_init25_contract_dry_run import run_case
+from scripts.validate_init25_parity_artifact import validate_no_sensitive_fields
 
 
 CASE_FILE = ROOT / "tests" / "fixtures" / "init25" / "dry_run_cases.json"
@@ -49,15 +46,11 @@ OWNED_ARTIFACTS = {
 }
 MAX_OUTPUT_BYTES = 1024 * 1024
 DEFAULT_TIMEOUT_SECONDS = 120.0
+CONFIG_FILE = ROOT / "agents" / "secpolicy_contract_dry_run.yaml"
+PERMISSION_PROFILE = ROOT / "agents" / "init25_shadow_permission_profile.json"
 _FIELD = re.compile(r"^[a-z][a-z0-9_.]*$")
 _CODE = re.compile(r"^[a-z][a-z0-9_]*$")
-
-
-@dataclass(frozen=True)
-class ExecutionResult:
-    stdout: str = ""
-    returncode: int = 0
-    error_code: str | None = None
+_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
 Executor = Callable[..., Any]
@@ -78,107 +71,20 @@ def _failure_code(text: str) -> str:
     return "runtime_failed"
 
 
-def execute_subprocess(
-    command: list[str],
-    *,
-    input: str,
-    env: dict[str, str],
-    timeout: float,
-    max_output_bytes: int,
-) -> ExecutionResult:
-    """Execute a command while bounding captured stdout and discarding stderr."""
-    process = subprocess.Popen(
-        command,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=env,
-    )
-    assert process.stdin and process.stdout and process.stderr
-
-    streams = selectors.DefaultSelector()
-    input_bytes = input.encode("utf-8")
-    input_offset = 0
-    if input_bytes:
-        os.set_blocking(process.stdin.fileno(), False)
-        streams.register(process.stdin, selectors.EVENT_WRITE, "stdin")
-    else:
-        process.stdin.close()
-    streams.register(process.stdout, selectors.EVENT_READ, "stdout")
-    streams.register(process.stderr, selectors.EVENT_READ, "stderr")
-    stdout = bytearray()
-    stderr_hint = bytearray()
-    deadline = time.monotonic() + timeout
-    error_code: str | None = None
-
-    while streams.get_map():
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            error_code = "runtime_timeout"
-            process.kill()
-            break
-        for key, _ in streams.select(min(remaining, 0.1)):
-            if key.data == "stdin":
-                try:
-                    input_offset += os.write(
-                        key.fileobj.fileno(),
-                        input_bytes[input_offset : input_offset + 65536],
-                    )
-                except BlockingIOError:
-                    continue
-                except BrokenPipeError:
-                    input_offset = len(input_bytes)
-                if input_offset == len(input_bytes):
-                    streams.unregister(key.fileobj)
-                    key.fileobj.close()
-                continue
-            chunk = os.read(key.fileobj.fileno(), 65536)
-            if not chunk:
-                streams.unregister(key.fileobj)
-                continue
-            if key.data == "stdout":
-                if len(stdout) + len(chunk) > max_output_bytes:
-                    error_code = "runtime_failed"
-                    process.kill()
-                    break
-                stdout.extend(chunk)
-            elif len(stderr_hint) < 65536:
-                stderr_hint.extend(chunk[: 65536 - len(stderr_hint)])
-        if error_code:
-            break
-
-    streams.close()
-    with suppress(OSError):
-        process.stdin.close()
-    if error_code:
-        process.wait()
-        return ExecutionResult(returncode=process.returncode or 1, error_code=error_code)
-
-    returncode = process.wait()
-    decoded = stdout.decode("utf-8", errors="replace")
-    if returncode:
-        hint = stderr_hint.decode("utf-8", errors="replace") + decoded
-        return ExecutionResult(returncode=returncode, error_code=_failure_code(hint))
-    return ExecutionResult(stdout=decoded)
-
-
-def detect_runtime_version() -> str:
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if key in {"PATH", "HOME", "DOCKER_HOST", "DOCKER_CONTEXT"}
-    }
-    result = execute_subprocess(
-        ["docker", "agent", "version"],
-        input="",
-        env=env,
-        timeout=10.0,
-        max_output_bytes=4096,
-    )
-    match = re.search(r"\bversion\s+(v?\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)\b", result.stdout)
-    if result.error_code or not match:
-        raise RuntimeError("runtime_version_unavailable")
-    return match.group(1)
+def _command(agent: str) -> list[str]:
+    return [
+        "docker",
+        "agent",
+        "run",
+        str(CONFIG_FILE),
+        "--agent",
+        agent,
+        "--exec",
+        "--json",
+        "--sandbox",
+        "--no-kit",
+        "-",
+    ]
 
 
 def parse_stage_output(stdout: str, expected_agent: str) -> dict[str, Any]:
@@ -290,26 +196,6 @@ def _validate_stage(
     return bounded, None
 
 
-def _environment(root: Path) -> dict[str, str]:
-    allowed = {"PATH", "DOCKER_HOST", "DOCKER_CONTEXT", "SSL_CERT_FILE", "SSL_CERT_DIR", "OPENAI_API_KEY"}
-    env = {key: value for key, value in os.environ.items() if key in allowed}
-    env.update({
-        "HOME": str(root / "home"),
-        "XDG_CACHE_HOME": str(root / "cache"),
-        "XDG_CONFIG_HOME": str(root / "config"),
-        "XDG_DATA_HOME": str(root / "data"),
-        "TELEMETRY_ENABLED": "false",
-    })
-    return env
-
-
-def _command(agent: str) -> list[str]:
-    return [
-        "docker", "agent", "run", str(ROOT / "agents" / "secpolicy_contract_dry_run.yaml"),
-        "--agent", agent, "--exec", "--json", "-",
-    ]
-
-
 def _simulated_stage(agent: str, case: dict[str, Any], authoritative: dict[str, Any]) -> dict[str, Any]:
     artifacts = authoritative["artifacts"]
     stage = {
@@ -356,13 +242,114 @@ def _coerce_execution(result: Any, expected_agent: str) -> tuple[dict[str, Any] 
         return None, str(exc)
 
 
+def _deterministic_authoritative(case: dict[str, Any]) -> dict[str, Any]:
+    baseline_started = time.monotonic()
+    _, authoritative, _ = run_case(case)
+    authoritative = dict(authoritative)
+    authoritative["baseline_type"] = "deterministic_contract_baseline"
+    authoritative["live_service_parity"] = False
+    authoritative["required_evidence_families"] = list(
+        case["input"]["required_evidence_families"]
+    )
+    authoritative["duration_ms"] = round(
+        (time.monotonic() - baseline_started) * 1000
+    )
+    return authoritative
+
+
+def _validate_authoritative_summary(
+    authoritative: dict[str, Any], case_id: str
+) -> dict[str, Any]:
+    validate_no_sensitive_fields(authoritative)
+    allowed = {
+        "schema_version",
+        "case_id",
+        "baseline_type",
+        "live_service_parity",
+        "input_alignment",
+        "artifact_evidence",
+        "validation_status",
+        "required_evidence_families",
+        "correlation_id",
+        "artifacts",
+        "duration_ms",
+        "source",
+        "runtime_errors",
+    }
+    if set(authoritative) != allowed:
+        raise ValueError("authoritative_fields_invalid")
+    if authoritative.get("case_id") != case_id:
+        raise ValueError("authoritative_case_id_mismatch")
+    if authoritative.get("baseline_type") != "live_authoritative_service_capture":
+        raise ValueError("authoritative_baseline_invalid")
+    runtime_errors = _bounded_objects(
+        authoritative.get("runtime_errors"), code_key="error_code"
+    )
+    if runtime_errors is None:
+        raise ValueError("authoritative_runtime_errors_invalid")
+    if authoritative.get("live_service_parity") is not False:
+        raise ValueError("authoritative_parity_claim_invalid")
+    if (
+        authoritative.get("schema_version") != "1.0"
+        or authoritative.get("input_alignment") != "unverified"
+        or authoritative.get("artifact_evidence")
+        != "contract_projection_not_observed"
+        or authoritative.get("validation_status")
+        not in {"accepted", "review", "rejected"}
+        or not isinstance(authoritative.get("duration_ms"), int)
+        or authoritative["duration_ms"] < 0
+    ):
+        raise ValueError("authoritative_contract_invalid")
+    correlation_id = authoritative.get("correlation_id")
+    if not isinstance(correlation_id, str) or not _IDENTIFIER.fullmatch(correlation_id):
+        raise ValueError("authoritative_correlation_invalid")
+    families = authoritative.get("required_evidence_families")
+    if (
+        not isinstance(families, list)
+        or any(not isinstance(item, str) or not _FIELD.fullmatch(item) for item in families)
+        or len(families) != len(set(families))
+    ):
+        raise ValueError("authoritative_evidence_invalid")
+    artifacts = authoritative.get("artifacts")
+    expected_artifacts = set().union(*OWNED_ARTIFACTS.values())
+    if not isinstance(artifacts, dict) or set(artifacts) != expected_artifacts:
+        raise ValueError("authoritative_artifacts_invalid")
+    for fields in artifacts.values():
+        if (
+            not isinstance(fields, list)
+            or any(not isinstance(field, str) or not _FIELD.fullmatch(field) for field in fields)
+            or len(fields) != len(set(fields))
+        ):
+            raise ValueError("authoritative_artifacts_invalid")
+    source = authoritative.get("source")
+    if (
+        not isinstance(source, dict)
+        or set(source) != {"smoke_run_id", "context_id", "mode"}
+        or source.get("mode") != "runtime"
+        or any(
+            not isinstance(source.get(key), str)
+            or not _IDENTIFIER.fullmatch(source[key])
+            for key in ("smoke_run_id", "context_id")
+        )
+    ):
+        raise ValueError("authoritative_source_invalid")
+    return {
+        **authoritative,
+        "required_evidence_families": list(families),
+        "artifacts": {name: list(fields) for name, fields in artifacts.items()},
+        "source": dict(source),
+        "runtime_errors": runtime_errors,
+    }
+
+
 def run_shadow_mode(
     case: dict[str, Any],
     *,
     mode: str = "live",
     executor: Executor | None = None,
-    version_detector: Callable[[], str] = detect_runtime_version,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    authoritative_summary: dict[str, Any] | None = None,
+    output_dir: Path | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     if mode not in {"live", "simulated"}:
         raise ValueError("mode must be live or simulated")
@@ -371,15 +358,11 @@ def run_shadow_mode(
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("timeout must be finite and positive")
 
-    baseline_started = time.monotonic()
-    _, authoritative, _ = run_case(case)
-    authoritative = dict(authoritative)
-    authoritative["baseline_type"] = "deterministic_contract_baseline"
-    authoritative["live_service_parity"] = False
-    authoritative["required_evidence_families"] = list(case["input"]["required_evidence_families"])
-    authoritative["duration_ms"] = round((time.monotonic() - baseline_started) * 1000)
-
     case_id = case["case_id"]
+    if mode == "live" and authoritative_summary is not None:
+        authoritative = _validate_authoritative_summary(authoritative_summary, case_id)
+    else:
+        authoritative = _deterministic_authoritative(case)
     correlation_id = authoritative["correlation_id"]
     candidate: dict[str, Any] = {
         "validation_status": "not_run",
@@ -392,89 +375,128 @@ def run_shadow_mode(
         "provider_invoked": False,
     }
     started = time.monotonic()
-    runtime_ready = mode != "live"
+    deadline = started + timeout
+    if mode == "live" and authoritative_summary is None:
+        candidate["runtime_errors"].append(
+            _runtime_error("authoritative_capture_missing", "authoritative_capture")
+        )
     if mode == "live":
-        try:
-            runtime_version = version_detector()
-            runtime_ready = True
-        except Exception:
-            runtime_version = "unknown"
-            candidate["runtime_errors"].append(_runtime_error("runtime_version_unavailable", "shadow_runner"))
-        candidate["runtime_invocation"] = {
-            "mode": "shadow",
-            "runtime": "docker-agent",
-            "runtime_version": runtime_version,
-        }
+        candidate["runtime_errors"].extend(authoritative.get("runtime_errors", []))
+        candidate["runtime_invocations"] = []
+        candidate["verified_logs_ref_count"] = 0
 
     credential_available = bool(os.environ.get("OPENAI_API_KEY", "").strip())
     if mode == "live" and not credential_available:
         candidate["runtime_errors"].append(_runtime_error("credential_missing", "shadow_runner"))
 
-    with tempfile.TemporaryDirectory(prefix="init25-shadow-") as temp_dir:
-        temp_root = Path(temp_dir)
-        for directory in ("home", "cache", "config", "data"):
-            (temp_root / directory).mkdir()
-        env = _environment(temp_root)
-        previous_stages: list[dict[str, Any]] = []
+    adapter = None
+    if mode == "live" and credential_available:
+        if output_dir is None:
+            candidate["runtime_errors"].append(
+                _runtime_error("runtime_output_dir_missing", "shadow_runner")
+            )
+        else:
+            adapter = DockerAgentRuntimeAdapter(
+                CONFIG_FILE,
+                PERMISSION_PROFILE,
+                output_dir,
+            )
+    previous_stages: list[dict[str, Any]] = []
 
-        for agent in LEAF_AGENTS:
-            if mode == "live" and (not credential_available or not runtime_ready):
-                break
-            if mode == "simulated" and executor is None:
-                raw_stage: Any = _simulated_stage(agent, case, authoritative)
+    for agent in LEAF_AGENTS:
+        if mode == "live" and adapter is None:
+            break
+        if mode == "simulated" and executor is None:
+            raw_stage: Any = _simulated_stage(agent, case, authoritative)
+        else:
+            prompt = json.dumps({
+                "case_id": case_id,
+                "correlation_id": correlation_id,
+                "context_ready_for_policy": case["input"].get("context_ready_for_policy") is True,
+                "expected_artifact_names": sorted(OWNED_ARTIFACTS[agent]),
+                "required_evidence_families": authoritative["required_evidence_families"],
+                "previous_stages": previous_stages,
+            }, separators=(",", ":"))
+            if mode == "live":
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    candidate["runtime_errors"].append(
+                        _runtime_error("runtime_timeout", agent)
+                    )
+                    break
+                assert adapter is not None
+                result = adapter.invoke(
+                    agent=agent,
+                    prompt=prompt,
+                    correlation_id=correlation_id,
+                    input_artifact_ids=[f"case:{case_id}", *sorted(candidate["artifacts"])],
+                    expected_output_artifact_ids=sorted(OWNED_ARTIFACTS[agent]),
+                    timeout=remaining,
+                )
+                candidate["runtime_invocations"].append(result.runtime_invocation)
+                if adapter.verify_logs_ref(result.runtime_invocation["logs_ref"]):
+                    candidate["verified_logs_ref_count"] += 1
+                else:
+                    candidate["runtime_errors"].append(
+                        _runtime_error("runtime_logs_unverified", agent)
+                    )
+                    break
+                candidate["provider_attempted"] = result.error_code not in {
+                    "sbx_unavailable",
+                    "runtime_timeout",
+                    "runtime_version_unavailable",
+                }
+                raw_stage = result
             else:
-                prompt = json.dumps({
-                    "case_id": case_id,
-                    "correlation_id": correlation_id,
-                    "context_ready_for_policy": case["input"].get("context_ready_for_policy") is True,
-                    "expected_artifact_names": sorted(OWNED_ARTIFACTS[agent]),
-                    "required_evidence_families": authoritative["required_evidence_families"],
-                    "previous_stages": previous_stages,
-                }, separators=(",", ":"))
-                candidate["provider_attempted"] = mode == "live"
                 try:
-                    raw_stage = (executor or execute_subprocess)(
+                    raw_stage = executor(
                         _command(agent),
                         input=prompt,
-                        env=env,
+                        env={},
                         timeout=timeout,
                         max_output_bytes=MAX_OUTPUT_BYTES,
                     )
-                except (subprocess.TimeoutExpired, TimeoutError):
-                    raw_stage = ExecutionResult(error_code="runtime_timeout", returncode=1)
                 except Exception:
-                    raw_stage = ExecutionResult(error_code="runtime_failed", returncode=1)
+                    raw_stage = type(
+                        "SimulationFailure",
+                        (),
+                        {"stdout": "", "returncode": 1, "error_code": "simulation_failed"},
+                    )()
 
-            stage, execution_error = _coerce_execution(raw_stage, agent)
-            if execution_error:
-                candidate["runtime_errors"].append(_runtime_error(execution_error, agent))
-                break
-            assert stage is not None
-            bounded, validation_error = _validate_stage(agent, stage, case_id, correlation_id)
-            if validation_error:
-                candidate["runtime_errors"].append(_runtime_error(validation_error, agent))
-                break
-            assert bounded is not None
-            if mode == "live":
-                candidate["provider_invoked"] = True
-            candidate["artifacts"].update(bounded["artifacts"])
-            candidate["runtime_errors"].extend(bounded["runtime_errors"])
-            candidate["security_findings"].extend(bounded["security_findings"])
-            if agent == "regulatory_rag_agent":
-                candidate["covered_evidence_families"] = bounded["covered_evidence_families"]
-            if agent == "validator_agent":
-                candidate["validation_status"] = bounded["validation_status"]
-            previous_stages.append({"agent": agent, **bounded})
-            if bounded["status"] in {"blocked", "failed"}:
-                candidate["runtime_errors"].append(_runtime_error(f"stage_{bounded['status']}", agent))
-                break
+        stage, execution_error = _coerce_execution(raw_stage, agent)
+        if execution_error:
+            candidate["runtime_errors"].append(_runtime_error(execution_error, agent))
+            break
+        assert stage is not None
+        bounded, validation_error = _validate_stage(agent, stage, case_id, correlation_id)
+        if validation_error:
+            candidate["runtime_errors"].append(_runtime_error(validation_error, agent))
+            break
+        assert bounded is not None
+        if mode == "live":
+            candidate["provider_invoked"] = True
+            candidate["runtime_invocations"][-1]["output_artifact_ids"] = sorted(
+                bounded["artifacts"]
+            )
+        candidate["artifacts"].update(bounded["artifacts"])
+        candidate["runtime_errors"].extend(bounded["runtime_errors"])
+        candidate["security_findings"].extend(bounded["security_findings"])
+        if agent == "regulatory_rag_agent":
+            candidate["covered_evidence_families"] = bounded["covered_evidence_families"]
+        if agent == "validator_agent":
+            candidate["validation_status"] = bounded["validation_status"]
+        previous_stages.append({"agent": agent, **bounded})
+        if bounded["status"] in {"blocked", "failed"}:
+            candidate["runtime_errors"].append(
+                _runtime_error(f"stage_{bounded['status']}", agent)
+            )
+            break
 
     if mode == "simulated":
         candidate["simulation_only"] = True
         candidate["runtime_errors"].append(_runtime_error("simulation_only", "shadow_runner"))
         candidate["provider_attempted"] = False
         candidate["provider_invoked"] = False
-        candidate.pop("runtime_invocation", None)
     candidate["duration_ms"] = round((time.monotonic() - started) * 1000)
     report = build_report(case_id, authoritative, candidate)
     return authoritative, candidate, report
@@ -494,14 +516,25 @@ def main() -> None:
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--mode", choices=("live", "simulated"), default="live")
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
+    parser.add_argument("--authoritative-summary", type=Path)
     args = parser.parse_args()
+
+    authoritative_summary = None
+    if args.authoritative_summary:
+        authoritative_summary = json.loads(
+            args.authoritative_summary.read_text(encoding="utf-8")
+        )
+        if not isinstance(authoritative_summary, dict):
+            raise SystemExit("INIT-25 shadow error: authoritative summary must be an object")
+    args.output_dir.mkdir(parents=True, exist_ok=True)
 
     authoritative, candidate, report = run_shadow_mode(
         load_case(args.case_file, args.case_id),
         mode=args.mode,
         timeout=args.timeout,
+        authoritative_summary=authoritative_summary,
+        output_dir=args.output_dir,
     )
-    args.output_dir.mkdir(parents=True, exist_ok=True)
     _write_json(args.output_dir / "authoritative-summary.json", authoritative)
     _write_json(args.output_dir / "candidate-summary.json", candidate)
     _write_json(args.output_dir / "parity-report.json", report)

@@ -1,0 +1,50 @@
+{
+  "profile_id": "init25.shadow.sandbox.v1",
+  "version": 1,
+  "mode": "shadow",
+  "authoritative": false,
+  "sandbox": {
+    "required": true,
+    "backend": "sbx",
+    "no_kit": true
+  },
+  "tools": {
+    "allow": [],
+    "deny": [
+      "filesystem",
+      "network",
+      "service",
+      "shell"
+    ]
+  },
+  "egress": {
+    "policy": "provider_only_via_sandbox"
+  },
+  "environment": {
+    "allow": [
+      "DOCKER_CONTEXT",
+      "DOCKER_HOST",
+      "HOME",
+      "OPENAI_API_KEY",
+      "PATH",
+      "SSL_CERT_DIR",
+      "SSL_CERT_FILE",
+      "TELEMETRY_ENABLED"
+    ]
+  },
+  "deadline": {
+    "required": true,
+    "scope": "global"
+  },
+  "rollback": {
+    "mode": "automatic",
+    "actions": [
+      "terminate_process_group",
+      "preserve_bounded_evidence"
+    ]
+  },
+  "integrity": {
+    "algorithm": "sha256",
+    "value": "3981a8a60a721be6f394daa73d13c17c29df30ac5255d7b644ccb079d71903c7"
+  }
+}
