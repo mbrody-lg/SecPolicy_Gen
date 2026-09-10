@@ -22,11 +22,12 @@ Create a `.env` file in the `infrastructure/` directory:
 # Required for all agents
 OPENAI_API_KEY=fake-local-openai-key
 FLASK_SECRET_KEY=fake-local-flask-secret
-OIDC_ISSUER_URL=https://identity.example.com/tenant/secpolicygen
+OIDC_ISSUER_URL=http://identity.test:8080/realms/secpolicygen
 OIDC_CLIENT_ID=secpolicygen-context-agent
 OIDC_CLIENT_SECRET=fake-local-oidc-client-secret
 OIDC_REDIRECT_URI=http://localhost:5003/auth/callback
 OIDC_SCOPES=openid profile email
+OIDC_ALLOW_INSECURE_HTTP=true
 FLASK_ENV=development
 FLASK_RUN_DEBUG=0
 DEBUG=false
@@ -50,7 +51,13 @@ From the project root directory:
 make up
 ```
 
-This starts:
+To use the optional local identity provider instead of an external OIDC issuer:
+
+```bash
+make local-oidc-up
+```
+
+The base stack starts:
 - **MongoDB** - Data persistence for all agents
 - **Chroma** - Vector database for regulatory documents
 - **Context Agent** - OIDC-authenticated Web/API service at http://localhost:5003
@@ -59,6 +66,10 @@ This starts:
 - **Grafana** - Local observability UI at http://localhost:3000
 - **Prometheus** - Metrics store at http://localhost:9090
 - **Loki/Promtail** - Local Docker log aggregation at http://localhost:3100
+
+`make local-oidc-up` additionally starts the disposable identity provider on
+localhost ports `8080` and `8443` plus the Context Agent HTTPS edge on `5443`.
+Its local-only login is `developer` / `fake-local-developer-password`.
 
 ### 4. Stop Services
 
@@ -99,6 +110,8 @@ All agents run on separate ports and use internal Docker DNS:
 | Command | Purpose |
 |---------|---------|
 | `make up` | Start all services |
+| `make local-oidc-up` | Start the stack with the optional local OIDC provider |
+| `make local-oidc-smoke` | Prove local OIDC issuer login over HTTP and HTTPS |
 | `make down` | Stop all services |
 | `make clean` | Stop and remove all data |
 | `make rebuild` | Force rebuild all containers |

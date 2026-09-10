@@ -90,14 +90,20 @@ def _validate_http_url(name: str, value: str) -> str:
     return value
 
 
-def _validate_oidc_url(name: str, value: str, *, issuer: bool = False) -> str:
+def _validate_oidc_url(
+    name: str,
+    value: str,
+    *,
+    issuer: bool = False,
+    allow_insecure_http: bool = False,
+) -> str:
     """Require HTTPS for OIDC, with HTTP limited to loopback development hosts."""
     parsed = urlparse(value)
     hostname = (parsed.hostname or "").lower()
     local_http = hostname in {"localhost", "127.0.0.1", "::1"} or hostname.endswith(".localhost")
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError(f"{name} must be an http(s) URL.")
-    if parsed.scheme != "https" and not local_http:
+    if parsed.scheme != "https" and not local_http and not allow_insecure_http:
         raise ValueError(f"{name} must use HTTPS outside localhost.")
     if parsed.fragment or (issuer and parsed.query):
         raise ValueError(f"{name} must not include a query or fragment.")
@@ -158,6 +164,13 @@ def create_app():
     )
 
     app.config["SECRET_KEY"] = secret_key
+    allow_insecure_oidc_http = _get_env_bool("OIDC_ALLOW_INSECURE_HTTP", default=False)
+    if (
+        allow_insecure_oidc_http
+        and not is_testing
+        and os.getenv("FLASK_ENV", "production").strip().lower() != "development"
+    ):
+        raise ValueError("OIDC_ALLOW_INSECURE_HTTP is limited to development.")
     app.config["OIDC_ISSUER_URL"] = _validate_oidc_url(
         "OIDC_ISSUER_URL",
         _get_required_env(
@@ -166,7 +179,9 @@ def create_app():
             test_default="https://identity.test/tenant/secpolicygen",
         ),
         issuer=True,
+        allow_insecure_http=allow_insecure_oidc_http,
     )
+    app.config["OIDC_ALLOW_INSECURE_HTTP"] = allow_insecure_oidc_http
     app.config["OIDC_CLIENT_ID"] = _get_required_env(
         "OIDC_CLIENT_ID",
         is_testing=is_testing,
@@ -186,6 +201,10 @@ def create_app():
         ),
     )
     app.config["OIDC_SCOPES"] = _get_oidc_scopes()
+    oidc_ca_bundle = os.getenv("OIDC_CA_BUNDLE", "").strip()
+    if oidc_ca_bundle and not os.path.isfile(oidc_ca_bundle):
+        raise ValueError("OIDC_CA_BUNDLE must reference a readable CA bundle.")
+    app.config["OIDC_CA_BUNDLE"] = oidc_ca_bundle or None
     app.config["POLICY_CALLBACK_TOKEN"] = _get_required_env(
         "POLICY_CALLBACK_TOKEN",
         is_testing=is_testing,
@@ -238,7 +257,6 @@ def create_app():
     if trusted_hosts is not None:
         app.config["TRUSTED_HOSTS"] = trusted_hosts
     mongo.init_app(app)
-    csrf.init_app(app)
 
 
     @app.context_processor
@@ -293,6 +311,8 @@ def create_app():
         from app.tenant_scope import authorize_tenant_resource
 
         return authorize_tenant_resource()
+
+    csrf.init_app(app)
 
     @app.after_request
     def apply_security_headers(response):

@@ -273,3 +273,15 @@ def test_oidc_client_uses_discovery_pkce_and_openid_scope(app):
     )
     assert identity_module.oauth.oidc.client_kwargs["code_challenge_method"] == "S256"
     assert "openid" in identity_module.oauth.oidc.client_kwargs["scope"].split()
+
+
+def test_oidc_client_can_use_a_provider_specific_ca_bundle(app, tmp_path, monkeypatch):
+    ca_bundle = tmp_path / "provider-ca.crt"
+    ca_bundle.write_text("test-ca", encoding="utf-8")
+    app.config["OIDC_CA_BUNDLE"] = str(ca_bundle)
+    registered = {}
+    monkeypatch.setattr(identity_module.oauth, "register", lambda **kwargs: registered.update(kwargs))
+
+    identity_module.init_identity(app)
+
+    assert registered["client_kwargs"]["verify"] == str(ca_bundle)

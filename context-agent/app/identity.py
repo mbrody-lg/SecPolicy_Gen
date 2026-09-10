@@ -27,6 +27,12 @@ PUBLIC_ENDPOINTS = frozenset(
 
 def init_identity(app) -> None:
     """Register the configured OIDC provider without provider-specific code."""
+    client_kwargs = {
+        "scope": app.config["OIDC_SCOPES"],
+        "code_challenge_method": "S256",
+    }
+    if app.config["OIDC_CA_BUNDLE"]:
+        client_kwargs["verify"] = app.config["OIDC_CA_BUNDLE"]
     oauth.init_app(app)
     oauth.register(
         name="oidc",
@@ -35,10 +41,7 @@ def init_identity(app) -> None:
         server_metadata_url=(
             f"{app.config['OIDC_ISSUER_URL'].rstrip('/')}/.well-known/openid-configuration"
         ),
-        client_kwargs={
-            "scope": app.config["OIDC_SCOPES"],
-            "code_challenge_method": "S256",
-        },
+        client_kwargs=client_kwargs,
     )
 
 

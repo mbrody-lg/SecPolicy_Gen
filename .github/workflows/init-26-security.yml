@@ -1,0 +1,28 @@
+name: INIT-26 identity security gate
+
+on:
+  pull_request:
+    paths:
+      - "context-agent/**"
+      - "infrastructure/**"
+      - "scripts/run_local_oidc_interoperability.sh"
+      - "scripts/generate_local_oidc_tls.sh"
+      - "tests/browser/**"
+      - "tests/governance/**"
+      - "Makefile"
+      - ".github/workflows/init-26-security.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  identity-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare disposable local configuration
+        run: cp infrastructure/.env.example infrastructure/.env
+      - name: Run OIDC interoperability and reverse PoC gate
+        run: make init-26-security-gate

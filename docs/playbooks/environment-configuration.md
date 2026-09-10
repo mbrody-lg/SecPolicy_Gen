@@ -45,7 +45,14 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | `OIDC_CLIENT_SECRET` | `secret`, `required` | Required outside `TESTING`; fake local only in examples | Confidential OIDC client authentication | Never expose through logs or responses |
 | `OIDC_REDIRECT_URI` | `required` | Required outside `TESTING` | Exact OIDC callback URI | HTTPS outside localhost; register exact value at the provider |
 | `OIDC_SCOPES` | `runtime knob` | `openid profile email` | Requested identity claims | Must contain `openid` |
+| `OIDC_CA_BUNDLE` | `optional path` | Platform trust store | Additional CA bundle used only by the OIDC client | Use only for private/local issuers; never replace trust globally |
+| `OIDC_ALLOW_INSECURE_HTTP` | `local fixture` | `false` | Permit a non-loopback HTTP issuer | Enable only in isolated local Docker development; production must remain HTTPS |
+| `CONTEXT_CONFIG_PATH` | `runtime path` | `/context-agent/app/config/context_agent.yaml` | Context Agent YAML selected by Compose | Select before process startup |
+| `POLICY_CONFIG_PATH` | `runtime path` | `/policy-agent/app/config/policy_agent.yaml` | Policy Agent YAML selected by Compose | Select before process startup |
+| `VALIDATOR_CONFIG_PATH` | `runtime path` | `/validator-agent/app/config/validator_agent.yaml` | Validator Agent YAML selected by Compose | Select before process startup |
 | `POLICY_CALLBACK_TOKEN` | `secret`, `required` | Required outside `TESTING` | Policy Agent workload authentication for the Context Agent callback | Send only as `Authorization: Bearer`; rotate independently from browser/OIDC secrets |
+| `KEYCLOAK_ADMIN_USER` | `local fixture` | `admin` | Bootstrap user for the optional Docker OIDC fixture | Local development only; production identity remains externally managed |
+| `KEYCLOAK_ADMIN_PASSWORD` | `secret`, `local fixture` | Fake local value in examples | Bootstrap password for the optional Docker OIDC fixture | Never reuse outside the disposable local fixture |
 | `CONTEXT_IMPORT_ORGANIZATION_ID` | `operation input` | Required by fixture import | Organization owning imported contexts | Must reference an active, locally provisioned organization |
 | `TESTING` | `safe default` | Defaults to `false` | App factory/tests | Parse as explicit truthy flag |
 | `DEBUG` | `runtime knob` | Defaults to `false` | App factory/log behavior | Example defaults to `false`; dev override only |
