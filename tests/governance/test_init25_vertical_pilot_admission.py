@@ -1,13 +1,15 @@
 import hashlib
 import json
 from pathlib import Path
+import sys
 
 import yaml
 
-from scripts.assess_init25_vertical_pilot import assess
-
-
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts.assess_init25_vertical_pilot import assess
 
 
 def test_current_vertical_pilot_is_blocked_without_execution():
