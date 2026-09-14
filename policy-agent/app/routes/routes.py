@@ -5,6 +5,7 @@ import logging
 from flask import Blueprint, jsonify, request
 from markupsafe import escape
 
+from app.candidate_contract import authorize_candidate_request
 from app.metrics import metrics_response
 from app.observability import log_event
 from app.services.logic import (
@@ -124,6 +125,31 @@ def generate_policy():
         status_code = pipeline_result.pop("status_code")
         return jsonify(pipeline_result), status_code
     return jsonify(pipeline_result["policy"]), 200
+
+
+@routes.route("/candidate/generate-policy", methods=["POST"])
+def generate_candidate_policy():
+    """Generate a real policy candidate without writing authoritative state."""
+    metadata, contract_error = authorize_candidate_request(
+        audience="policy-agent",
+        scope="policy:candidate:generate",
+    )
+    if contract_error:
+        payload, status_code = contract_error
+        return jsonify(payload), status_code
+
+    pipeline_result = run_generation_pipeline(request.get_json(silent=True), persist=False)
+    if not pipeline_result["success"]:
+        status_code = pipeline_result.pop("status_code")
+        return jsonify(pipeline_result), status_code
+
+    policy = pipeline_result["policy"]
+    policy["candidate"] = {
+        "authoritative": False,
+        "tenant_id": metadata["tenant_id"],
+        "idempotency_key": metadata["idempotency_key"],
+    }
+    return jsonify(policy), 200
 
 
 @routes.route("/generate_policy/<context_id>/update", methods=["POST"])
