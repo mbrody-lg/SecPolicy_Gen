@@ -45,6 +45,8 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | `OIDC_CLIENT_SECRET` | `secret`, `required` | Required outside `TESTING`; fake local only in examples | Confidential OIDC client authentication | Never expose through logs or responses |
 | `OIDC_REDIRECT_URI` | `required` | Required outside `TESTING` | Exact OIDC callback URI | HTTPS outside localhost; register exact value at the provider |
 | `OIDC_SCOPES` | `runtime knob` | `openid profile email` | Requested identity claims | Must contain `openid` |
+| `POLICY_CALLBACK_TOKEN` | `secret`, `required` | Required outside `TESTING` | Policy Agent workload authentication for the Context Agent callback | Send only as `Authorization: Bearer`; rotate independently from browser/OIDC secrets |
+| `SERVICE_AUTH_TOKEN` | `secret`, `required` | Required outside `TESTING` | Shared local service-to-service bearer token for internal agent requests | Send only as `Authorization: Bearer`; rotate independently from browser/OIDC secrets |
 | `CONTEXT_IMPORT_ORGANIZATION_ID` | `operation input` | Required by fixture import | Organization owning imported contexts | Must reference an active, locally provisioned organization |
 | `TESTING` | `safe default` | Defaults to `false` | App factory/tests | Parse as explicit truthy flag |
 | `DEBUG` | `runtime knob` | Defaults to `false` | App factory/log behavior | Example defaults to `false`; dev override only |
@@ -71,6 +73,7 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | Variable | Class | Default policy | Used by | Validation expectation |
 |----------|-------|----------------|---------|------------------------|
 | `FLASK_SECRET_KEY` | `secret`, `required` | Required outside `TESTING`; fake local only in examples | Flask session signing | App init fails safely when missing outside tests |
+| `SERVICE_AUTH_TOKEN` | `secret`, `required` | Required outside `TESTING` | Shared local service-to-service bearer token for internal agent requests | Send only as `Authorization: Bearer`; rotate independently from browser/OIDC secrets |
 | `TESTING` | `safe default` | Defaults to `false` | App factory/tests | Parse as explicit truthy flag |
 | `DEBUG` | `runtime knob` | Defaults to `false` | App factory/log behavior | Example defaults to `false`; dev override only |
 | `MONGO_URI` | `required` | Local Docker default may be documented | Flask-PyMongo | Missing/malformed handling should be deterministic |
@@ -96,6 +99,7 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | Variable | Class | Default policy | Used by | Validation expectation |
 |----------|-------|----------------|---------|------------------------|
 | `FLASK_SECRET_KEY` | `secret`, `required` | Required outside `TESTING`; fake local only in examples | Flask session signing | App init fails safely when missing outside tests |
+| `SERVICE_AUTH_TOKEN` | `secret`, `required` | Required outside `TESTING` | Shared local service-to-service bearer token for internal agent requests | Send only as `Authorization: Bearer`; rotate independently from browser/OIDC secrets |
 | `TESTING` | `safe default` | Defaults to `false` | App factory/tests | Parse as explicit truthy flag |
 | `DEBUG` | `runtime knob` | Defaults to `false` | App factory/log behavior | Example defaults to `false`; dev override only |
 | `MONGO_URI` | `required` | Local Docker default may be documented | Flask-PyMongo | Missing/malformed handling should be deterministic |
@@ -233,7 +237,8 @@ the service handles that variable correctly.
 
 - INIT-04 should consume this contract when deciding GitHub Actions variables,
   repository secrets, and informational versus required gates.
-- INIT-11 should define future service-auth secrets and trust model before any
-  new service-to-service credential is introduced.
+- INIT-11 defines the service-auth trust model through `POLICY_CALLBACK_TOKEN`
+  and `SERVICE_AUTH_TOKEN`; future service-to-service credentials should follow
+  the same secret-handling and redaction contract.
 - INIT-13 and INIT-15 remain responsible for retrieval behavior, indexing
   quality, and benchmark promotion. INIT-02 only governs the config surface.

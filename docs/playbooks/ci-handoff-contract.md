@@ -144,21 +144,17 @@ values.
 
 ## INIT-11 Service-Auth Boundary
 
-INIT-02 deliberately does not define service-to-service authentication. When
-INIT-11 starts, it should reuse the secret-handling rules from the environment
-contract but define its own mechanism and variables.
+INIT-11 defines the first service-to-service authentication boundary using
+bearer workload tokens managed under the environment contract:
 
-INIT-11 should decide:
-
-- the service identity model;
-- whether the first mechanism is a shared secret header, signed token, mTLS, or
-  another project-appropriate control;
-- how auth failures are represented in readiness, health, and smoke artifacts;
-- which new secrets belong in GitHub Actions and which are deployment-only;
-- how to rotate service-auth material without changing app code.
-
-Until INIT-11 lands, CI must not invent placeholder auth headers or mark
-service-auth checks as required.
+- `POLICY_CALLBACK_TOKEN` protects Policy Agent to Context Agent callback writes.
+- `SERVICE_AUTH_TOKEN` protects internal agent requests between Context Agent,
+  Policy Agent, and Validator Agent.
+- Service-auth failures are represented as `401` responses with a
+  `service_authentication_required` error code and a bearer challenge.
+- CI may provide service-auth secrets only through repository or environment
+  secret management; logs and artifacts must continue to redact raw values.
+- Token rotation must happen by changing secret values without changing app code.
 
 ## Non-Interactive Requirements
 

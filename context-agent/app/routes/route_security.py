@@ -244,8 +244,8 @@ ROUTE_SECURITY_CLASSIFICATIONS = (
         rule="/context/<context_id>/policy",
         method="POST",
         category=SERVICE_CALLBACK,
-        current_guard=BODY_CONTRACT_GUARD,
-        next_control="service_to_service_auth",
+        current_guard="workload_bearer_token_and_body_contract",
+        next_control="callback_producer_contract",
         rationale="Internal callback that persists validated policy payloads.",
     ),
     RouteSecurityClassification(
@@ -292,9 +292,9 @@ ROUTE_SECURITY_CLASSIFICATIONS = (
         rule="/diagnostics/<correlation_id>",
         method="GET",
         category=AUTHENTICATED_READ,
-        current_guard="authenticated_session",
-        next_control="diagnostics_permission_check",
-        rationale="Diagnostics payload is bounded but access control remains an INIT-11 follow-up.",
+        current_guard="authenticated_session_diagnostics_permission_and_tenant_scope",
+        next_control="none",
+        rationale="Returns bounded diagnostics only to principals with diagnostics:read in the active organization.",
     ),
 )
 

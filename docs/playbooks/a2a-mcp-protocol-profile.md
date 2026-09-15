@@ -121,8 +121,8 @@ Prompts and mutable tools are deferred until a concrete consumer requires them.
 
 ## Security Profile
 
-No remote A2A or MCP exposure is allowed before INIT-11 provides service
-identity and tenant binding.
+Remote A2A or MCP exposure remains disallowed unless service identity, tenant
+binding, and the controls below are all enforced for that surface.
 
 Required controls:
 

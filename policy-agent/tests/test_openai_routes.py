@@ -7,6 +7,7 @@ from flask import g
 from app.routes import routes as routes_module
 
 pytestmark = [pytest.mark.route]
+SERVICE_HEADERS = {"Authorization": "Bearer test-only-service-auth-token"}
 
 
 def test_health_route_returns_lightweight_service_status(client):
@@ -166,10 +167,17 @@ def test_rag_refresh_route_runs_controlled_refresh(client):
             202,
         ),
     ):
-        response = client.post("/rag/refresh")
+        response = client.post("/rag/refresh", headers=SERVICE_HEADERS)
 
     assert response.status_code == 202
     assert response.get_json()["job"] == {"id": "job-1", "status": "running"}
+
+
+def test_rag_refresh_route_requires_service_identity(client):
+    response = client.post("/rag/refresh")
+
+    assert response.status_code == 401
+    assert response.get_json()["error_code"] == "service_authentication_required"
 
 
 def test_rag_refresh_route_escapes_reflected_job_metadata(client):
@@ -185,7 +193,7 @@ def test_rag_refresh_route_escapes_reflected_job_metadata(client):
             202,
         ),
     ):
-        response = client.post("/rag/refresh")
+        response = client.post("/rag/refresh", headers=SERVICE_HEADERS)
 
     assert response.status_code == 202
     assert b"<script>alert(1)</script>" not in response.data
@@ -206,7 +214,7 @@ def test_rag_refresh_route_reports_disabled_runtime(client):
             403,
         ),
     ):
-        response = client.post("/rag/refresh")
+        response = client.post("/rag/refresh", headers=SERVICE_HEADERS)
 
     assert response.status_code == 403
     assert response.get_json()["error_code"] == "rag_refresh_disabled"
@@ -229,6 +237,7 @@ def test_generate_policy_route_rejects_missing_required_fields(client):
             "/generate_policy",
             data=json.dumps({"context_id": "ctx-1", "refined_prompt": "prompt only"}),
             content_type="application/json",
+            headers=SERVICE_HEADERS,
         )
 
     assert response.status_code == 400
@@ -313,6 +322,7 @@ def test_generate_policy_route_with_openai(
             "/generate_policy",
             data=json.dumps(payload),
             content_type="application/json",
+            headers=SERVICE_HEADERS,
         )
 
     assert response.status_code == 200
@@ -359,6 +369,7 @@ def test_generate_policy_route_returns_deterministic_internal_error(client):
             "/generate_policy",
             data=json.dumps(payload),
             content_type="application/json",
+            headers=SERVICE_HEADERS,
         )
 
     assert response.status_code == 500
@@ -388,6 +399,7 @@ def test_generate_policy_route_adds_security_headers(client):
             "/generate_policy",
             data="[]",
             content_type="application/json",
+            headers=SERVICE_HEADERS,
         )
 
     assert response.status_code == 400
@@ -414,7 +426,7 @@ def test_generate_policy_route_preserves_request_correlation_id(client):
             "/generate_policy",
             data="[]",
             content_type="application/json",
-            headers={"X-Correlation-ID": "request-correlation-id"},
+            headers={**SERVICE_HEADERS, "X-Correlation-ID": "request-correlation-id"},
         )
 
     assert captured["correlation_id"] == "request-correlation-id"
@@ -441,9 +453,18 @@ def test_generate_policy_route_generates_request_correlation_id_when_missing(cli
             "/generate_policy",
             data="[]",
             content_type="application/json",
+            headers=SERVICE_HEADERS,
         )
 
     correlation_id = response.headers["X-Correlation-ID"]
     assert correlation_id
     assert captured["correlation_id"] == correlation_id
     assert response.get_json()["correlation_id"] == correlation_id
+
+
+def test_generate_policy_route_requires_service_identity(client):
+    response = client.post("/generate_policy", json={"context_id": "ctx-1"})
+
+    assert response.status_code == 401
+    assert response.get_json()["error_code"] == "service_authentication_required"
+    assert response.headers["WWW-Authenticate"] == "Bearer"

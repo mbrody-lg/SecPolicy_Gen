@@ -6,6 +6,8 @@ from flask import g
 from app import mongo
 from app.candidate_contract import authorize_candidate_request
 
+SERVICE_HEADERS = {"Authorization": "Bearer test-only-service-auth-token"}
+
 
 def _headers(**overrides):
     headers = {
@@ -25,8 +27,8 @@ def test_candidate_route_is_fail_closed_without_verified_principal(client):
         headers={"Authorization": "Bearer spoofed", "X-Service-Identity": "docker-agent"},
     )
 
-    assert response.status_code == 503
-    assert response.get_json()["error_code"] == "candidate_identity_unavailable"
+    assert response.status_code == 401
+    assert response.get_json()["error_code"] == "service_authentication_required"
 
 
 def test_candidate_contract_rejects_tenant_mismatch(app):
@@ -90,7 +92,7 @@ def test_candidate_generation_uses_domain_code_without_persistence(client):
             "retrieval_evidence": [],
         }) as run_agent,
     ):
-        response = client.post("/candidate/generate-policy", json=payload)
+        response = client.post("/candidate/generate-policy", json=payload, headers=_headers(**SERVICE_HEADERS))
 
     assert response.status_code == 200
     assert response.get_json()["ownership"] == {
@@ -110,6 +112,7 @@ def test_candidate_route_enforces_fixed_bounded_json_limit(client, app, monkeypa
         "/candidate/generate-policy",
         data="x" * ((256 * 1024) + 1),
         content_type="application/json",
+        headers=_headers(**SERVICE_HEADERS),
     )
 
     assert response.status_code == 413
@@ -134,3 +137,28 @@ def test_candidate_contract_rejects_overflowing_deadline(app):
     assert metadata is None
     assert error[1] == 400
     assert error[0]["error_code"] == "candidate_deadline_invalid"
+
+
+def test_candidate_route_accepts_service_identity_principal(client):
+    payload = {
+        "context_id": "ctx-candidate",
+        "refined_prompt": "Generate an access control policy.",
+        "language": "en",
+        "model_version": "mock",
+    }
+    policy = {
+        **payload,
+        "policy_text": "Candidate policy",
+        "ownership": {"owner_service": "policy-agent", "source_of_truth": False, "collection": None},
+    }
+
+    with patch("app.routes.routes.run_generation_pipeline", return_value={"success": True, "policy": policy}) as pipeline:
+        response = client.post("/candidate/generate-policy", json=payload, headers=_headers(**SERVICE_HEADERS))
+
+    assert response.status_code == 200
+    assert response.get_json()["candidate"] == {
+        "authoritative": False,
+        "tenant_id": "tenant-a",
+        "idempotency_key": "attempt-1",
+    }
+    pipeline.assert_called_once_with(payload, persist=False)

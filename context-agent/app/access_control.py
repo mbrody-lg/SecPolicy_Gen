@@ -45,6 +45,7 @@ PUBLIC_OR_MEMBERSHIP_OPTIONAL_ENDPOINTS = frozenset(
         "main.health",
         "main.ready",
         "main.metrics",
+        "main.send_policy_to_context",
         "static",
     }
 )

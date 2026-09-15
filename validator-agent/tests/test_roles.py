@@ -1,5 +1,7 @@
 from unittest.mock import patch
 
+SERVICE_HEADERS = {"Authorization": "Bearer test-only-service-auth-token"}
+
 
 class FakeCoordinator:
     def validate_policy(self, payload):
@@ -24,7 +26,7 @@ def test_validator_agent_all_roles(client, default_prompt, default_context_id):
             "policy_text": default_prompt,
             "structured_plan": "Fake structure",
             "generated_at": "2025-05-21T12:00:00Z"
-        })
+        }, headers=SERVICE_HEADERS)
 
     assert response.status_code == 200
     data = response.get_json()
