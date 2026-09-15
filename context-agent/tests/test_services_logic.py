@@ -1813,12 +1813,14 @@ def test_refresh_system_state_calls_policy_rag_refresh(app_context, monkeypatch)
     assert result["success"] is True
     assert calls[0][0].endswith("/rag/refresh")
     assert "X-Correlation-ID" in calls[0][2]
+    assert calls[0][2]["Authorization"] == "Bearer test-only-service-auth-token"
     assert result["status"]["status"] == "ready"
 
 
 def test_refresh_system_state_reports_policy_refresh_failure(app_context, monkeypatch):
     def fake_post(url, timeout, headers):
         assert "X-Correlation-ID" in headers
+        assert headers["Authorization"] == "Bearer test-only-service-auth-token"
         return FakeResponse(
             {
                 "success": False,
