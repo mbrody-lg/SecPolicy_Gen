@@ -89,7 +89,10 @@ def test_send_policy_update_to_policy_agent_posts_expected_payload():
             "reasons": ["Missing scope"],
             "recommendations": ["Add scope"],
         },
-        headers={"X-Correlation-ID": "ctx-1"},
+        headers={
+            "Authorization": "Bearer test-only-service-auth-token",
+            "X-Correlation-ID": "ctx-1",
+        },
         timeout=30.0,
     )
 
@@ -209,7 +212,10 @@ def test_send_policy_update_to_policy_agent_prefers_request_correlation_id(clien
                 recommendations=["Add scope"],
             )
 
-    assert post.call_args.kwargs["headers"] == {"X-Correlation-ID": "corr-request"}
+    assert post.call_args.kwargs["headers"] == {
+        "Authorization": "Bearer test-only-service-auth-token",
+        "X-Correlation-ID": "corr-request",
+    }
 
 
 def test_send_policy_update_to_policy_agent_emits_structured_logs(caplog):

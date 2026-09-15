@@ -162,6 +162,11 @@ def create_app():
         is_testing=is_testing,
         test_default="/validator-agent/app/config/validator_agent.yaml",
     )
+    app.config["SERVICE_AUTH_TOKEN"] = _get_required_env(
+        "SERVICE_AUTH_TOKEN",
+        is_testing=is_testing,
+        test_default="test-only-service-auth-token",
+    )
     app.config["TESTING"] = is_testing
     app.config["DEBUG"] = _get_env_bool("DEBUG", default=False)
     app.config["POLICY_AGENT_URL"] = _validate_http_url(
@@ -197,6 +202,12 @@ def create_app():
 
         g.correlation_id = _normalize_correlation_id(request.headers.get(CORRELATION_ID_HEADER))
         start_request_timer()
+
+    @app.before_request
+    def authenticate_service_principal():
+        from app.service_identity import require_service_identity
+
+        return require_service_identity()
 
     @app.after_request
     def apply_security_headers(response):

@@ -2320,9 +2320,13 @@ def _get_correlation_id(payload: dict | None = None, context_id: str | None = No
 
 def _dependency_headers(correlation_id: str | None) -> dict:
     """Build outbound service headers with correlation metadata when available."""
-    if not correlation_id:
-        return {}
-    return {"X-Correlation-ID": correlation_id}
+    headers = {}
+    if correlation_id:
+        headers["X-Correlation-ID"] = correlation_id
+    service_token = current_app.config.get("SERVICE_AUTH_TOKEN")
+    if service_token:
+        headers["Authorization"] = f"Bearer {service_token}"
+    return headers
 
 
 def _dependency_timeout(config_name: str, default: float = 30.0) -> float:

@@ -10,6 +10,7 @@ from app import mongo
 import pytest
 
 pytestmark = [pytest.mark.route]
+SERVICE_HEADERS = {"Authorization": "Bearer test-only-service-auth-token"}
 
 
 def test_health_route_reports_service_status(client):
@@ -111,6 +112,7 @@ def test_validate_policy_route_rejects_missing_required_fields(client):
             "/validate-policy",
             data=json.dumps({"context_id": "ctx-1", "policy_text": "policy"}),
             content_type="application/json",
+            headers=SERVICE_HEADERS,
         )
 
     assert response.status_code == 400
@@ -134,6 +136,7 @@ def test_validate_policy_route_rejects_invalid_json_body(client):
         "/validate-policy",
         data="[]",
         content_type="application/json",
+        headers=SERVICE_HEADERS,
     )
 
     assert response.status_code == 400
@@ -184,7 +187,8 @@ def test_validate_policy_route(client, default_context_id):
         response = client.post(
             "/validate-policy",
             data=json.dumps(payload),
-            content_type="application/json"
+            content_type="application/json",
+            headers=SERVICE_HEADERS,
         )
 
     assert response.status_code == 200
@@ -228,7 +232,7 @@ def test_validate_policy_route_preserves_inbound_correlation_id(client, default_
             "/validate-policy",
             data=json.dumps(payload),
             content_type="application/json",
-            headers={"X-Correlation-ID": "corr-inbound"},
+            headers={**SERVICE_HEADERS, "X-Correlation-ID": "corr-inbound"},
         )
 
     assert response.status_code == 400
@@ -259,6 +263,7 @@ def test_validate_policy_route_propagates_dependency_error(client):
             "/validate-policy",
             data=json.dumps(payload),
             content_type="application/json",
+            headers=SERVICE_HEADERS,
         )
 
     assert response.status_code == 502
@@ -290,6 +295,7 @@ def test_validate_policy_route_hides_internal_exception_details(client):
             "/validate-policy",
             data=json.dumps(payload),
             content_type="application/json",
+            headers=SERVICE_HEADERS,
         )
 
     assert response.status_code == 500
@@ -303,6 +309,15 @@ def test_validate_policy_route_hides_internal_exception_details(client):
         "correlation_id": response.headers["X-Correlation-ID"],
     }
     assert payload["correlation_id"] != "ctx-int"
+
+
+def test_validate_policy_route_requires_service_identity(client):
+    response = client.post("/validate-policy", json={"context_id": "ctx-1"})
+
+    assert response.status_code == 401
+    assert response.get_json()["error_code"] == "service_authentication_required"
+    assert response.headers["WWW-Authenticate"] == "Bearer"
+
 
 def test_delete_validation_by_context(client, app_context):
     context_id = str(ObjectId())

@@ -129,6 +129,11 @@ def create_app():
         is_testing=is_testing,
         test_default="/config/policy_agent.yaml",
     )
+    app.config["SERVICE_AUTH_TOKEN"] = _get_required_env(
+        "SERVICE_AUTH_TOKEN",
+        is_testing=is_testing,
+        test_default="test-only-service-auth-token",
+    )
     app.config["TESTING"] = is_testing
     app.config["DEBUG"] = _get_env_bool("DEBUG", default=False)
     app.config["MAX_CONTENT_LENGTH"] = _get_env_int("MAX_CONTENT_LENGTH", 256 * 1024)
@@ -154,6 +159,12 @@ def create_app():
     def assign_correlation_id():
         g.correlation_id = _resolve_request_correlation_id()
         start_request_timer()
+
+    @app.before_request
+    def authenticate_service_principal():
+        from app.service_identity import require_service_identity
+
+        return require_service_identity()
 
     @app.after_request
     def apply_security_headers(response):
