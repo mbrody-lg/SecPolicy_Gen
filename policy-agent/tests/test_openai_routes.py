@@ -167,10 +167,17 @@ def test_rag_refresh_route_runs_controlled_refresh(client):
             202,
         ),
     ):
-        response = client.post("/rag/refresh")
+        response = client.post("/rag/refresh", headers=SERVICE_HEADERS)
 
     assert response.status_code == 202
     assert response.get_json()["job"] == {"id": "job-1", "status": "running"}
+
+
+def test_rag_refresh_route_requires_service_identity(client):
+    response = client.post("/rag/refresh")
+
+    assert response.status_code == 401
+    assert response.get_json()["error_code"] == "service_authentication_required"
 
 
 def test_rag_refresh_route_escapes_reflected_job_metadata(client):
@@ -186,7 +193,7 @@ def test_rag_refresh_route_escapes_reflected_job_metadata(client):
             202,
         ),
     ):
-        response = client.post("/rag/refresh")
+        response = client.post("/rag/refresh", headers=SERVICE_HEADERS)
 
     assert response.status_code == 202
     assert b"<script>alert(1)</script>" not in response.data
@@ -207,7 +214,7 @@ def test_rag_refresh_route_reports_disabled_runtime(client):
             403,
         ),
     ):
-        response = client.post("/rag/refresh")
+        response = client.post("/rag/refresh", headers=SERVICE_HEADERS)
 
     assert response.status_code == 403
     assert response.get_json()["error_code"] == "rag_refresh_disabled"

@@ -377,7 +377,7 @@ def refresh_system_state() -> dict:
     try:
         response = requests.post(
             f"{policy_agent_url.rstrip('/')}/rag/refresh",
-            headers={CORRELATION_ID_HEADER: correlation_id} if correlation_id else {},
+            headers=_dependency_headers(correlation_id),
             timeout=_dependency_timeout("POLICY_AGENT_TIMEOUT_SECONDS"),
         )
         payload = response.json() if response.content else {}
