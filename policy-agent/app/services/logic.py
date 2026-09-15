@@ -1162,8 +1162,6 @@ def run_with_agent(
 ) -> dict:
     """Run full policy-agent role pipeline for initial policy generation."""
     config = load_policy_config()
-    if store_config:
-        _store_policy_config(model_version, config)
 
     agent = create_agent_from_config(config)
     retrieval_plan = build_retrieval_plan(
