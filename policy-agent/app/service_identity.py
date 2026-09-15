@@ -9,6 +9,7 @@ from flask import current_app, g, jsonify, request
 
 PROTECTED_ENDPOINTS = frozenset({
     "routes.generate_policy",
+    "routes.rag_refresh",
     "routes.update_policy",
 })
 
