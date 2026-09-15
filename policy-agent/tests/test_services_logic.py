@@ -956,6 +956,34 @@ def test_run_generation_pipeline_persists_policy(app_context, monkeypatch):
     ]
 
 
+def test_run_generation_pipeline_normalizes_optional_policy_lists(app_context, monkeypatch):
+    monkeypatch.setattr(
+        logic,
+        "run_with_agent",
+        lambda **kwargs: {
+            "text": "Generated policy body",
+            "structured_plan": "legacy plan string",
+            "retrieval_evidence": None,
+        },
+    )
+
+    result = logic.run_generation_pipeline(
+        {
+            "context_id": "ctx-stable-payload",
+            "refined_prompt": "Generate policy",
+            "language": "en",
+            "model_version": "openai",
+        }
+    )
+
+    assert result["success"] is True
+    assert result["policy"]["structured_plan"] == []
+    assert result["policy"]["retrieval_evidence"] == []
+    stored_policy = mongo.db.policies.find_one({"context_id": "ctx-stable-payload"})
+    assert stored_policy["structured_plan"] == []
+    assert stored_policy["retrieval_evidence"] == []
+
+
 def test_run_generation_pipeline_emits_structured_logs(app_context, monkeypatch, caplog):
     monkeypatch.setattr(
         logic,

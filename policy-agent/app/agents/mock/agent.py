@@ -72,7 +72,7 @@ class MockAgent(Agent):
                     reason="unknown_role",
                 )
 
-        structured_plan = plans if plans else "[Simulation] No plan generated"
+        structured_plan = plans if plans else []
 
         return {
             "text": f"[Generated policy simulation]: {current_prompt}",
