@@ -1126,6 +1126,10 @@ def _provider_provenance(config: dict) -> dict:
     }
 
 
+def _optional_list_field(value) -> list:
+    return value if isinstance(value, list) else []
+
+
 def _validate_agent_result(result: dict, config: dict) -> dict:
     if not isinstance(result, dict):
         raise ValueError("Agent result must be a mapping.")
@@ -1133,6 +1137,8 @@ def _validate_agent_result(result: dict, config: dict) -> dict:
     if not isinstance(text, str) or not text.strip():
         raise ValueError("Agent result must contain non-empty text.")
     result["text"] = text.strip()
+    result["structured_plan"] = _optional_list_field(result.get("structured_plan"))
+    result["retrieval_evidence"] = _optional_list_field(result.get("retrieval_evidence"))
     result["provider_provenance"] = _provider_provenance(config)
     return result
 
@@ -1300,8 +1306,8 @@ def generate_policy_payload(payload: dict | None, *, persist: bool = True) -> di
         "correlation_id": correlation_id,
         "language": data["language"],
         "policy_text": result_object["text"],
-        "structured_plan": result_object.get("structured_plan", []),
-        "retrieval_evidence": result_object.get("retrieval_evidence", []),
+        "structured_plan": _optional_list_field(result_object.get("structured_plan")),
+        "retrieval_evidence": _optional_list_field(result_object.get("retrieval_evidence")),
         "model_version": data["model_version"],
         "provider_provenance": result_object.get("provider_provenance"),
         "policy_agent_version": "0.1.0",
@@ -1431,8 +1437,8 @@ def update_policy_payload(payload: dict | None, path_context_id: str) -> dict:
         "correlation_id": correlation_id,
         "language": data["language"],
         "policy_text": result_object["text"],
-        "structured_plan": policy.get("structured_plan", []),
-        "retrieval_evidence": policy.get("retrieval_evidence", []),
+        "structured_plan": _optional_list_field(policy.get("structured_plan")),
+        "retrieval_evidence": _optional_list_field(policy.get("retrieval_evidence")),
         "model_version": policy.get("model_version"),
         "provider_provenance": result_object.get(
             "provider_provenance", policy.get("provider_provenance")
