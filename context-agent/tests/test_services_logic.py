@@ -2035,7 +2035,10 @@ def test_call_policy_agent_propagates_timeout_and_correlation_headers(app_contex
 
     assert result == {"success": True, "policy_text": "generated"}
     assert captured["url"].endswith("/generate_policy")
-    assert captured["headers"] == {"X-Correlation-ID": "corr-1"}
+    assert captured["headers"] == {
+        "Authorization": "Bearer test-only-service-auth-token",
+        "X-Correlation-ID": "corr-1",
+    }
     assert captured["timeout"] == 12.5
 
 
@@ -2100,7 +2103,10 @@ def test_call_validator_agent_propagates_timeout_and_correlation_headers(app_con
 
     assert result == {"status": "accepted"}
     assert captured["url"].endswith("/validate-policy")
-    assert captured["headers"] == {"X-Correlation-ID": "corr-3"}
+    assert captured["headers"] == {
+        "Authorization": "Bearer test-only-service-auth-token",
+        "X-Correlation-ID": "corr-3",
+    }
     assert captured["timeout"] == 18.0
 
 
@@ -2187,7 +2193,10 @@ def test_call_policy_agent_prefers_request_correlation_id_over_payload(app, monk
         )
 
     assert result == {"success": True, "policy_text": "generated"}
-    assert captured["headers"] == {"X-Correlation-ID": "corr-request"}
+    assert captured["headers"] == {
+        "Authorization": "Bearer test-only-service-auth-token",
+        "X-Correlation-ID": "corr-request",
+    }
 
 
 def test_call_policy_agent_emits_structured_logs(app_context, monkeypatch, caplog):

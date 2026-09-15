@@ -3,6 +3,9 @@ from unittest.mock import patch
 
 from bson import ObjectId
 
+SERVICE_HEADERS = {"Authorization": "Bearer test-only-service-auth-token"}
+
+
 def test_update_policy_with_openaiagent(client):
     context_id = ObjectId()
     data = {
@@ -52,7 +55,7 @@ def test_update_policy_with_openaiagent(client):
             },
         },
     ) as run_policy_update_pipeline:
-        response = client.post(f"/generate_policy/{context_id}/update", json=data)
+        response = client.post(f"/generate_policy/{context_id}/update", json=data, headers=SERVICE_HEADERS)
 
     assert response.status_code == 200
     json_data = response.get_json()
@@ -96,7 +99,7 @@ def test_update_policy_returns_404_when_canonical_policy_is_missing(client):
             "status_code": 404,
         },
     ):
-        response = client.post(f"/generate_policy/{context_id}/update", json=data)
+        response = client.post(f"/generate_policy/{context_id}/update", json=data, headers=SERVICE_HEADERS)
 
     assert response.status_code == 404
     assert response.get_json() == {
@@ -138,7 +141,7 @@ def test_update_policy_returns_contract_error_when_context_id_mismatches(client)
             "status_code": 400,
         },
     ):
-        response = client.post(f"/generate_policy/{context_id}/update", json=data)
+        response = client.post(f"/generate_policy/{context_id}/update", json=data, headers=SERVICE_HEADERS)
 
     assert response.status_code == 400
     assert response.get_json() == {
@@ -180,7 +183,7 @@ def test_update_policy_hides_internal_exception_details(client):
             "status_code": 500,
         },
     ):
-        response = client.post(f"/generate_policy/{context_id}/update", json=data)
+        response = client.post(f"/generate_policy/{context_id}/update", json=data, headers=SERVICE_HEADERS)
 
     assert response.status_code == 500
     assert response.get_json() == {
@@ -191,3 +194,12 @@ def test_update_policy_hides_internal_exception_details(client):
         "details": {"stage": "policy_update", "operation": "update_policy"},
         "correlation_id": str(context_id),
     }
+
+
+def test_update_policy_requires_service_identity(client):
+    context_id = ObjectId()
+    response = client.post(f"/generate_policy/{context_id}/update", json={"context_id": str(context_id)})
+
+    assert response.status_code == 401
+    assert response.get_json()["error_code"] == "service_authentication_required"
+    assert response.headers["WWW-Authenticate"] == "Bearer"

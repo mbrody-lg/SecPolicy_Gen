@@ -14,6 +14,7 @@ if str(ROOT_PATH) not in sys.path:
 os.environ.setdefault("TESTING", "true")
 os.environ.setdefault("DEBUG", "false")
 os.environ.setdefault("FLASK_SECRET_KEY", "test-only-secret-key")
+os.environ.setdefault("SERVICE_AUTH_TOKEN", "test-only-service-auth-token")
 os.environ.setdefault("CONFIG_PATH", str(ROOT_PATH / "app" / "config" / "validator_agent.yaml"))
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 

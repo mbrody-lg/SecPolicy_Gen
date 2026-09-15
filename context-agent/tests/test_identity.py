@@ -241,7 +241,30 @@ def test_service_callback_is_fail_closed_without_workload_identity(app):
     )
 
     assert response.status_code == 401
-    assert response.get_json()["error_code"] == "authentication_required"
+    assert response.get_json()["error_code"] == "workload_authentication_required"
+    assert response.headers["WWW-Authenticate"] == "Bearer"
+
+
+def test_service_callback_rejects_invalid_workload_credential(app):
+    response = app.test_client().post(
+        "/context/507f1f77bcf86cd799439011/policy",
+        json={"policy": "untrusted"},
+        headers={"Authorization": "Bearer wrong-token"},
+    )
+
+    assert response.status_code == 401
+    assert response.get_json()["error_code"] == "workload_authentication_required"
+
+
+def test_service_callback_authenticates_before_concealing_missing_resource(app):
+    response = app.test_client().post(
+        "/context/507f1f77bcf86cd799439011/policy",
+        json={"policy": "test"},
+        headers={"Authorization": "Bearer test-only-policy-callback-token"},
+    )
+
+    assert response.status_code == 404
+    assert response.get_json()["error_code"] == "resource_not_found"
 
 
 def test_oidc_client_uses_discovery_pkce_and_openid_scope(app):

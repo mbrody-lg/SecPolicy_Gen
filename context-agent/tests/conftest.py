@@ -18,6 +18,7 @@ if str(ROOT_PATH) not in sys.path:
 os.environ.setdefault("TESTING", "true")
 os.environ.setdefault("DEBUG", "false")
 os.environ.setdefault("FLASK_SECRET_KEY", "test-only-secret-key")
+os.environ.setdefault("SERVICE_AUTH_TOKEN", "test-only-service-auth-token")
 os.environ.setdefault("MONGO_URI", "mongodb://mongo:27017/context-testdb")
 
 TEST_PRINCIPAL = {
