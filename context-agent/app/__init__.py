@@ -189,6 +189,11 @@ def create_app():
         is_testing=is_testing,
         test_default="test-only-policy-callback-token",
     )
+    app.config["SERVICE_AUTH_TOKEN"] = _get_required_env(
+        "SERVICE_AUTH_TOKEN",
+        is_testing=is_testing,
+        test_default="test-only-service-auth-token",
+    )
     app.config["TESTING"] = is_testing
     app.config["DEBUG"] = _get_env_bool("DEBUG", default=False)
     app.config["MONGO_URI"] = _validate_mongo_uri(
