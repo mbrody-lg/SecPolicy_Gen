@@ -6,6 +6,8 @@ from flask import g
 from app.agents.roles.coordinator import Coordinator
 from app.candidate_contract import authorize_candidate_request
 
+SERVICE_HEADERS = {"Authorization": "Bearer test-only-service-auth-token"}
+
 
 def _headers(**overrides):
     headers = {
@@ -25,8 +27,8 @@ def test_candidate_route_is_fail_closed_without_verified_principal(client):
         headers={"Authorization": "Bearer spoofed", "X-Service-Identity": "docker-agent"},
     )
 
-    assert response.status_code == 503
-    assert response.get_json()["error_code"] == "candidate_identity_unavailable"
+    assert response.status_code == 401
+    assert response.get_json()["error_code"] == "service_authentication_required"
 
 
 def test_candidate_contract_rejects_tenant_mismatch(app):
@@ -105,8 +107,40 @@ def test_candidate_validation_route_preserves_authoritative_store(client):
             "validation": validation,
         }) as pipeline,
     ):
-        response = client.post("/candidate/validate-policy", json=payload)
+        response = client.post("/candidate/validate-policy", json=payload, headers=_headers(**SERVICE_HEADERS))
 
     assert response.status_code == 200
     assert response.get_json()["candidate"]["authoritative"] is False
     assert pipeline.call_args.kwargs["read_only"] is True
+
+
+def test_candidate_validation_accepts_service_identity_principal(client):
+    payload = {
+        "context_id": "ctx-candidate",
+        "policy_text": "Candidate policy",
+        "structured_plan": [],
+        "generated_at": "2026-07-16T00:00:00+00:00",
+    }
+    validation = {
+        **payload,
+        "language": "en",
+        "policy_agent_version": "0.1.0",
+        "status": "accepted",
+        "reasons": [],
+        "recommendations": [],
+        "ownership": {"owner_service": "validator-agent", "source_of_truth": False, "collection": None},
+    }
+
+    with patch(
+        "app.routes.routes.run_validation_pipeline",
+        return_value={"success": True, "stage": "completed", "validation": validation},
+    ) as pipeline:
+        response = client.post("/candidate/validate-policy", json=payload, headers=_headers(**SERVICE_HEADERS))
+
+    assert response.status_code == 200
+    assert response.get_json()["candidate"] == {
+        "authoritative": False,
+        "tenant_id": "tenant-a",
+        "idempotency_key": "attempt-1",
+    }
+    pipeline.assert_called_once_with(payload, read_only=True)

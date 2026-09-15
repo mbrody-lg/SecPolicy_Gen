@@ -29,7 +29,7 @@ def _safe_header(name: str, max_length: int = 128) -> str | None:
 
 
 def authorize_candidate_request(*, audience: str, scope: str) -> tuple[dict | None, tuple[dict, int] | None]:
-    """Authorize a principal verified by the future INIT-11 middleware."""
+    """Authorize a principal verified by service identity middleware."""
     request.max_content_length = min(
         request.max_content_length or CANDIDATE_MAX_CONTENT_LENGTH,
         CANDIDATE_MAX_CONTENT_LENGTH,

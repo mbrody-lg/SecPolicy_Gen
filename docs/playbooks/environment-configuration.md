@@ -237,7 +237,8 @@ the service handles that variable correctly.
 
 - INIT-04 should consume this contract when deciding GitHub Actions variables,
   repository secrets, and informational versus required gates.
-- INIT-11 should define future service-auth secrets and trust model before any
-  new service-to-service credential is introduced.
+- INIT-11 defines the service-auth trust model through `POLICY_CALLBACK_TOKEN`
+  and `SERVICE_AUTH_TOKEN`; future service-to-service credentials should follow
+  the same secret-handling and redaction contract.
 - INIT-13 and INIT-15 remain responsible for retrieval behavior, indexing
   quality, and benchmark promotion. INIT-02 only governs the config surface.

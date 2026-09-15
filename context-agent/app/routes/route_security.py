@@ -292,9 +292,9 @@ ROUTE_SECURITY_CLASSIFICATIONS = (
         rule="/diagnostics/<correlation_id>",
         method="GET",
         category=AUTHENTICATED_READ,
-        current_guard="authenticated_session",
-        next_control="diagnostics_permission_check",
-        rationale="Diagnostics payload is bounded but access control remains an INIT-11 follow-up.",
+        current_guard="authenticated_session_diagnostics_permission_and_tenant_scope",
+        next_control="none",
+        rationale="Returns bounded diagnostics only to principals with diagnostics:read in the active organization.",
     ),
 )
 
