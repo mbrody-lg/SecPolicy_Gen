@@ -39,6 +39,8 @@ PROBE_MAX_ATTEMPTS="${MIGRATION_SMOKE_PROBE_ATTEMPTS:-60}"
 PROBE_DELAY_SECONDS="${MIGRATION_SMOKE_PROBE_DELAY_SECONDS:-2}"
 LOG_TAIL_LINES="${MIGRATION_SMOKE_LOG_TAIL_LINES:-80}"
 RAG_PREFLIGHT_FILE="$ROOT_DIR/migration/functional-smoke-rag-preflight.json"
+POLICY_ARTIFACT_JSON="$ROOT_DIR/migration/functional-smoke-policies.json"
+POLICY_ARTIFACT_MARKDOWN="$ROOT_DIR/migration/functional-smoke-policies.md"
 
 declare -a SERVICE_PROBE_DEFINITIONS=(
   "context-agent|http://localhost:5003|context-agent"
@@ -74,6 +76,101 @@ validate_rag_mode() {
 resolve_service_config_path() {
   local container_name=$1
   docker exec "$container_name" python -c "from app import create_app; app=create_app(); print(app.config['CONFIG_PATH'])"
+}
+
+resolve_context_questions_config_path() {
+  docker exec "$CONTEXT_CONTAINER" python -c "from app import create_app; app=create_app(); print(app.config['QUESTIONS_CONFIG_PATH'])"
+}
+
+hash_container_file() {
+  local container_name=$1
+  local file_path=$2
+  docker exec -i "$container_name" python - "$file_path" <<'PY'
+import hashlib
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+try:
+    print(hashlib.sha256(path.read_bytes()).hexdigest())
+except FileNotFoundError:
+    print("")
+PY
+}
+
+config_source_type() {
+  local config_path=$1
+  if [[ "$config_path" == /agent-config/* ]]; then
+    printf "external"
+  elif [[ "$config_path" == */config/examples/* ]]; then
+    printf "repo-example"
+  elif is_mock_mode; then
+    printf "repo-internal-mock-swappable"
+  else
+    printf "repo-internal"
+  fi
+}
+
+build_config_evidence_json() {
+  local context_config_path=$1
+  local context_config_sha=$2
+  local context_questions_path=$3
+  local context_questions_sha=$4
+  local policy_config_path=$5
+  local policy_config_sha=$6
+  local validator_config_path=$7
+  local validator_config_sha=$8
+
+  "$PYTHON_BIN" - \
+    "$context_config_path" "$context_config_sha" "$(config_source_type "$context_config_path")" \
+    "$context_questions_path" "$context_questions_sha" "$(config_source_type "$context_questions_path")" \
+    "$policy_config_path" "$policy_config_sha" "$(config_source_type "$policy_config_path")" \
+    "$validator_config_path" "$validator_config_sha" "$(config_source_type "$validator_config_path")" <<'PY'
+import json
+import sys
+
+(
+    context_config_path,
+    context_config_sha,
+    context_config_source,
+    context_questions_path,
+    context_questions_sha,
+    context_questions_source,
+    policy_config_path,
+    policy_config_sha,
+    policy_config_source,
+    validator_config_path,
+    validator_config_sha,
+    validator_config_source,
+) = sys.argv[1:13]
+
+print(json.dumps({
+    "context-agent": {
+        "container": "context_agent_web",
+        "config_path": context_config_path,
+        "sha256": context_config_sha or None,
+        "source_type": context_config_source,
+    },
+    "context-questions": {
+        "container": "context_agent_web",
+        "config_path": context_questions_path,
+        "sha256": context_questions_sha or None,
+        "source_type": context_questions_source,
+    },
+    "policy-agent": {
+        "container": "policy_agent_service",
+        "config_path": policy_config_path,
+        "sha256": policy_config_sha or None,
+        "source_type": policy_config_source,
+    },
+    "validator-agent": {
+        "container": "validator_agent_service",
+        "config_path": validator_config_path,
+        "sha256": validator_config_sha or None,
+        "source_type": validator_config_source,
+    },
+}, sort_keys=True))
+PY
 }
 
 collect_probe_diagnostics() {
@@ -599,12 +696,17 @@ from pymongo import MongoClient
 
 organization_id = os.environ["MIGRATION_SMOKE_ORGANIZATION_ID"]
 client = MongoClient("mongo", 27017)
-context_documents = list(client.contextdb.contexts.find(
+context_ids = [
+    str(document["_id"])
+    for document in client.contextdb.contexts.find(
+        {"organization_id": organization_id},
+        {"_id": 1},
+    )
+]
+context_object_ids = [document["_id"] for document in client.contextdb.contexts.find(
     {"organization_id": organization_id},
     {"_id": 1},
-))
-context_ids = [str(document["_id"]) for document in context_documents]
-context_object_ids = [document["_id"] for document in context_documents]
+)]
 tenant_filter = {"organization_id": organization_id}
 client.contextdb.contexts.delete_many(tenant_filter)
 client.contextdb.interactions.delete_many(tenant_filter)
@@ -618,9 +720,8 @@ if context_ids:
     client.validatordb.validations.delete_many(context_filter)
     client.contextdb.validations.delete_many(context_filter)
 if context_object_ids:
-    client.contextdb.interactions.delete_many({
-        "context_id": {"$in": context_object_ids},
-    })
+    object_context_filter = {"context_id": {"$in": context_object_ids}}
+    client.contextdb.interactions.delete_many(object_context_filter)
 PY
 fi
 
@@ -680,6 +781,17 @@ restore_chroma_backup
 log "validating RAG runtime readiness contract"
 wait_for_rag_ready
 
+CONTEXT_EFFECTIVE_CONFIG="$(resolve_service_config_path "$CONTEXT_CONTAINER")"
+CONTEXT_EFFECTIVE_QUESTIONS_CONFIG="$(resolve_context_questions_config_path)"
+POLICY_EFFECTIVE_CONFIG="$(resolve_service_config_path "$POLICY_CONTAINER")"
+VALIDATOR_EFFECTIVE_CONFIG="$(resolve_service_config_path "$VALIDATOR_CONTAINER")"
+CONFIG_EVIDENCE_JSON="$(build_config_evidence_json \
+  "$CONTEXT_EFFECTIVE_CONFIG" "$(hash_container_file "$CONTEXT_CONTAINER" "$CONTEXT_EFFECTIVE_CONFIG")" \
+  "$CONTEXT_EFFECTIVE_QUESTIONS_CONFIG" "$(hash_container_file "$CONTEXT_CONTAINER" "$CONTEXT_EFFECTIVE_QUESTIONS_CONFIG")" \
+  "$POLICY_EFFECTIVE_CONFIG" "$(hash_container_file "$POLICY_CONTAINER" "$POLICY_EFFECTIVE_CONFIG")" \
+  "$VALIDATOR_EFFECTIVE_CONFIG" "$(hash_container_file "$VALIDATOR_CONTAINER" "$VALIDATOR_EFFECTIVE_CONFIG")" \
+)"
+
 log "loading golden fixtures into context-agent"
 docker exec "$CONTEXT_CONTAINER" python generate_context_from_yaml.py \
   --organization-id "$SMOKE_ORGANIZATION_ID" \
@@ -690,6 +802,7 @@ RESULT_FILE="$ROOT_DIR/migration/functional-smoke-result.json"
 ERROR_FILE="$ROOT_DIR/migration/functional-smoke-error.log"
 mkdir -p "$(dirname "$RESULT_FILE")"
 : > "$ERROR_FILE"
+rm -f "$POLICY_ARTIFACT_JSON" "$POLICY_ARTIFACT_MARKDOWN"
 
 log "running full context -> policy -> validation pipeline and collecting evidence"
 if ! docker exec -i \
@@ -700,6 +813,11 @@ if ! docker exec -i \
   -e MIGRATION_SMOKE_RAG_MODE="$RAG_MODE" \
   -e MIGRATION_SMOKE_RAG_PREFLIGHT_FILE="/migration/functional-smoke-rag-preflight.json" \
   -e MIGRATION_SMOKE_ORGANIZATION_ID="$SMOKE_ORGANIZATION_ID" \
+  -e MIGRATION_SMOKE_POLICY_ARTIFACT_JSON="/migration/functional-smoke-policies.json" \
+  -e MIGRATION_SMOKE_POLICY_ARTIFACT_MARKDOWN="/migration/functional-smoke-policies.md" \
+  -e MIGRATION_SMOKE_POLICY_ARTIFACT_HOST_JSON="$POLICY_ARTIFACT_JSON" \
+  -e MIGRATION_SMOKE_POLICY_ARTIFACT_HOST_MARKDOWN="$POLICY_ARTIFACT_MARKDOWN" \
+  -e MIGRATION_SMOKE_CONFIG_EVIDENCE="$CONFIG_EVIDENCE_JSON" \
   -e MIGRATION_SMOKE_PIPELINE_JOB_TIMEOUT_SECONDS="$PIPELINE_JOB_TIMEOUT_SECONDS" \
   -e MIGRATION_SMOKE_PIPELINE_JOB_POLL_SECONDS="$PIPELINE_JOB_POLL_SECONDS" \
   "$CONTEXT_CONTAINER" python - > "$RESULT_FILE" 2> "$ERROR_FILE" <<'PY'
@@ -744,6 +862,11 @@ PIPELINE_JOB_TIMEOUT_SECONDS = int(os.getenv("MIGRATION_SMOKE_PIPELINE_JOB_TIMEO
 PIPELINE_JOB_POLL_SECONDS = float(os.getenv("MIGRATION_SMOKE_PIPELINE_JOB_POLL_SECONDS", "2"))
 SMOKE_ORGANIZATION_ID = os.getenv("MIGRATION_SMOKE_ORGANIZATION_ID", "functional-smoke-org")
 SMOKE_SUBJECT = "functional-smoke-user"
+POLICY_ARTIFACT_JSON = os.getenv("MIGRATION_SMOKE_POLICY_ARTIFACT_JSON", "/migration/functional-smoke-policies.json")
+POLICY_ARTIFACT_MARKDOWN = os.getenv("MIGRATION_SMOKE_POLICY_ARTIFACT_MARKDOWN", "/migration/functional-smoke-policies.md")
+POLICY_ARTIFACT_HOST_JSON = os.getenv("MIGRATION_SMOKE_POLICY_ARTIFACT_HOST_JSON", POLICY_ARTIFACT_JSON)
+POLICY_ARTIFACT_HOST_MARKDOWN = os.getenv("MIGRATION_SMOKE_POLICY_ARTIFACT_HOST_MARKDOWN", POLICY_ARTIFACT_MARKDOWN)
+CONFIG_EVIDENCE = json.loads(os.getenv("MIGRATION_SMOKE_CONFIG_EVIDENCE", "{}") or "{}")
 
 
 def create_authenticated_session():
@@ -764,12 +887,14 @@ def create_authenticated_session():
     serializer = app.session_interface.get_signing_serializer(app)
     if serializer is None:
         raise RuntimeError("Unable to create signed functional smoke session.")
-    session_cookie = serializer.dumps({
-        "principal": {
-            "issuer": app.config["OIDC_ISSUER_URL"],
-            "subject": SMOKE_SUBJECT,
-        },
-    })
+    session_cookie = serializer.dumps(
+        {
+            "principal": {
+                "issuer": app.config["OIDC_ISSUER_URL"],
+                "subject": SMOKE_SUBJECT,
+            },
+        }
+    )
     client = requests.Session()
     client.headers.update({
         "Cookie": f"{app.config['SESSION_COOKIE_NAME']}={session_cookie}",
@@ -790,11 +915,182 @@ def load_json_file(path):
         return None
 
 
+def json_safe(value):
+    if isinstance(value, ObjectId):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): json_safe(nested) for key, nested in value.items()}
+    if isinstance(value, list):
+        return [json_safe(item) for item in value]
+    return value
+
+
+def context_review_summary(context_doc):
+    fields = [
+        "country",
+        "region",
+        "sector",
+        "company_activity",
+        "company_size",
+        "business_model",
+        "service_type",
+        "important_assets",
+        "critical_assets",
+        "data_categories",
+        "third_party_dependencies",
+        "cloud_services",
+        "current_security_operations",
+        "known_gaps",
+        "methodology",
+        "regulatory_hints",
+        "security_maturity",
+        "risk_tolerance",
+        "governance_owner",
+        "policy_type",
+        "policy_scope",
+        "policy_exclusions",
+        "policy_audience",
+        "need",
+        "language",
+    ]
+    return {
+        field: context_doc.get(field)
+        for field in fields
+        if context_doc.get(field) not in (None, "")
+    }
+
+
+def case_title(context_doc):
+    policy_type = str(context_doc.get("policy_type") or "").strip()
+    sector = str(context_doc.get("sector") or "").strip()
+    activity = str(context_doc.get("company_activity") or "").strip()
+    if policy_type and sector:
+        return f"{sector} - {policy_type}"
+    if policy_type:
+        return policy_type
+    if sector:
+        return sector
+    if activity:
+        return activity[:80]
+    return str(context_doc.get("_id"))
+
+
+def latest_validated_policy_interaction(context_oid):
+    return context_db.interactions.find_one(
+        {
+            "context_id": context_oid,
+            "question_id": "validated_policy",
+        },
+        sort=[("timestamp", -1)],
+    )
+
+
+def build_policy_artifact_entry(context_id, context_doc, policy_doc, validation_docs):
+    context_oid = ObjectId(context_id)
+    validated_interaction = latest_validated_policy_interaction(context_oid)
+    latest_validation = validation_docs[0] if validation_docs else {}
+    generated_policy_text = (policy_doc or {}).get("policy_text")
+    final_policy_text = (
+        (validated_interaction or {}).get("answer")
+        or latest_validation.get("policy_text")
+        or generated_policy_text
+        or ""
+    )
+    return {
+        "context_id": context_id,
+        "case_title": case_title(context_doc),
+        "context": context_review_summary(context_doc),
+        "policy": {
+            "final_policy_text": final_policy_text,
+            "generated_policy_text": generated_policy_text or "",
+            "language": (policy_doc or {}).get("language") or latest_validation.get("language"),
+            "policy_agent_version": (policy_doc or {}).get("policy_agent_version"),
+            "generated_at": (policy_doc or {}).get("generated_at"),
+            "model_version": (policy_doc or {}).get("model_version"),
+            "lifecycle_status": (policy_doc or {}).get("lifecycle_status"),
+            "revision_count": (policy_doc or {}).get("revision_count"),
+        },
+        "validation": {
+            "final_decision": latest_validation.get("final_decision"),
+            "status": latest_validation.get("status"),
+            "recommendations": latest_validation.get("recommendations", []),
+            "rounds": len(validation_docs),
+            "policy_content_hash": latest_validation.get("policy_content_hash"),
+            "timestamp": latest_validation.get("timestamp"),
+        },
+        "retrieval_evidence": (policy_doc or {}).get("retrieval_evidence", []),
+        "structured_plan": (policy_doc or {}).get("structured_plan", []),
+    }
+
+
+def markdown_value(value):
+    if value is None:
+        return ""
+    if isinstance(value, (list, dict)):
+        return json.dumps(json_safe(value), ensure_ascii=False, indent=2)
+    return str(value)
+
+
+def write_policy_artifacts(entries, finished_at):
+    artifact = {
+        "schema_version": "1.0",
+        "generated_at": finished_at,
+        "organization_id": SMOKE_ORGANIZATION_ID,
+        "mode": "mock" if MOCK_MODE else "runtime",
+        "total_policies": len(entries),
+        "policies": json_safe(entries),
+    }
+    with open(POLICY_ARTIFACT_JSON, "w", encoding="utf-8") as handle:
+        json.dump(artifact, handle, ensure_ascii=False, indent=2)
+
+    lines = [
+        "# Functional Smoke Generated Policies",
+        "",
+        f"- Generated at: {finished_at}",
+        f"- Organization: `{SMOKE_ORGANIZATION_ID}`",
+        f"- Mode: `{'mock' if MOCK_MODE else 'runtime'}`",
+        f"- Total policies: {len(entries)}",
+        "",
+    ]
+    for index, entry in enumerate(entries, start=1):
+        lines.extend([
+            f"## {index}. {entry['case_title']}",
+            "",
+            f"- Context ID: `{entry['context_id']}`",
+            f"- Validation decision: `{entry['validation'].get('final_decision') or 'n/a'}`",
+            f"- Validation rounds: {entry['validation'].get('rounds', 0)}",
+            "",
+            "### Context",
+            "",
+        ])
+        for key, value in entry["context"].items():
+            lines.append(f"- **{key}**: {markdown_value(value)}")
+        lines.extend([
+            "",
+            "### Final Policy",
+            "",
+            "```markdown",
+            entry["policy"].get("final_policy_text") or "",
+            "```",
+            "",
+        ])
+        recommendations = entry["validation"].get("recommendations") or []
+        if recommendations:
+            lines.extend(["### Validation Recommendations", ""])
+            for recommendation in recommendations:
+                lines.append(f"- {markdown_value(recommendation)}")
+            lines.append("")
+    with open(POLICY_ARTIFACT_MARKDOWN, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines).rstrip() + "\n")
+
+
 def probe_service(base_url):
     checks = {}
     for path in ("/health", "/ready"):
         try:
-            response = requests.get(f"{base_url}{path}", timeout=15)
+            response = HTTP.get(f"{base_url}{path}", timeout=15)
             payload = response.json() if response.headers.get("Content-Type", "").startswith("application/json") else {}
             checks[path[1:]] = {
                 "status_code": response.status_code,
@@ -911,6 +1207,42 @@ observability_by_context = {}
 for context_id in context_ids:
     correlation_id = f"smoke-{context_id}-{uuid4().hex[:8]}"
     try:
+        plan_response = HTTP.post(
+            f"http://localhost:5000/context/{context_id}/context-plan/execute",
+            headers={
+                "Accept": "application/json",
+                "X-Requested-With": "XMLHttpRequest",
+                "X-Correlation-ID": f"{correlation_id}-context",
+            },
+            allow_redirects=False,
+            timeout=30,
+        )
+        observability_by_context.setdefault(context_id, {})
+        observability_by_context[context_id]["context_plan_status"] = plan_response.status_code
+        plan_payload = plan_response.json() if plan_response.headers.get("Content-Type", "").startswith("application/json") else {}
+        plan_job = plan_payload.get("job") if isinstance(plan_payload, dict) else None
+        if isinstance(plan_job, dict) and plan_job.get("job_id"):
+            observability_by_context[context_id]["context_plan_job"] = poll_pipeline_job(plan_job["job_id"])
+
+        final_context_response = HTTP.post(
+            f"http://localhost:5000/context/{context_id}/final-context/synthesize",
+            headers={
+                "Accept": "application/json",
+                "X-Requested-With": "XMLHttpRequest",
+                "X-Correlation-ID": f"{correlation_id}-final-context",
+            },
+            allow_redirects=False,
+            timeout=30,
+        )
+        observability_by_context[context_id]["final_context_status"] = final_context_response.status_code
+        final_context_payload = (
+            final_context_response.json()
+            if final_context_response.headers.get("Content-Type", "").startswith("application/json")
+            else {}
+        )
+        if isinstance(final_context_payload, dict) and not final_context_payload.get("success", False):
+            observability_by_context[context_id]["final_context_error_code"] = final_context_payload.get("error_code")
+
         response = HTTP.post(
             f"http://localhost:5000/context/{context_id}/generate_policy",
             headers={
@@ -931,11 +1263,12 @@ for context_id in context_ids:
     except Exception as exc:
         generate_status = 0
         response_correlation_id = None
-        observability_by_context[context_id] = {
+        observability_by_context.setdefault(context_id, {})
+        observability_by_context[context_id].update({
             "requested_correlation_id": correlation_id,
             "generate_response_correlation_id": response_correlation_id,
             "error": str(exc),
-        }
+        })
 
     status_by_context[context_id] = generate_status
     observability_by_context.setdefault(context_id, {})
@@ -955,9 +1288,11 @@ fallback_db = client.contextdb
 
 contexts = []
 failed = []
+policy_artifact_entries = []
 
 for context_id in context_ids:
     context_oid = ObjectId(context_id)
+    context_doc = context_db.contexts.find_one({"_id": context_oid}) or {}
     validated_count = context_db.interactions.count_documents({
         "context_id": context_oid,
         "question_id": "validated_policy",
@@ -983,7 +1318,20 @@ for context_id in context_ids:
     reasons = []
     generate_status = status_by_context.get(context_id, 0)
     observability = observability_by_context.get(context_id, {})
+    context_plan_job = observability.get("context_plan_job", {})
     job_observability = observability.get("pipeline_job", {})
+    if observability.get("context_plan_status") not in (200, 202):
+        reasons.append(f"context_plan_status:{observability.get('context_plan_status')}")
+    if context_plan_job.get("status_code") not in (None, 200):
+        reasons.append(f"context_plan_job_status:{context_plan_job.get('status_code')}")
+    if context_plan_job.get("job_status") and context_plan_job.get("job_status") != "completed":
+        reasons.append(f"context_plan_job_terminal_status:{context_plan_job.get('job_status')}")
+    if context_plan_job.get("timed_out"):
+        reasons.append(f"context_plan_job_timeout_stage:{context_plan_job.get('job_stage')}")
+    if observability.get("final_context_status") != 200:
+        reasons.append(f"final_context_status:{observability.get('final_context_status')}")
+    if observability.get("final_context_error_code"):
+        reasons.append(f"final_context_error:{observability.get('final_context_error_code')}")
     if generate_status not in (200, 202, 302):
         reasons.append(f"generate_status:{generate_status}")
     if generate_status == 202 and not job_observability.get("job_id"):
@@ -1019,6 +1367,15 @@ for context_id in context_ids:
 
     if reasons:
         failed.append({"context_id": context_id, "reasons": reasons})
+    if policy_doc:
+        policy_artifact_entries.append(
+            build_policy_artifact_entry(
+                context_id,
+                context_doc,
+                policy_doc,
+                validation_docs,
+            )
+        )
 
     contexts.append({
         "context_id": context_id,
@@ -1043,6 +1400,7 @@ if preflight_failures:
         failed.insert(0, {"context_id": "preflight", "reasons": preflight_failures})
 
 finished_at = utc_now()
+write_policy_artifacts(policy_artifact_entries, finished_at)
 rag_preflight = load_json_file(os.getenv("MIGRATION_SMOKE_RAG_PREFLIGHT_FILE"))
 result = {
     "schema_version": "1.0",
@@ -1059,7 +1417,14 @@ result = {
     "environment": {
         "compose_file": "infrastructure/docker-compose.yml",
         "services": sorted(SERVICE_ENDPOINTS.keys()),
+        "agent_configs": CONFIG_EVIDENCE,
         "redaction": "applied",
+    },
+    "artifacts": {
+        "policy_review_json": POLICY_ARTIFACT_HOST_JSON,
+        "policy_review_markdown": POLICY_ARTIFACT_HOST_MARKDOWN,
+        "container_policy_review_json": POLICY_ARTIFACT_JSON,
+        "container_policy_review_markdown": POLICY_ARTIFACT_MARKDOWN,
     },
     "contexts": contexts,
     "failures": failed,
