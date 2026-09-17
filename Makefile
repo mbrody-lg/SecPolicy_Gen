@@ -8,14 +8,23 @@ FRONTEND_DIR=context-agent/frontend
 PNPM?=pnpm
 PNPM_COMMAND=$(PNPM) --pm-on-fail=ignore
 
-.PHONY: all docker-preflight up down clean rebuild logs observability-urls shell-context context-tests context-evals context-browser-smoke context-live-provider-smoke context-import frontend-pnpm-check frontend-install frontend-build frontend-check policy-shell policy-tests policy-vectorize policy-rag-validate policy-rag-backup policy-rag-restore validator-shell validator-tests governance-tests init25-runtime-compat functional-smoke functional-smoke-real functional-smoke-real-full functional-smoke-real-backup critical-path-validation bootstrap-test-env host-fast-tests lint help
+.PHONY: all docker-preflight agent-config-bootstrap validate-agent-config up down clean rebuild logs observability-urls shell-context context-tests context-evals context-browser-smoke context-live-provider-smoke context-import frontend-pnpm-check frontend-install frontend-build frontend-check policy-shell policy-tests policy-vectorize policy-rag-validate policy-rag-backup policy-rag-restore validator-shell validator-tests governance-tests init25-runtime-compat functional-smoke functional-smoke-real functional-smoke-real-full functional-smoke-real-backup critical-path-validation bootstrap-test-env host-fast-tests lint help
 
 ## Verify docker and compose prerequisites
 docker-preflight:
 	@bash scripts/docker_preflight.sh
 
+## Create local external agent configuration files when missing
+agent-config-bootstrap:
+	bash scripts/bootstrap_agent_config.sh
+
+## Validate external agent configuration contracts with service runtimes
+validate-agent-config: docker-preflight agent-config-bootstrap
+	$(COMPOSE) build context-agent policy-agent validator-agent
+	bash scripts/validate_agent_config_contracts.sh
+
 ## Start all infrastructure
-up: docker-preflight
+up: docker-preflight agent-config-bootstrap
 	$(COMPOSE) up --build -d
 
 ## Stop all infrastructure
@@ -174,6 +183,8 @@ help:
 	@echo "Makefile for multi-agent project"
 	@echo ""
 	@echo "make docker-preflight -> Verify Docker and Compose prerequisites"
+	@echo "make agent-config-bootstrap -> Create missing external local agent configs"
+	@echo "make validate-agent-config -> Validate external local agent config contracts"
 	@echo "make up 			-> Start all infrastructure"
 	@echo "make down 		-> Stop and remove containers"
 	@echo "make clean 		-> Stop + remove volumes"

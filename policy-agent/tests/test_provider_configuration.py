@@ -1,11 +1,13 @@
 from copy import deepcopy
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from app import mongo
-from app.agents.factory import MAX_PROPOSALS, validate_agent_config
+from app.agents.base import get_role_name
+from app.agents.factory import MAX_PROPOSALS, load_agent_config, validate_agent_config
 from app.services import logic
 
 
@@ -69,6 +71,26 @@ def test_validate_agent_config_accepts_role_identifier_in_any_key_order():
     ]
 
     assert validate_agent_config(config) is config
+
+
+def test_default_policy_agent_config_keeps_runtime_contract_shape():
+    config_path = Path(__file__).resolve().parents[1] / "app/config/policy_agent.yaml"
+    config = load_agent_config(str(config_path))
+
+    roles = {get_role_name(role): role for role in config["roles"]}
+
+    assert list(roles) == ["RAG", "MPG", "SRFL", "IMQ"]
+    assert roles["MPG"]["proposals"] == 3
+    assert roles["RAG"]["vector"][0]["collection"] == [
+        "legal_norms",
+        "sector_norms",
+        "security_frameworks",
+        "risk_methodologies",
+        "implementation_guides",
+    ]
+    for role in roles.values():
+        assert role["model"] == config["model"]
+        assert isinstance(role["instructions"], str) and role["instructions"].strip()
 
 
 class FakeProvider:
