@@ -159,6 +159,23 @@ def test_policy_handoff_prompt_uses_final_context_template():
     assert "Patient records require access controls." in prompt
 
 
+def test_policy_handoff_prompt_bounds_large_sections():
+    prompt = render_final_context_prompt({
+        "version": "1.0",
+        "plan_revision_id": "plan-rev-1",
+        "context_snapshot_hash": "hash-1",
+        "sections": {
+            "task_findings": {
+                "content": "Patient records require access controls. " + ("x" * 10000),
+            }
+        },
+    })
+
+    assert "Patient records require access controls." in prompt
+    assert len(prompt) < 20000
+    assert "policy_handoff_context for full structured detail" in prompt
+
+
 def test_openai_role_prompts_do_not_override_context_workplace_contract():
     roles_dir = Path(__file__).resolve().parents[1] / "app" / "agents" / "openai" / "roles"
 
