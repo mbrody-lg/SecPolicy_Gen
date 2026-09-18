@@ -114,7 +114,7 @@ restore_and_cleanup() {
         docker cp "$TMP_BACKUP_DIR/policy_agent.yaml" "$POLICY_CONTAINER:$POLICY_CONTAINER_CONFIG" || true
       fi
       if [[ -f "$TMP_BACKUP_DIR/validator_agent.yaml" ]]; then
-        docker cp "$TMP_BACKUP_DIR/validator_agent.yaml" "$VALIDATOR_CONTAINER:/validator-agent/app/config/validator_agent.yaml" || true
+        docker cp "$TMP_BACKUP_DIR/validator_agent.yaml" "$VALIDATOR_CONTAINER:$VALIDATOR_CONTAINER_CONFIG" || true
       fi
     fi
 
@@ -562,6 +562,13 @@ else
 fi
 
 validate_real_config_env
+"$ROOT_DIR/scripts/bootstrap_agent_config.sh"
+if is_mock_mode; then
+  export CONTEXT_AGENT_CONFIG_PATH="${CONTEXT_AGENT_CONFIG_PATH:-/context-agent/app/config/context_agent.yaml}"
+  export CONTEXT_QUESTIONS_CONFIG_PATH="${CONTEXT_QUESTIONS_CONFIG_PATH:-/context-agent/app/config/context_questions.yaml}"
+  export POLICY_AGENT_CONFIG_PATH="${POLICY_AGENT_CONFIG_PATH:-/policy-agent/app/config/policy_agent.yaml}"
+  export VALIDATOR_AGENT_CONFIG_PATH="${VALIDATOR_AGENT_CONFIG_PATH:-/validator-agent/app/config/validator_agent.yaml}"
+fi
 mkdir -p "$(dirname "$RAG_PREFLIGHT_FILE")"
 rm -f "$RAG_PREFLIGHT_FILE"
 
@@ -608,6 +615,11 @@ if is_mock_mode; then
   docker exec "$CONTEXT_CONTAINER" sh -lc "mkdir -p \"$(dirname "$CONTEXT_CONTAINER_CONFIG")\" && cp \"$CONTEXT_MOCK_CONFIG\" \"$CONTEXT_CONTAINER_CONFIG\""
   docker exec "$POLICY_CONTAINER" sh -lc "mkdir -p \"$(dirname "$POLICY_CONTAINER_CONFIG")\" && cp \"$POLICY_MOCK_CONFIG\" \"$POLICY_CONTAINER_CONFIG\""
   docker exec "$VALIDATOR_CONTAINER" sh -lc "mkdir -p \"$(dirname "$VALIDATOR_CONTAINER_CONFIG")\" && cp /validator-agent/app/config/examples/validator_agent.example.mock.yaml \"$VALIDATOR_CONTAINER_CONFIG\""
+  log "restarting services so mock configs are loaded into process memory"
+  "${DOCKER_COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$TMP_ENV_FILE" restart context-agent policy-agent validator-agent >/dev/null
+  wait_for_http "http://localhost:5003/"
+  wait_for_http "http://localhost:5002/generate_policy"
+  wait_for_http "http://localhost:5001/validate-policy"
 else
   log "using existing service configs (requires production-like API keys for model calls)"
 fi
