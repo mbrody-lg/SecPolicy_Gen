@@ -76,6 +76,13 @@ REQUIRED_ENV_EXAMPLE_VARIABLES = {
     "VALIDATOR_AGENT_TIMEOUT_SECONDS",
     "VALIDATOR_AGENT_URL",
 }
+EXTERNAL_AGENT_CONFIG_VARIABLES = {
+    "AGENT_CONFIG_DIR",
+    "CONTEXT_AGENT_CONFIG_PATH",
+    "CONTEXT_QUESTIONS_CONFIG_PATH",
+    "POLICY_AGENT_CONFIG_PATH",
+    "VALIDATOR_AGENT_CONFIG_PATH",
+}
 SECRET_EXAMPLE_VARIABLES = {
     "OIDC_CLIENT_SECRET",
     "FLASK_SECRET_KEY",
@@ -173,6 +180,13 @@ def test_environment_contract_covers_consumed_variables():
     )
 
     missing = consumed_variables - _contract_variables()
+
+    assert missing == set()
+
+
+@pytest.mark.fast
+def test_environment_contract_covers_external_agent_configuration():
+    missing = EXTERNAL_AGENT_CONFIG_VARIABLES - _contract_variables()
 
     assert missing == set()
 

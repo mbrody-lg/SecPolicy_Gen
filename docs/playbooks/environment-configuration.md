@@ -118,6 +118,11 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 
 | Variable | Class | Default policy | Used by | Validation expectation |
 |----------|-------|----------------|---------|------------------------|
+| `AGENT_CONFIG_DIR` | `safe default` | Defaults to `runtime/agent-config` on the host | Compose bind mounts and agent-config bootstrap/validation tooling | Directory must remain outside tracked service source and contain the expected YAML files |
+| `CONTEXT_AGENT_CONFIG_PATH` | `safe default` | Defaults to `/agent-config/context_agent.yaml` in Compose | Context Agent `CONFIG_PATH` wiring | Mounted file must pass the Context Agent runtime loader |
+| `CONTEXT_QUESTIONS_CONFIG_PATH` | `safe default` | Defaults to `/agent-config/context_questions.yaml` in Compose | Context Agent `QUESTIONS_CONFIG_PATH` wiring | Mounted file must pass the Context Agent questions loader |
+| `POLICY_AGENT_CONFIG_PATH` | `safe default` | Defaults to `/agent-config/policy_agent.yaml` in Compose | Policy Agent `CONFIG_PATH` wiring | Mounted file must pass the Policy Agent runtime loader |
+| `VALIDATOR_AGENT_CONFIG_PATH` | `safe default` | Defaults to `/agent-config/validator_agent.yaml` in Compose | Validator Agent `CONFIG_PATH` wiring | Mounted file must pass the Validator Agent runtime loader |
 | `FLASK_ENV` | `runtime knob` | Local Compose uses `development` | Flask runtime | Document as local-only until production runtime exists |
 | `FLASK_RUN_DEBUG` | `runtime knob` | Defaults to off; local override only | Flask development server | Must not be enabled by default |
 | `FLASK_APP` | `safe default` | Dockerfiles set each service app module | Local/container Flask runner | Required only for `flask run` style execution |
