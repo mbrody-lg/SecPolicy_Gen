@@ -33,6 +33,7 @@ CHROMA_BACKUP_FILE="${MIGRATION_SMOKE_CHROMA_BACKUP_FILE:-}"
 CHROMA_BACKUP_AFTER_REFRESH="${MIGRATION_SMOKE_CHROMA_BACKUP_AFTER_REFRESH:-0}"
 TMP_BACKUP_DIR=""
 GOLDEN_DIR="${MIGRATION_SMOKE_GOLDEN_DIR:-/migration/golden-contexts}"
+SMOKE_ORGANIZATION_ID="${MIGRATION_SMOKE_ORGANIZATION_ID:-functional-smoke-org}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 PROBE_MAX_ATTEMPTS="${MIGRATION_SMOKE_PROBE_ATTEMPTS:-60}"
 PROBE_DELAY_SECONDS="${MIGRATION_SMOKE_PROBE_DELAY_SECONDS:-2}"
@@ -591,17 +592,64 @@ docker exec "$CONTEXT_CONTAINER" test -d "$GOLDEN_DIR"
 log "loading golden fixtures from $GOLDEN_DIR"
 
 if [[ "$CLEAN_DB" == "1" || "$CLEAN_DB" == "true" ]]; then
-  log "clearing previous service state for deterministic run"
-  docker exec -i "$CONTEXT_CONTAINER" python - <<'PY'
+  log "clearing previous smoke tenant state for deterministic run"
+  docker exec -i -e MIGRATION_SMOKE_ORGANIZATION_ID="$SMOKE_ORGANIZATION_ID" "$CONTEXT_CONTAINER" python - <<'PY'
+import os
 from pymongo import MongoClient
 
+organization_id = os.environ["MIGRATION_SMOKE_ORGANIZATION_ID"]
 client = MongoClient("mongo", 27017)
-client.contextdb.contexts.delete_many({})
-client.contextdb.interactions.delete_many({})
-client.policydb.policies.delete_many({})
-client.validatordb.validations.delete_many({})
+context_documents = list(client.contextdb.contexts.find(
+    {"organization_id": organization_id},
+    {"_id": 1},
+))
+context_ids = [str(document["_id"]) for document in context_documents]
+context_object_ids = [document["_id"] for document in context_documents]
+tenant_filter = {"organization_id": organization_id}
+client.contextdb.contexts.delete_many(tenant_filter)
+client.contextdb.interactions.delete_many(tenant_filter)
+client.contextdb.pipeline_jobs.delete_many(tenant_filter)
+client.contextdb.pipeline_events.delete_many(tenant_filter)
+client.contextdb.pipeline_diagnostics.delete_many(tenant_filter)
+if context_ids:
+    context_filter = {"context_id": {"$in": context_ids}}
+    client.policydb.policies.delete_many(context_filter)
+    client.contextdb.policies.delete_many(context_filter)
+    client.validatordb.validations.delete_many(context_filter)
+    client.contextdb.validations.delete_many(context_filter)
+if context_object_ids:
+    client.contextdb.interactions.delete_many({
+        "context_id": {"$in": context_object_ids},
+    })
 PY
 fi
+
+log "provisioning smoke tenant $SMOKE_ORGANIZATION_ID"
+docker exec -i -e MIGRATION_SMOKE_ORGANIZATION_ID="$SMOKE_ORGANIZATION_ID" "$CONTEXT_CONTAINER" python - <<'PY'
+import os
+from datetime import datetime, timezone
+from pymongo import MongoClient
+
+organization_id = os.environ["MIGRATION_SMOKE_ORGANIZATION_ID"]
+now = datetime.now(timezone.utc)
+client = MongoClient("mongo", 27017)
+client.contextdb.organizations.update_one(
+    {"organization_id": organization_id},
+    {
+        "$set": {
+            "name": "Functional Smoke Organization",
+            "status": "active",
+            "updated_at": now,
+        },
+        "$setOnInsert": {
+            "_id": organization_id,
+            "organization_id": organization_id,
+            "created_at": now,
+        },
+    },
+    upsert=True,
+)
+PY
 
 if is_mock_mode; then
   CONTEXT_CONTAINER_CONFIG="$(resolve_service_config_path "$CONTEXT_CONTAINER")"
@@ -633,7 +681,10 @@ log "validating RAG runtime readiness contract"
 wait_for_rag_ready
 
 log "loading golden fixtures into context-agent"
-docker exec "$CONTEXT_CONTAINER" python generate_context_from_yaml.py "$GOLDEN_DIR"
+docker exec "$CONTEXT_CONTAINER" python generate_context_from_yaml.py \
+  --organization-id "$SMOKE_ORGANIZATION_ID" \
+  --auto-approve-plan \
+  "$GOLDEN_DIR"
 
 RESULT_FILE="$ROOT_DIR/migration/functional-smoke-result.json"
 ERROR_FILE="$ROOT_DIR/migration/functional-smoke-error.log"
@@ -648,6 +699,7 @@ if ! docker exec -i \
   -e MIGRATION_SMOKE_REQUIRE_RAG_READY="$REQUIRE_RAG_READY" \
   -e MIGRATION_SMOKE_RAG_MODE="$RAG_MODE" \
   -e MIGRATION_SMOKE_RAG_PREFLIGHT_FILE="/migration/functional-smoke-rag-preflight.json" \
+  -e MIGRATION_SMOKE_ORGANIZATION_ID="$SMOKE_ORGANIZATION_ID" \
   -e MIGRATION_SMOKE_PIPELINE_JOB_TIMEOUT_SECONDS="$PIPELINE_JOB_TIMEOUT_SECONDS" \
   -e MIGRATION_SMOKE_PIPELINE_JOB_POLL_SECONDS="$PIPELINE_JOB_POLL_SECONDS" \
   "$CONTEXT_CONTAINER" python - > "$RESULT_FILE" 2> "$ERROR_FILE" <<'PY'
@@ -659,6 +711,7 @@ from datetime import datetime, timezone
 from bson import ObjectId
 from pymongo import MongoClient
 from app import create_app, mongo
+from app.access_control import provision_membership, provision_organization, sync_principal
 import requests
 
 app = create_app()
@@ -689,6 +742,42 @@ MOCK_MODE = env_flag("MIGRATION_SMOKE_MOCK", True)
 REQUIRE_RAG_READY = env_flag("MIGRATION_SMOKE_REQUIRE_RAG_READY", False)
 PIPELINE_JOB_TIMEOUT_SECONDS = int(os.getenv("MIGRATION_SMOKE_PIPELINE_JOB_TIMEOUT_SECONDS", "180"))
 PIPELINE_JOB_POLL_SECONDS = float(os.getenv("MIGRATION_SMOKE_PIPELINE_JOB_POLL_SECONDS", "2"))
+SMOKE_ORGANIZATION_ID = os.getenv("MIGRATION_SMOKE_ORGANIZATION_ID", "functional-smoke-org")
+SMOKE_SUBJECT = "functional-smoke-user"
+
+
+def create_authenticated_session():
+    organization = provision_organization(
+        organization_id=SMOKE_ORGANIZATION_ID,
+        name="Functional Smoke Organization",
+    )
+    principal = sync_principal(
+        issuer=app.config["OIDC_ISSUER_URL"],
+        subject=SMOKE_SUBJECT,
+    )
+    provision_membership(
+        principal_id=principal["_id"],
+        organization_id=organization["organization_id"],
+        roles=["admin"],
+        is_default=True,
+    )
+    serializer = app.session_interface.get_signing_serializer(app)
+    if serializer is None:
+        raise RuntimeError("Unable to create signed functional smoke session.")
+    session_cookie = serializer.dumps({
+        "principal": {
+            "issuer": app.config["OIDC_ISSUER_URL"],
+            "subject": SMOKE_SUBJECT,
+        },
+    })
+    client = requests.Session()
+    client.headers.update({
+        "Cookie": f"{app.config['SESSION_COOKIE_NAME']}={session_cookie}",
+    })
+    return client
+
+
+HTTP = create_authenticated_session()
 
 
 def load_json_file(path):
@@ -735,7 +824,7 @@ def lookup_diagnostics(correlation_id):
 
     while time.time() < deadline:
         try:
-            diagnostics_response = requests.get(
+            diagnostics_response = HTTP.get(
                 f"http://localhost:5000/diagnostics/{correlation_id}",
                 headers={"X-Correlation-ID": correlation_id},
                 timeout=30,
@@ -770,7 +859,7 @@ def poll_pipeline_job(job_id):
     }
     while time.time() < deadline:
         try:
-            response = requests.get(
+            response = HTTP.get(
                 f"http://localhost:5000/pipeline/jobs/{job_id}",
                 headers={"Accept": "application/json"},
                 timeout=15,
@@ -809,14 +898,20 @@ for service_name, checks in service_checks.items():
         if check_name == "ready" and check.get("payload_status") != "ready":
             preflight_failures.append(f"{service_name}:{check_name}:payload_status:{check.get('payload_status')}")
 
-context_ids = [str(doc["_id"]) for doc in mongo.db.contexts.find({}, {"_id": 1})]
+context_ids = [
+    str(doc["_id"])
+    for doc in mongo.db.contexts.find(
+        {"organization_id": SMOKE_ORGANIZATION_ID},
+        {"_id": 1},
+    ).sort("created_at", 1)
+]
 status_by_context = {}
 observability_by_context = {}
 
 for context_id in context_ids:
     correlation_id = f"smoke-{context_id}-{uuid4().hex[:8]}"
     try:
-        response = requests.post(
+        response = HTTP.post(
             f"http://localhost:5000/context/{context_id}/generate_policy",
             headers={
                 "Accept": "application/json",
