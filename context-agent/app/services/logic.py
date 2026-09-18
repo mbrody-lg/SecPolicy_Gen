@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 MAX_PIPELINE_DIAGNOSTIC_HOPS = 25
 SYSTEM_STATUS_TIMEOUT_SECONDS = 2.0
 SYSTEM_RAG_STATUS_TIMEOUT_SECONDS = 10.0
+POLICY_HANDOFF_PROMPT_SECTION_LIMIT = 3500
 DEFAULT_CONTEXT_PROMPT_TEMPLATES = {
     "context_intake": "\n".join([
         "You are Context Agent working inside the Context Workplace.",
@@ -1641,13 +1642,16 @@ def _string_list(values) -> list[str]:
 
 
 def render_final_context_prompt(final_context: dict) -> str:
-    """Render the canonical prompt consumed by Policy Agent."""
+    """Render the bounded canonical prompt consumed by Policy Agent."""
     sections = final_context.get("sections", {})
     section_lines = []
     for title, section in sections.items():
         section_lines.extend([
             title.replace("_", " ").title(),
-            str(section.get("content") or "").strip(),
+            _bounded_handoff_text(
+                section.get("content"),
+                limit=POLICY_HANDOFF_PROMPT_SECTION_LIMIT,
+            ),
             "",
         ])
     return _render_context_prompt_template(
@@ -1657,9 +1661,22 @@ def render_final_context_prompt(final_context: dict) -> str:
                 f"- Final context version: {final_context.get('version')}",
                 f"- Plan revision: {final_context.get('plan_revision_id') or 'unknown'}",
                 f"- Context snapshot hash: {final_context.get('context_snapshot_hash') or 'unknown'}",
+                "- Detailed structured handoff is supplied separately in policy_handoff_context.",
             ]),
             "final_context_sections": "\n".join(section_lines).strip(),
         },
+    )
+
+
+def _bounded_handoff_text(value, *, limit: int) -> str:
+    """Return a bounded handoff text segment while preserving useful context."""
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    truncated = text[:limit].rstrip()
+    return (
+        f"{truncated}\n"
+        "[Truncated for policy prompt size; see policy_handoff_context for full structured detail.]"
     )
 
 
