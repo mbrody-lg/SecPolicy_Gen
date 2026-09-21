@@ -8,6 +8,9 @@ import pytest
 ROOT_DIR = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = ROOT_DIR / "docs" / "playbooks" / "environment-configuration.md"
 ENV_EXAMPLE_PATH = ROOT_DIR / "infrastructure" / ".env.example"
+SMOKE_ENV_EXAMPLE_PATH = ROOT_DIR / "infrastructure" / ".env.smoke.example"
+FUNCTIONAL_SMOKE_PATH = ROOT_DIR / "scripts" / "run_docker_functional_smoke.sh"
+GITIGNORE_PATH = ROOT_DIR / ".gitignore"
 SERVICE_ENV_EXAMPLE_PATHS = [
     ROOT_DIR / "context-agent" / ".env.example",
     ROOT_DIR / "policy-agent" / ".env.example",
@@ -212,6 +215,44 @@ def test_env_example_covers_contract_surface_with_fake_secrets():
     assert undocumented == set()
     assert unsafe_secret_examples == {}
     assert live_like_values == {}
+
+
+@pytest.mark.fast
+def test_smoke_env_example_is_complete_and_fake_only():
+    env_values = _env_file_values(SMOKE_ENV_EXAMPLE_PATH)
+
+    missing = REQUIRED_ENV_EXAMPLE_VARIABLES - set(env_values)
+    undocumented = set(env_values) - _contract_variables()
+    unsafe_secret_examples = {
+        key: env_values[key]
+        for key in SECRET_EXAMPLE_VARIABLES
+        if key in env_values and not env_values[key].startswith("fake-local-")
+    }
+    live_like_values = {
+        key: value
+        for key, value in env_values.items()
+        if any(pattern.search(value) for pattern in LIVE_SECRET_PATTERNS)
+    }
+
+    assert missing == set()
+    assert undocumented == set()
+    assert unsafe_secret_examples == {}
+    assert live_like_values == {}
+
+
+@pytest.mark.fast
+def test_functional_smoke_env_is_separate_from_developer_env():
+    script = _read(FUNCTIONAL_SMOKE_PATH)
+    gitignore = _read(GITIGNORE_PATH).splitlines()
+
+    assert 'LOCAL_ENV_FILE="${INFRA_DIR}/.env"' in script
+    assert 'SMOKE_ENV_FILE="${INFRA_DIR}/.env.smoke"' in script
+    assert 'SMOKE_ENV_FILE="$SMOKE_ENV_OVERRIDE"' in script
+    assert 'SMOKE_ENV_EXAMPLE_FILE="${INFRA_DIR}/.env.smoke.example"' in script
+    assert 'TMP_ENV_FILE="$LOCAL_ENV_FILE"' in script
+    assert 'cp "$SMOKE_ENV_EXAMPLE_FILE" "$TMP_ENV_FILE"' in script
+    assert 'cp "$INFRA_DIR/.env.example" "$TMP_ENV_FILE"' not in script
+    assert "/infrastructure/.env.smoke" in gitignore
 
 
 @pytest.mark.fast

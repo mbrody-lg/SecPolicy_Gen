@@ -138,6 +138,7 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | `MIGRATION_SMOKE_CLEAN_DB` | `runtime knob` | Defaults to clean on | Functional smoke | Parse as explicit truthy flag |
 | `MIGRATION_SMOKE_KEEP_STACK` | `runtime knob` | Defaults to off | Functional smoke cleanup | Parse as explicit truthy flag |
 | `MIGRATION_SMOKE_GOLDEN_DIR` | `safe default` | Defaults to mounted fixtures | Functional smoke | Path must exist in context container |
+| `MIGRATION_SMOKE_ORGANIZATION_ID` | `safe default` | Defaults to `functional-smoke-org` | Tenant-scoped functional smoke | Must identify the dedicated smoke organization and never select another tenant's state |
 | `MIGRATION_SMOKE_PROBE_ATTEMPTS` | `runtime knob` | Safe default `60` | Functional smoke probes | Parse as positive integer |
 | `MIGRATION_SMOKE_PROBE_DELAY_SECONDS` | `runtime knob` | Safe default `2` | Functional smoke probes | Parse as positive integer |
 | `MIGRATION_SMOKE_LOG_TAIL_LINES` | `runtime knob` | Safe default `80` | Functional smoke diagnostics | Keep logs bounded and redacted |
@@ -151,7 +152,7 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | `CHROMA_CONTAINER` | `safe default` | Defaults to local Compose Chroma container | Chroma backup tooling | Local/dev only |
 | `CHROMA_IMAGE` | `safe default` | Defaults to local Chroma image | Chroma backup tooling | Local/dev only |
 | `CHROMA_BACKUP_FILE` | `safe default` | Defaults to local workspace backup path | Chroma backup tooling | Path should stay under local workspace |
-| `MIGRATION_SMOKE_ENV_FILE` | `safe default` | Defaults to `infrastructure/.env` | Functional smoke | Path must exist |
+| `MIGRATION_SMOKE_ENV_FILE` | `safe default` | Defaults to ignored `infrastructure/.env.smoke`; when absent, mock smoke uses an ephemeral copy of `.env.smoke.example` | Functional smoke | Explicit overrides must exist; must contain fake-only deterministic values |
 | `MIGRATION_SMOKE_REQUIRE_REAL_CONFIG` | `runtime knob` | Defaults to off | Functional smoke | Parse as explicit truthy flag |
 | `MIGRATION_SMOKE_REQUIRE_RAG_READY` | `runtime knob` | Defaults to off | Functional smoke | Parse as explicit truthy flag |
 | `MIGRATION_SMOKE_RAG_MODE` | `runtime knob` | Defaults to mock-compatible mode | Functional smoke RAG preparation | Restrict to documented smoke modes |
@@ -188,6 +189,13 @@ Local-only settings include `FLASK_ENV=development`, `FLASK_RUN_DEBUG=1`,
 mappings, and bind mounts. The default local contract keeps
 `FLASK_RUN_DEBUG=0` and `DEBUG=false`; enabling either is an explicit developer
 override.
+
+Developer stack commands use the ignored `infrastructure/.env`, bootstrapped
+from `.env.example` when appropriate. Default functional smoke runs are
+isolated from that personal file: they use ignored `.env.smoke`, or an
+ephemeral copy of the versioned fake-only `.env.smoke.example` when the local
+smoke file is absent. Only an explicit
+`MIGRATION_SMOKE_REQUIRE_REAL_CONFIG=1` run may consume `.env`.
 
 Production environments must inject real secrets through a secret manager or
 equivalent runtime environment, keep `DEBUG=false`, use secure cookies behind

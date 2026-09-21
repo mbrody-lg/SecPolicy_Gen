@@ -4,7 +4,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INFRA_DIR="$ROOT_DIR/infrastructure"
 source "$ROOT_DIR/scripts/redaction.sh"
-INFRA_ENV_FILE="${INFRA_DIR}/.env"
+LOCAL_ENV_FILE="${INFRA_DIR}/.env"
+SMOKE_ENV_OVERRIDE="${MIGRATION_SMOKE_ENV_FILE:-}"
+SMOKE_ENV_FILE="${INFRA_DIR}/.env.smoke"
+if [[ -n "$SMOKE_ENV_OVERRIDE" ]]; then
+  SMOKE_ENV_FILE="$SMOKE_ENV_OVERRIDE"
+fi
+SMOKE_ENV_EXAMPLE_FILE="${INFRA_DIR}/.env.smoke.example"
 TMP_ENV_FILE=""
 TMP_ENV_TEMP_CREATED=0
 STACK_STARTED=0
@@ -262,8 +268,8 @@ validate_real_config_env() {
     return 0
   fi
 
-  if [[ "$TMP_ENV_TEMP_CREATED" -eq 1 || "$TMP_ENV_FILE" != "$INFRA_ENV_FILE" ]]; then
-    echo "Real-config smoke requires infrastructure/.env; refusing to use .env.example."
+  if [[ "$TMP_ENV_TEMP_CREATED" -eq 1 || "$TMP_ENV_FILE" != "$LOCAL_ENV_FILE" ]]; then
+    echo "Real-config smoke requires infrastructure/.env; refusing to use smoke configuration."
     return 1
   fi
 
@@ -545,21 +551,26 @@ fi
 
 validate_rag_mode
 
-if [[ ! -f "$INFRA_ENV_FILE" ]]; then
-  if is_truthy "$REQUIRE_REAL_CONFIG"; then
-    echo "Missing infrastructure/.env; real-config smoke cannot use .env.example."
-    exit 1
-  elif [[ -f "$INFRA_DIR/.env.example" ]]; then
-    TMP_ENV_FILE="$(mktemp)"
-    TMP_ENV_TEMP_CREATED=1
-    cp "$INFRA_DIR/.env.example" "$TMP_ENV_FILE"
-    log "using ephemeral infrastructure env file from .env.example"
-  else
-    echo "Missing infrastructure/.env and .env.example"
+if is_truthy "$REQUIRE_REAL_CONFIG"; then
+  if [[ ! -f "$LOCAL_ENV_FILE" ]]; then
+    echo "Missing infrastructure/.env; real-config smoke cannot use smoke configuration."
     exit 1
   fi
+  TMP_ENV_FILE="$LOCAL_ENV_FILE"
+elif [[ -f "$SMOKE_ENV_FILE" ]]; then
+  TMP_ENV_FILE="$SMOKE_ENV_FILE"
+  log "using functional-smoke env file: $SMOKE_ENV_FILE"
+elif [[ -n "$SMOKE_ENV_OVERRIDE" ]]; then
+  echo "Configured MIGRATION_SMOKE_ENV_FILE does not exist: $SMOKE_ENV_OVERRIDE"
+  exit 1
+elif [[ -f "$SMOKE_ENV_EXAMPLE_FILE" ]]; then
+  TMP_ENV_FILE="$(mktemp)"
+  TMP_ENV_TEMP_CREATED=1
+  cp "$SMOKE_ENV_EXAMPLE_FILE" "$TMP_ENV_FILE"
+  log "using ephemeral functional-smoke env file from .env.smoke.example"
 else
-  TMP_ENV_FILE="$INFRA_ENV_FILE"
+  echo "Missing infrastructure/.env.smoke and .env.smoke.example"
+  exit 1
 fi
 
 validate_real_config_env
