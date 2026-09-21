@@ -44,6 +44,7 @@ cache/
 # Environment / Secrets
 .env
 .env.*.local
+/infrastructure/.env.smoke
 
 # MacOS
 .DS_Store
