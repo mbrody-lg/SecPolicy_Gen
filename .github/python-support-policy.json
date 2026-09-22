@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "source": "https://devguide.python.org/versions/",
+  "warning_window_days": 180,
+  "eol_removal_days": 30,
+  "baseline_version": "3.11",
+  "supported_runtime_versions": ["3.11"],
+  "compatibility_target_versions": ["3.12", "3.13", "3.14"],
+  "preview_versions": ["3.15"],
+  "versions": [
+    {"version": "3.11", "eol": "2027-10-31", "tier": "baseline"},
+    {"version": "3.12", "eol": "2028-10-31", "tier": "compatibility-target"},
+    {"version": "3.13", "eol": "2029-10-31", "tier": "compatibility-target"},
+    {"version": "3.14", "eol": "2030-10-31", "tier": "compatibility-target"},
+    {"version": "3.15", "eol": "2031-10-31", "tier": "preview"}
+  ]
+}

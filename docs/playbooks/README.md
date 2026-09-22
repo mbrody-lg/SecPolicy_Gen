@@ -49,6 +49,7 @@ When the work needs a single CI-aligned evidence command for the full critical l
 - [Observability Log Contract](./observability-log-contract.md)
 - [Developer Recovery](./developer-recovery.md)
 - [CI Handoff Contract](./ci-handoff-contract.md)
+- [Python Dependency Constraints](./python-dependency-constraints.md)
 - [Environment Configuration Contract](./environment-configuration.md)
 
 ## When To Use Them

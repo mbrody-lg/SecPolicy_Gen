@@ -19,8 +19,8 @@ def test_report_inventories_repository_and_writes_artifacts(tmp_path):
     report = build_report(date(2026, 9, 22))
     write_report(report, tmp_path)
 
-    assert report["summary"]["eol_runtimes"] == 1
-    assert report["summary"]["approaching_eol_runtimes"] == 1
+    assert report["summary"]["eol_runtimes"] == 0
+    assert report["summary"]["approaching_eol_runtimes"] == 0
     assert {item["name"] for item in report["python_requirements"]} >= {"Flask", "openai"}
     assert any(item["name"] == "@playwright/test" for item in report["node_packages"])
     assert json.loads((tmp_path / "dependency-maintenance.json").read_text())["generated_on"] == "2026-09-22"
