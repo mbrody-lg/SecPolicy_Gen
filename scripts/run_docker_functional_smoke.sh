@@ -19,6 +19,8 @@ CONTEXT_CONTAINER="context_agent_web"
 POLICY_CONTAINER="policy_agent_service"
 VALIDATOR_CONTAINER="validator_agent_service"
 COMPOSE_FILE="${INFRA_DIR}/docker-compose.yml"
+COMPOSE_OVERRIDE="${MIGRATION_SMOKE_COMPOSE_OVERRIDE:-}"
+COMPOSE_PROJECT_NAME="${MIGRATION_SMOKE_COMPOSE_PROJECT:-}"
 POLICY_MOCK_CONFIG="/policy-agent/app/config/examples/policy_agent.example.mock.yaml"
 CONTEXT_MOCK_CONFIG="/context-agent/app/config/examples/context_agent.example.mock.yaml"
 CONTEXT_CONTAINER_CONFIG=""
@@ -190,11 +192,11 @@ collect_probe_diagnostics() {
   printf "\n"
 
   log "compose status:"
-  "${DOCKER_COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$TMP_ENV_FILE" ps 2>&1 \
+  "${DOCKER_COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" --env-file "$TMP_ENV_FILE" ps 2>&1 \
     | redact_sensitive_output || true
 
   log "recent $compose_service logs (tail=$LOG_TAIL_LINES):"
-  "${DOCKER_COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$TMP_ENV_FILE" logs --tail "$LOG_TAIL_LINES" "$compose_service" 2>&1 \
+  "${DOCKER_COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" --env-file "$TMP_ENV_FILE" logs --tail "$LOG_TAIL_LINES" "$compose_service" 2>&1 \
     | redact_sensitive_output || true
 }
 
@@ -205,6 +207,18 @@ elif docker compose version >/dev/null 2>&1; then
 else
   echo "docker-compose (or docker compose) is required for functional smoke tests."
   exit 1
+fi
+if [[ -n "$COMPOSE_PROJECT_NAME" ]]; then
+  DOCKER_COMPOSE_CMD+=( -p "$COMPOSE_PROJECT_NAME" )
+fi
+if [[ -n "$COMPOSE_OVERRIDE" ]]; then
+  if [[ ! -f "$COMPOSE_OVERRIDE" ]]; then
+    echo "Configured smoke Compose override does not exist: $COMPOSE_OVERRIDE"
+    exit 1
+  fi
+  COMPOSE_FILE_ARGS=(-f "$COMPOSE_FILE" -f "$COMPOSE_OVERRIDE")
+else
+  COMPOSE_FILE_ARGS=(-f "$COMPOSE_FILE")
 fi
 
 restore_and_cleanup() {
@@ -236,7 +250,7 @@ restore_and_cleanup() {
 
   if [[ "$STACK_STARTED" -eq 1 ]]; then
     log "stopping docker stack"
-    "${DOCKER_COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" down -v --remove-orphans >/dev/null 2>&1 || true
+    "${DOCKER_COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
     STACK_STARTED=0
   fi
 }
@@ -433,7 +447,7 @@ collect_rag_preflight_diagnostics() {
   printf "\n"
 
   log "recent policy-agent logs (tail=$LOG_TAIL_LINES):"
-  "${DOCKER_COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$TMP_ENV_FILE" logs --tail "$LOG_TAIL_LINES" "policy-agent" 2>&1 \
+  "${DOCKER_COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" --env-file "$TMP_ENV_FILE" logs --tail "$LOG_TAIL_LINES" "policy-agent" 2>&1 \
     | redact_sensitive_output || true
 }
 
@@ -682,7 +696,7 @@ mkdir -p "$(dirname "$RAG_PREFLIGHT_FILE")"
 rm -f "$RAG_PREFLIGHT_FILE"
 
 log "starting docker stack for functional smoke tests"
-"${DOCKER_COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$TMP_ENV_FILE" up --build -d
+"${DOCKER_COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" --env-file "$TMP_ENV_FILE" up --build -d
 STACK_STARTED=1
 
 log "waiting for services to accept HTTP traffic"
@@ -776,7 +790,7 @@ if is_mock_mode; then
   docker exec "$POLICY_CONTAINER" sh -lc "mkdir -p \"$(dirname "$POLICY_CONTAINER_CONFIG")\" && cp \"$POLICY_MOCK_CONFIG\" \"$POLICY_CONTAINER_CONFIG\""
   docker exec "$VALIDATOR_CONTAINER" sh -lc "mkdir -p \"$(dirname "$VALIDATOR_CONTAINER_CONFIG")\" && cp /validator-agent/app/config/examples/validator_agent.example.mock.yaml \"$VALIDATOR_CONTAINER_CONFIG\""
   log "restarting services so mock configs are loaded into process memory"
-  "${DOCKER_COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$TMP_ENV_FILE" restart context-agent policy-agent validator-agent >/dev/null
+  "${DOCKER_COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" --env-file "$TMP_ENV_FILE" restart context-agent policy-agent validator-agent >/dev/null
   wait_for_http "http://localhost:5003/"
   wait_for_http "http://localhost:5002/generate_policy"
   wait_for_http "http://localhost:5001/validate-policy"

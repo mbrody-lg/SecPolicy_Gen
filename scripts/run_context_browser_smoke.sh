@@ -6,15 +6,34 @@ cd "$ROOT_DIR"
 
 FIXTURE_PATH="${CONTEXT_BROWSER_FIXTURE_HOST_PATH:-migration/context-browser-smoke.json}"
 COMPOSE_FILE="infrastructure/docker-compose.yml"
-ENV_FILE="infrastructure/.env"
+COMPOSE_OVERRIDE="${CONTEXT_BROWSER_COMPOSE_OVERRIDE:-}"
+COMPOSE_PROJECT_NAME="${CONTEXT_BROWSER_COMPOSE_PROJECT:-}"
+ENV_FILE="${CONTEXT_BROWSER_ENV_FILE:-infrastructure/.env}"
+
+if [[ ! -f "$ENV_FILE" ]]; then
+  echo "[context-browser] environment file does not exist: $ENV_FILE" >&2
+  exit 1
+fi
+if [[ -n "$COMPOSE_OVERRIDE" && ! -f "$COMPOSE_OVERRIDE" ]]; then
+  echo "[context-browser] Compose override does not exist: $COMPOSE_OVERRIDE" >&2
+  exit 1
+fi
 
 make docker-preflight
 read -r -a DOCKER_COMPOSE_CMD <<< "$(scripts/docker_preflight.sh --print-compose)"
+if [[ -n "$COMPOSE_PROJECT_NAME" ]]; then
+  DOCKER_COMPOSE_CMD+=( -p "$COMPOSE_PROJECT_NAME" )
+fi
+if [[ -n "$COMPOSE_OVERRIDE" ]]; then
+  COMPOSE_FILE_ARGS=(-f "$COMPOSE_FILE" -f "$COMPOSE_OVERRIDE")
+else
+  COMPOSE_FILE_ARGS=(-f "$COMPOSE_FILE")
+fi
 
 mkdir -p "$(dirname "$FIXTURE_PATH")"
 
 echo "[context-browser] ensuring Context Agent test stack is running"
-"${DOCKER_COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d context-agent
+"${DOCKER_COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" --env-file "$ENV_FILE" up -d context-agent
 for _ in $(seq 1 60); do
   health_status="$(docker inspect --format='{{.State.Health.Status}}' context_agent_web 2>/dev/null || true)"
   if [[ "$health_status" == "healthy" ]]; then
@@ -31,6 +50,6 @@ echo "[context-browser] seeding deterministic context workflow fixtures"
 docker exec context_agent_web python scripts/seed_browser_smoke_contexts.py > "$FIXTURE_PATH"
 
 echo "[context-browser] running Playwright release-gate smoke in Docker"
-"${DOCKER_COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" --profile test run --rm \
+"${DOCKER_COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" --env-file "$ENV_FILE" --profile test run --rm \
   -e CONTEXT_BROWSER_FIXTURE_PATH="/repo/$FIXTURE_PATH" \
   context-browser-tests

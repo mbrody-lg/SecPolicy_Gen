@@ -16,6 +16,11 @@ if str(TESTS_PATH) not in sys.path:
     sys.path.insert(0, str(TESTS_PATH))
 
 from app import create_app, mongo  # noqa: E402
+from app.access_control import (  # noqa: E402
+    provision_membership,
+    provision_organization,
+    sync_principal,
+)
 from ui_workflow_fixtures import context_document, interactions  # noqa: E402
 
 
@@ -26,12 +31,23 @@ STATES = (
     "final_needs_improvement",
     "ready",
 )
+ORGANIZATION_ID = "browser-smoke-org"
+SUBJECT = "browser-smoke-user"
 
 
 def main() -> None:
     app = create_app()
     urls = {}
     with app.app_context():
+        issuer = app.config["OIDC_ISSUER_URL"]
+        principal = sync_principal(issuer=issuer, subject=SUBJECT)
+        provision_organization(name="Browser Smoke Organization", organization_id=ORGANIZATION_ID)
+        provision_membership(
+            principal_id=principal["_id"],
+            organization_id=ORGANIZATION_ID,
+            roles=["operator"],
+            is_default=True,
+        )
         mongo.db.contexts.delete_many({"browser_smoke": True})
         mongo.db.interactions.delete_many({"browser_smoke": True})
 
@@ -39,16 +55,35 @@ def main() -> None:
             context_id = str(ObjectId())
             context = context_document(context_id, state)
             context["browser_smoke"] = True
+            context["organization_id"] = ORGANIZATION_ID
             mongo.db.contexts.insert_one(context)
 
             seeded_interactions = []
             for interaction in interactions(context_id):
                 interaction["browser_smoke"] = True
+                interaction["organization_id"] = ORGANIZATION_ID
                 seeded_interactions.append(interaction)
             mongo.db.interactions.insert_many(seeded_interactions)
             urls[state] = f"/context/{context_id}"
 
-    print(json.dumps({"contexts": urls}, sort_keys=True))
+        session_serializer = app.session_interface.get_signing_serializer(app)
+        session_cookie = session_serializer.dumps(
+            {"principal": {"issuer": issuer, "subject": SUBJECT}}
+        )
+
+    print(
+        json.dumps(
+            {
+                "contexts": urls,
+                "session_cookie": {
+                    "name": app.config.get("SESSION_COOKIE_NAME", "session"),
+                    "value": session_cookie,
+                    "url": "http://context-agent:5000",
+                },
+            },
+            sort_keys=True,
+        )
+    )
 
 
 if __name__ == "__main__":

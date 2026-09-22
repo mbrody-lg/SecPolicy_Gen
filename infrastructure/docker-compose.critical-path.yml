@@ -1,0 +1,18 @@
+# Test-only credentials for the CI critical-path runner.
+services:
+  context-agent:
+    environment:
+      TESTING: "true"
+      FLASK_SECRET_KEY: test-only-secret-key
+      POLICY_CALLBACK_TOKEN: test-only-policy-callback-token
+      SERVICE_AUTH_TOKEN: test-only-service-auth-token
+  policy-agent:
+    environment:
+      TESTING: "true"
+      FLASK_SECRET_KEY: test-only-secret-key
+      SERVICE_AUTH_TOKEN: test-only-service-auth-token
+  validator-agent:
+    environment:
+      TESTING: "true"
+      FLASK_SECRET_KEY: test-only-secret-key
+      SERVICE_AUTH_TOKEN: test-only-service-auth-token
