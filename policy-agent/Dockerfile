@@ -1,6 +1,10 @@
 # Local/development Flask image. Not a production runtime contract.
 FROM python:3.11-slim
 
+ARG PIP_VERSION=26.2.1
+ARG TORCH_VERSION=2.14.0+cpu
+ARG TORCH_CPU_INDEX=https://download.pytorch.org/whl/cpu
+
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/policy-agent
@@ -14,10 +18,11 @@ RUN apt-get update \
 
 WORKDIR /policy-agent
 
-COPY requirements.txt .
-RUN pip install --upgrade pip \
-    && pip install --index-url https://download.pytorch.org/whl/cpu torch \
-    && pip install -r requirements.txt
+COPY requirements.txt constraints-py311.txt ./
+RUN python -m pip install --upgrade "pip==${PIP_VERSION}" \
+    && python -m pip install --index-url "${TORCH_CPU_INDEX}" "torch==${TORCH_VERSION}" \
+    && python -m pip install -c constraints-py311.txt -r requirements.txt \
+    && python -m pip check
 
 COPY . .
 
