@@ -8,7 +8,7 @@ FRONTEND_DIR=context-agent/frontend
 PNPM?=pnpm
 PNPM_COMMAND=$(PNPM) --pm-on-fail=ignore
 
-.PHONY: all docker-preflight agent-config-bootstrap validate-agent-config dependency-maintenance-report python-constraints-check up down clean rebuild logs observability-urls shell-context context-tests context-evals context-browser-smoke context-live-provider-smoke context-import frontend-pnpm-check frontend-install frontend-build frontend-check policy-shell policy-tests policy-vectorize policy-rag-validate policy-rag-backup policy-rag-restore validator-shell validator-tests governance-tests init25-runtime-compat functional-smoke functional-smoke-real functional-smoke-real-full functional-smoke-real-backup critical-path-validation bootstrap-test-env host-fast-tests lint help
+.PHONY: all docker-preflight agent-config-bootstrap validate-agent-config dependency-maintenance-report python-constraints-check python-support-check up down clean rebuild logs observability-urls shell-context context-tests context-evals context-browser-smoke context-live-provider-smoke context-import frontend-pnpm-check frontend-install frontend-build frontend-check policy-shell policy-tests policy-vectorize policy-rag-validate policy-rag-backup policy-rag-restore validator-shell validator-tests governance-tests init25-runtime-compat functional-smoke functional-smoke-real functional-smoke-real-full functional-smoke-real-backup critical-path-validation bootstrap-test-env host-fast-tests lint help
 
 ## Verify docker and compose prerequisites
 docker-preflight:
@@ -28,6 +28,9 @@ dependency-maintenance-report:
 
 python-constraints-check:
 	python3 scripts/validate_python_constraints.py
+
+python-support-check:
+	python3 scripts/validate_python_support.py
 
 ## Start all infrastructure
 up: docker-preflight agent-config-bootstrap
