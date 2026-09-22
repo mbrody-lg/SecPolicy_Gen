@@ -42,6 +42,8 @@ def test_critical_path_passes_explicit_env_and_project_to_smoke():
     smoke = SMOKE_RUNNER.read_text(encoding="utf-8")
 
     assert 'ENV_FILE="${CRITICAL_PATH_ENV_FILE:-infrastructure/.env}"' in validation
+    assert 'ENV_FILE="$ENV_FILE" make docker-preflight' in validation
+    assert 'ENV_FILE="$ENV_FILE" scripts/docker_preflight.sh --print-compose' in validation
     assert 'COMPOSE_PROJECT_NAME="${CRITICAL_PATH_COMPOSE_PROJECT:-}"' in validation
     assert 'MIGRATION_SMOKE_ENV_FILE="$ENV_FILE"' in validation
     assert 'MIGRATION_SMOKE_COMPOSE_PROJECT="$COMPOSE_PROJECT_NAME"' in validation

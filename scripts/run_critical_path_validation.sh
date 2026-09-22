@@ -102,8 +102,8 @@ if [[ -n "$COMPOSE_OVERRIDE" && ! -f "$COMPOSE_OVERRIDE" ]]; then
 fi
 
 echo "[critical-path] starting docker stack"
-make docker-preflight
-read -r -a DOCKER_COMPOSE_CMD <<< "$(scripts/docker_preflight.sh --print-compose)"
+ENV_FILE="$ENV_FILE" make docker-preflight
+read -r -a DOCKER_COMPOSE_CMD <<< "$(ENV_FILE="$ENV_FILE" scripts/docker_preflight.sh --print-compose)"
 if [[ -n "$COMPOSE_PROJECT_NAME" ]]; then
   DOCKER_COMPOSE_CMD+=( -p "$COMPOSE_PROJECT_NAME" )
 fi
