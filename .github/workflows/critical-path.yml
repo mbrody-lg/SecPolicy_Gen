@@ -1,0 +1,56 @@
+name: Critical path
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/critical-path.yml"
+      - "context-agent/**"
+      - "policy-agent/**"
+      - "validator-agent/**"
+      - "infrastructure/docker-compose.yml"
+      - "infrastructure/docker-compose.critical-path.yml"
+      - "infrastructure/.env.smoke.example"
+      - "migration/golden-contexts/**"
+      - "scripts/bootstrap_agent_config.sh"
+      - "scripts/docker_preflight.sh"
+      - "scripts/run_critical_path_ci.sh"
+      - "scripts/run_critical_path_validation.sh"
+      - "scripts/run_context_browser_smoke.sh"
+      - "scripts/run_docker_functional_smoke.sh"
+      - "scripts/validate_smoke_artifact.py"
+      - "Makefile"
+      - "pyproject.toml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: critical-path-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  critical-path:
+    name: informational-critical-path
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Run critical path validation
+        run: bash scripts/run_critical_path_ci.sh
+      - name: Publish critical-path evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: critical-path-evidence-${{ github.run_id }}
+          path: |
+            migration/critical-path/metrics.json
+            migration/functional-smoke-result.json
+            migration/functional-smoke-rag-preflight.json
+            migration/functional-smoke-policies.json
+            migration/functional-smoke-policies.md
+          if-no-files-found: warn
+          retention-days: 14

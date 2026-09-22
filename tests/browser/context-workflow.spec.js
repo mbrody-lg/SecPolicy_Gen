@@ -11,6 +11,10 @@ async function openContext(page, state) {
   if (!url) {
     throw new Error(`Missing browser fixture context for state: ${state}`);
   }
+  if (!manifest.session_cookie) {
+    throw new Error("Missing browser fixture session cookie");
+  }
+  await page.context().addCookies([manifest.session_cookie]);
   await page.goto(url);
   await expect(page.locator("[data-workplace-navigation]")).toBeVisible();
 }
@@ -54,10 +58,15 @@ test.describe("Context Agent workflow release gate", () => {
 
     const blockedPolicy = await openTab(page, "policy-generation");
     await expect(blockedPolicy.getByText("Synthesize the final context before generating a policy.")).toBeVisible();
-    await expect(blockedPolicy.locator("[data-generate-policy-button]")).toBeDisabled();
+    const blockedButton = blockedPolicy.locator("[data-generate-policy-button]");
+    await expect(blockedButton).toHaveAttribute("data-domain-ready", "0");
+    await expect(blockedButton).toBeDisabled();
 
     await openContext(page, "ready");
     const readyPolicy = await openTab(page, "policy-generation");
-    await expect(readyPolicy.locator("[data-generate-policy-button]")).toBeEnabled();
+    await expect(readyPolicy.locator("[data-generate-policy-button]")).toHaveAttribute(
+      "data-domain-ready",
+      "1",
+    );
   });
 });

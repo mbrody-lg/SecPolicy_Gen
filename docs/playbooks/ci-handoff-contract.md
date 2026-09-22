@@ -120,6 +120,13 @@ The runner applies `docker-compose.service-tests.yml` under a dedicated Compose
 project name, with fixed container names and host ports removed, so cleanup
 cannot target the developer's normal stack or volumes.
 
+The critical-path workflow is a separate informational check. It runs the
+canonical `make critical-path-validation` target with the versioned fake-only
+environment and a dedicated Compose project, removes CI-owned volumes, records
+duration and runner disk usage, and retains the redacted smoke artifacts for 14
+days. `continue-on-error` is deliberate during baseline collection; promotion
+to a required check needs the criteria below and a separate reviewed change.
+
 ## Informational First Gates
 
 Start these as informational until INIT-04 has enough runtime history:
@@ -134,6 +141,11 @@ Good promotion signals:
 - command duration is acceptable for PR feedback
 - retry behavior is not masking real runtime defects
 - logs avoid secret disclosure
+
+The informational critical-path baseline must also record total duration and
+disk delta. Review at least five representative PR runs before promotion, with
+no unexplained flakes, actionable retained evidence for every failure, and a
+runtime that remains within the 45-minute job budget.
 
 ## Failure Artifacts
 

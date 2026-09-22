@@ -1,8 +1,9 @@
 # Infrastructure directory
 INFRA_DIR=infrastructure
+ENV_FILE?=$(INFRA_DIR)/.env
 
 DOCKER_COMPOSE_CMD=$(shell scripts/docker_preflight.sh --print-compose 2>/dev/null || printf 'docker-compose')
-COMPOSE=$(DOCKER_COMPOSE_CMD) -f $(INFRA_DIR)/docker-compose.yml --env-file $(INFRA_DIR)/.env
+COMPOSE=$(DOCKER_COMPOSE_CMD) -f $(INFRA_DIR)/docker-compose.yml --env-file $(ENV_FILE)
 LINT_PYTHON=$(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi)
 FRONTEND_DIR=context-agent/frontend
 PNPM?=pnpm

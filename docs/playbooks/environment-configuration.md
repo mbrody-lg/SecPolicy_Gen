@@ -143,6 +143,9 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | `MIGRATION_SMOKE_PROBE_DELAY_SECONDS` | `runtime knob` | Safe default `2` | Functional smoke probes | Parse as positive integer |
 | `MIGRATION_SMOKE_LOG_TAIL_LINES` | `runtime knob` | Safe default `80` | Functional smoke diagnostics | Keep logs bounded and redacted |
 | `CONTEXT_BROWSER_FIXTURE_HOST_PATH` | `safe default` | Defaults to `migration/context-browser-smoke.json` | Context browser smoke | Local fixture manifest path; do not commit generated artifact |
+| `CONTEXT_BROWSER_ENV_FILE` | `safe default` | Defaults to `infrastructure/.env`; inherited from critical-path CI | Context browser smoke | CI must use the versioned fake-only env file |
+| `CONTEXT_BROWSER_COMPOSE_PROJECT` | `safe default` | Empty locally; inherited from critical-path CI | Context browser smoke | Reuse the active critical-path project |
+| `CONTEXT_BROWSER_COMPOSE_OVERRIDE` | `safe default` | Empty locally; inherited from critical-path CI | Context browser smoke | Reuse the test-only critical-path overlay |
 | `CONTEXT_LIVE_PROVIDER_SMOKE_OUTPUT` | `safe default` | Defaults to `migration/context-live-provider-smoke.json` | Context live-provider smoke | Local redacted evidence path; do not commit generated artifact |
 | `RUN_REAL_PROVIDER_TESTS` | `runtime knob` | Defaults to off | Live provider tests | Must be explicit; deterministic tests must not require it |
 | `COMPOSE_FILE` | `safe default` | Defaults to infrastructure Compose file | Docker preflight | Path must exist |
@@ -150,6 +153,13 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | `SERVICE_TEST_ENV_FILE` | `safe default` | Defaults to versioned fake-only `.env.smoke.example` | Isolated service-test runner | Explicit override must exist and must not contain production credentials |
 | `SERVICE_TEST_METRICS_DIR` | `safe default` | Defaults to `migration/service-tests` | Isolated service-test runner | Generated metrics remain local or short-lived CI artifacts |
 | `SERVICE_TEST_HEALTH_TIMEOUT_SECONDS` | `runtime knob` | Safe default `180` | Isolated service-test runner | Parse as a positive integer and keep bounded |
+| `CRITICAL_PATH_ENV_FILE` | `safe default` | Local critical path defaults to `infrastructure/.env`; CI uses `.env.smoke.example` | Critical-path validation | Explicit override must exist; CI must never consume the developer env file |
+| `CRITICAL_PATH_COMPOSE_PROJECT` | `safe default` | Empty locally; CI uses `secpolicy-critical-path-ci` | Critical-path validation | CI project name must be dedicated to the job |
+| `CRITICAL_PATH_COMPOSE_OVERRIDE` | `safe default` | Empty locally; CI uses `docker-compose.critical-path.yml` | Critical-path validation | Overlay contains test-only credentials and must flow into the smoke phase |
+| `CRITICAL_PATH_REMOVE_VOLUMES` | `runtime knob` | Defaults to off locally; CI sets `1` | Critical-path cleanup | Remove volumes only for the dedicated CI project |
+| `CRITICAL_PATH_METRICS_DIR` | `safe default` | Defaults to `migration/critical-path` | Critical-path CI wrapper | Generated metrics are short-lived CI artifacts |
+| `MIGRATION_SMOKE_COMPOSE_PROJECT` | `safe default` | Empty locally; inherited from critical-path CI | Functional smoke | Use a dedicated project in automation |
+| `MIGRATION_SMOKE_COMPOSE_OVERRIDE` | `safe default` | Empty locally; inherited from critical-path CI | Functional smoke | Explicit override must exist and remain test-only |
 | `GRAFANA_ADMIN_USER` | `runtime knob` | Local default `admin` | Local Grafana service | Local/dev only |
 | `GRAFANA_ADMIN_PASSWORD` | `runtime knob` | Local default `admin` | Local Grafana service | Local/dev only; do not reuse in production |
 | `CHROMA_CONTAINER` | `safe default` | Defaults to local Compose Chroma container | Chroma backup tooling | Local/dev only |
