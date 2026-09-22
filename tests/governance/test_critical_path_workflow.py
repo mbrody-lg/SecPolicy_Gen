@@ -3,6 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "critical-path.yml"
+MAKEFILE = ROOT / "Makefile"
 CI_RUNNER = ROOT / "scripts" / "run_critical_path_ci.sh"
 VALIDATION_RUNNER = ROOT / "scripts" / "run_critical_path_validation.sh"
 SMOKE_RUNNER = ROOT / "scripts" / "run_docker_functional_smoke.sh"
@@ -72,6 +73,18 @@ def test_context_browser_smoke_accepts_critical_path_compose_contract():
     assert "CONTEXT_BROWSER_ENV_FILE" in browser
     assert "CONTEXT_BROWSER_COMPOSE_PROJECT" in browser
     assert "CONTEXT_BROWSER_COMPOSE_OVERRIDE" in browser
+    assert 'ENV_FILE="$ENV_FILE" make docker-preflight' in browser
+    assert 'ENV_FILE="$ENV_FILE" scripts/docker_preflight.sh --print-compose' in browser
+
+
+def test_governance_target_accepts_the_critical_path_env_file():
+    validation = VALIDATION_RUNNER.read_text(encoding="utf-8")
+    makefile = MAKEFILE.read_text(encoding="utf-8")
+
+    assert "ENV_FILE?=$(INFRA_DIR)/.env" in makefile
+    assert "--env-file $(ENV_FILE)" in makefile
+    assert "--env-file $(INFRA_DIR)/.env" not in makefile
+    assert 'ENV_FILE="$ENV_FILE" make governance-tests' in validation
 
 
 def test_browser_fixture_provisions_tenant_scoped_test_session():

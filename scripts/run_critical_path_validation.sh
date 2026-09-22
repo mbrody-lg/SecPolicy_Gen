@@ -125,7 +125,7 @@ CONTEXT_BROWSER_COMPOSE_OVERRIDE="$COMPOSE_OVERRIDE" \
   make context-browser-smoke
 make policy-tests
 make validator-tests
-make governance-tests
+ENV_FILE="$ENV_FILE" make governance-tests
 
 echo "[critical-path] resetting stack before smoke validation"
 compose_down
