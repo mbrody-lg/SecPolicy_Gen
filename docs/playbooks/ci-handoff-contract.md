@@ -110,6 +110,16 @@ clear failure ownership: lint, fast host tests, Compose config validation,
 critical path can become required after INIT-04 has runtime history and stable
 artifact retention.
 
+The service-test workflow runs Context, Policy, and Validator Agent as separate
+matrix checks through `scripts/run_service_tests_ci.sh`. Each check uses the
+versioned fake-only smoke environment, starts only the selected Compose service
+and its declared dependencies, waits for health, invokes the canonical Make
+target, records build-plus-test duration, and removes its volumes. Provider-live
+tests remain opt-in through their pytest skip contract and receive no CI secret.
+The runner applies `docker-compose.service-tests.yml` under a dedicated Compose
+project name, with fixed container names and host ports removed, so cleanup
+cannot target the developer's normal stack or volumes.
+
 ## Informational First Gates
 
 Start these as informational until INIT-04 has enough runtime history:

@@ -7,6 +7,9 @@ LINT_PYTHON=$(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else
 FRONTEND_DIR=context-agent/frontend
 PNPM?=pnpm
 PNPM_COMMAND=$(PNPM) --pm-on-fail=ignore
+CONTEXT_TEST_CONTAINER?=context_agent_web
+POLICY_TEST_CONTAINER?=policy_agent_service
+VALIDATOR_TEST_CONTAINER?=validator_agent_service
 
 .PHONY: all docker-preflight agent-config-bootstrap validate-agent-config dependency-maintenance-report python-constraints-check python-support-check up down clean rebuild logs observability-urls shell-context context-tests context-evals context-browser-smoke context-live-provider-smoke context-import frontend-pnpm-check frontend-install frontend-build frontend-check policy-shell policy-tests policy-vectorize policy-rag-validate policy-rag-backup policy-rag-restore validator-shell validator-tests governance-tests init25-runtime-compat functional-smoke functional-smoke-real functional-smoke-real-full functional-smoke-real-backup critical-path-validation bootstrap-test-env host-fast-tests lint help
 
@@ -64,7 +67,7 @@ shell-context:
 
 ## Run tests for agent-context
 context-tests: 
-	docker exec context_agent_web pytest
+	docker exec $(CONTEXT_TEST_CONTAINER) pytest
 
 ## Run deterministic Context Agent evaluation release gate
 context-evals:
@@ -115,7 +118,7 @@ policy-shell:
 
 ## Run tests for policy-agent
 policy-tests: 
-	docker exec policy_agent_service pytest
+	docker exec $(POLICY_TEST_CONTAINER) pytest
 
 ## Run tests for policy-agent
 policy-vectorize: 
@@ -139,7 +142,7 @@ validator-shell:
 
 ## Execute testos for validator-agent
 validator-tests:
-	docker exec validator_agent_service pytest
+	docker exec $(VALIDATOR_TEST_CONTAINER) pytest
 
 ## Run repository-level governance tests in a Docker test runner
 governance-tests: docker-preflight
