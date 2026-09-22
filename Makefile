@@ -8,7 +8,7 @@ FRONTEND_DIR=context-agent/frontend
 PNPM?=pnpm
 PNPM_COMMAND=$(PNPM) --pm-on-fail=ignore
 
-.PHONY: all docker-preflight agent-config-bootstrap validate-agent-config up down clean rebuild logs observability-urls shell-context context-tests context-evals context-browser-smoke context-live-provider-smoke context-import frontend-pnpm-check frontend-install frontend-build frontend-check policy-shell policy-tests policy-vectorize policy-rag-validate policy-rag-backup policy-rag-restore validator-shell validator-tests governance-tests init25-runtime-compat functional-smoke functional-smoke-real functional-smoke-real-full functional-smoke-real-backup critical-path-validation bootstrap-test-env host-fast-tests lint help
+.PHONY: all docker-preflight agent-config-bootstrap validate-agent-config dependency-maintenance-report up down clean rebuild logs observability-urls shell-context context-tests context-evals context-browser-smoke context-live-provider-smoke context-import frontend-pnpm-check frontend-install frontend-build frontend-check policy-shell policy-tests policy-vectorize policy-rag-validate policy-rag-backup policy-rag-restore validator-shell validator-tests governance-tests init25-runtime-compat functional-smoke functional-smoke-real functional-smoke-real-full functional-smoke-real-backup critical-path-validation bootstrap-test-env host-fast-tests lint help
 
 ## Verify docker and compose prerequisites
 docker-preflight:
@@ -22,6 +22,9 @@ agent-config-bootstrap:
 validate-agent-config: docker-preflight agent-config-bootstrap
 	$(COMPOSE) build context-agent policy-agent validator-agent
 	bash scripts/validate_agent_config_contracts.sh
+
+dependency-maintenance-report:
+	python3 scripts/build_dependency_maintenance_report.py
 
 ## Start all infrastructure
 up: docker-preflight agent-config-bootstrap
@@ -185,6 +188,7 @@ help:
 	@echo "make docker-preflight -> Verify Docker and Compose prerequisites"
 	@echo "make agent-config-bootstrap -> Create missing external local agent configs"
 	@echo "make validate-agent-config -> Validate external local agent config contracts"
+	@echo "make dependency-maintenance-report -> Build informational dependency lifecycle inventory"
 	@echo "make up 			-> Start all infrastructure"
 	@echo "make down 		-> Stop and remove containers"
 	@echo "make clean 		-> Stop + remove volumes"

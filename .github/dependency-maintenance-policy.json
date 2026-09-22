@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "warning_window_days": 180,
+  "sources": {
+    "python": "https://devguide.python.org/versions/",
+    "node": "https://nodejs.org/en/about/previous-releases"
+  },
+  "runtimes": [
+    {"name": "python", "version": "3.9", "eol": "2025-10-31", "usage": "pylint CI matrix"},
+    {"name": "python", "version": "3.10", "eol": "2026-10-31", "usage": "pylint CI matrix"},
+    {"name": "python", "version": "3.11", "eol": "2027-10-31", "usage": "service containers and pylint CI"},
+    {"name": "python", "version": "3.12", "eol": "2028-10-31", "usage": "pylint CI matrix"},
+    {"name": "node", "version": "22", "eol": "2027-04-30", "usage": "frontend build CI"}
+  ]
+}
