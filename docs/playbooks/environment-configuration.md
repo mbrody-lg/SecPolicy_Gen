@@ -147,6 +147,9 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | `RUN_REAL_PROVIDER_TESTS` | `runtime knob` | Defaults to off | Live provider tests | Must be explicit; deterministic tests must not require it |
 | `COMPOSE_FILE` | `safe default` | Defaults to infrastructure Compose file | Docker preflight | Path must exist |
 | `ENV_FILE` | `safe default` | Defaults to `infrastructure/.env` | Docker preflight | Path must exist for stack targets |
+| `SERVICE_TEST_ENV_FILE` | `safe default` | Defaults to versioned fake-only `.env.smoke.example` | Isolated service-test runner | Explicit override must exist and must not contain production credentials |
+| `SERVICE_TEST_METRICS_DIR` | `safe default` | Defaults to `migration/service-tests` | Isolated service-test runner | Generated metrics remain local or short-lived CI artifacts |
+| `SERVICE_TEST_HEALTH_TIMEOUT_SECONDS` | `runtime knob` | Safe default `180` | Isolated service-test runner | Parse as a positive integer and keep bounded |
 | `GRAFANA_ADMIN_USER` | `runtime knob` | Local default `admin` | Local Grafana service | Local/dev only |
 | `GRAFANA_ADMIN_PASSWORD` | `runtime knob` | Local default `admin` | Local Grafana service | Local/dev only; do not reuse in production |
 | `CHROMA_CONTAINER` | `safe default` | Defaults to local Compose Chroma container | Chroma backup tooling | Local/dev only |

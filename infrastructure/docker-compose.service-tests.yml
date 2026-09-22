@@ -1,0 +1,29 @@
+# Isolation overlay for service-test runners. No fixed names or host ports.
+services:
+  mongo:
+    container_name: !reset null
+    ports: !reset []
+  chroma:
+    ports: !reset []
+  context-agent:
+    container_name: !reset null
+    ports: !reset []
+    environment:
+      TESTING: "true"
+      FLASK_SECRET_KEY: test-only-secret-key
+      POLICY_CALLBACK_TOKEN: test-only-policy-callback-token
+      SERVICE_AUTH_TOKEN: test-only-service-auth-token
+  policy-agent:
+    container_name: !reset null
+    ports: !reset []
+    environment:
+      TESTING: "true"
+      FLASK_SECRET_KEY: test-only-secret-key
+      SERVICE_AUTH_TOKEN: test-only-service-auth-token
+  validator-agent:
+    container_name: !reset null
+    ports: !reset []
+    environment:
+      TESTING: "true"
+      FLASK_SECRET_KEY: test-only-secret-key
+      SERVICE_AUTH_TOKEN: test-only-service-auth-token
