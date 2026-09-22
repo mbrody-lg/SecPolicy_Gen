@@ -2,6 +2,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+WORKFLOWS_DIR = ROOT / ".github" / "workflows"
 WORKFLOW = ROOT / ".github" / "workflows" / "critical-path.yml"
 MAKEFILE = ROOT / "Makefile"
 CI_RUNNER = ROOT / "scripts" / "run_critical_path_ci.sh"
@@ -24,6 +25,16 @@ def test_critical_path_workflow_starts_informational_and_retains_evidence():
     assert "migration/critical-path/metrics.json" in workflow
     assert "migration/functional-smoke-result.json" in workflow
     assert "retention-days: 14" in workflow
+
+
+def test_artifact_uploads_use_the_node24_action_pinned_by_sha():
+    workflows = "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted(WORKFLOWS_DIR.glob("*.yml"))
+    )
+
+    expected = "actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0"
+    assert workflows.count(expected) == 3
+    assert "actions/upload-artifact@v4" not in workflows
 
 
 def test_ci_runner_uses_versioned_fake_env_and_dedicated_compose_project():

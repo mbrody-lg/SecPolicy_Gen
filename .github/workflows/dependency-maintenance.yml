@@ -19,7 +19,7 @@ jobs:
       - name: Build informational dependency report
         run: python scripts/build_dependency_maintenance_report.py
       - name: Upload dependency report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: dependency-maintenance-${{ github.run_id }}
           path: migration/dependency-maintenance/
