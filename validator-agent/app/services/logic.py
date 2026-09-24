@@ -356,6 +356,18 @@ def validate_policy_payload(payload: dict | None, *, read_only: bool = False) ->
     """Validate request contract, run coordinator orchestration, and normalize response."""
     correlation_id = _get_correlation_id(payload)
     data = _ensure_payload_object(payload, correlation_id)
+    canonical_markers = {"policy_request", "contract", "approved_context", "policy_intent", "business_facts", "origin"}
+    present = canonical_markers.intersection(data)
+    if present:
+        raise PipelineStepError(
+            stage="contract_validation",
+            message="Canonical policy_request ingress is not enabled.",
+            error_type="contract_error",
+            error_code="policy_request_not_supported",
+            status_code=400,
+            details={"field": sorted(present)[0]},
+            correlation_id=correlation_id,
+        )
     log_event(
         logger,
         logging.INFO,

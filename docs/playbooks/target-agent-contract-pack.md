@@ -50,12 +50,13 @@ not an LLM agent or an externally discoverable A2A agent.
 Use current service contracts as the source of truth. Docker Agent/cagent
 configs may reference these contracts, but must not redefine them.
 
-This pack has three contract layers:
+This pack has four contract layers:
 
 | Layer | Meaning | Change rule |
 | --- | --- | --- |
 | Current service contract | Already produced or accepted by `context-agent`, `policy-agent`, or `validator-agent` | Must match current code and tests |
 | Compatibility bridge | Explicit adapter shape between current services | May be tightened only with producer and consumer tests |
+| Specified cross-service contract | Canonical domain shape with offline validation, not yet emitted or consumed by services | Becomes current only after producer and consumer integration tests |
 | Target runtime artifact | Required for Docker Agent/cagent dry-run, shadow mode, parity, or cutover | Must not be treated as current service behavior until implemented |
 
 Target runtime artifacts should include these envelope fields when practical:
@@ -219,6 +220,21 @@ Validation-critical conditions:
 - findings expose structured evidence or legacy content;
 - `unresolved_gaps` is empty;
 - `retrieval_hints.collection_families` is not empty.
+
+### `secpolicy.policy_request` v1.0
+
+Represents explicit Policy intent bound to an approved context snapshot.
+
+Layer: specified cross-service contract. The pure validator and conservative
+v0 projection are implemented, but Context Agent does not yet emit this
+request and Policy/Validator intentionally reject explicit `policy_request`
+ingress. Current generation and validation payloads below remain unchanged.
+
+The canonical shape, provenance rules, approval binding, limits, and
+`legacy_unverified` behavior are defined in
+[Policy request v1](../contracts/policy-request-v1.md). It must not be treated
+as an accepted current-service payload or runtime artifact until producer and
+consumer integration is implemented and verified.
 
 ### `rag.retrieval_context`
 
