@@ -1,0 +1,52 @@
+{
+  "contract": "secpolicy.policy_request",
+  "version": "1.0",
+  "context_id": "synthetic-context-001",
+  "approved_context": {
+    "approval_status": "approved",
+    "context_id": "synthetic-context-001",
+    "tenant_id": "synthetic-tenant-001",
+    "plan_revision_id": "synthetic-plan-001",
+    "snapshot_hash": "bfa1f606502f3c49a2b93fd8538556a51c3aee2ffe9c857caab87b600bec655d",
+    "legacy_handoff_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "hash_scope": "policy_input_v1",
+    "policy_handoff_context": {
+      "contract": "context_agent.policy_handoff",
+      "version": "1.0",
+      "source": "context-agent",
+      "security_context_version": "1.0",
+      "final_context_version": "1.0",
+      "plan_revision_id": "synthetic-plan-001",
+      "context_snapshot_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "final_context_status": "ready",
+      "context_ready_for_policy": true,
+      "final_context_sections": {"profile": {"status": "accepted", "content": "Synthetic business profile"}},
+      "structured_findings": [{"status": "completed", "task_id": "synthetic-task-001", "findings": ["Synthetic control gap"]}],
+      "retrieval_hints": {"collection_families": ["synthetic-controls"]},
+      "unresolved_gaps": []
+    }
+  },
+  "policy_intent": {
+    "policy_type": {"value": "access control", "source": "provided", "source_ref": "answer:policy_type"},
+    "scope": {"value": "Example Test Ltd internal systems", "source": "provided", "source_ref": "answer:scope"},
+    "audience": {"value": ["employees"], "source": "provided", "source_ref": "answer:audience"},
+    "exclusions": {"value": [], "source": "provided", "source_ref": "answer:exclusions"},
+    "requested_instruments": {"value": [], "source": "provided", "source_ref": "answer:instruments"},
+    "document_profile": {"value": "standard", "source": "provided", "source_ref": "answer:profile"},
+    "coverage_mode": {"value": "risk_based", "source": "provided", "source_ref": "answer:coverage"},
+    "language": {"value": "en", "source": "provided", "source_ref": "answer:language"}
+  },
+  "business_facts": {
+    "entity_scope": {"value": {"legal_entities": ["Example Test Ltd"], "size_band": "small", "jurisdictions": ["Exampleland"], "sectors": ["software"], "services": ["software development"], "data_categories": ["customer records"]}, "source": "provided", "source_ref": "answer:entity_scope"},
+    "current_posture": {"value": "Manual access reviews", "source": "provided", "source_ref": "answer:posture"},
+    "target_posture": {"value": "Quarterly reviews", "source": "provided", "source_ref": "answer:target"},
+    "maturity": {"value": null, "source": "unknown", "source_ref": null},
+    "risk_appetite": {"value": null, "source": "unknown", "source_ref": null},
+    "risk_tolerance": {"value": null, "source": "unknown", "source_ref": null},
+    "existing_controls": {"value": ["Manual review"], "source": "provided", "source_ref": "answer:controls"},
+    "known_gaps": {"value": [], "source": "provided", "source_ref": "answer:gaps"},
+    "constraints": {"value": [], "source": "provided", "source_ref": "answer:constraints"},
+    "governance_owner": {"value": "Security team", "source": "provided", "source_ref": "answer:owner"}
+  },
+  "origin": {"contract": "context_agent.policy_handoff", "version": "1.0", "defaults": {}}
+}

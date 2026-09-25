@@ -171,6 +171,21 @@ def _ensure_payload_object(payload: dict | None, correlation_id: str | None) -> 
     return payload
 
 
+def _reject_unintegrated_policy_request(payload: dict, correlation_id: str | None) -> None:
+    canonical_markers = {"policy_request", "contract", "approved_context", "policy_intent", "business_facts", "origin"}
+    present = canonical_markers.intersection(payload)
+    if present:
+        raise PipelineStepError(
+            stage="contract_validation",
+            message="Canonical policy_request ingress is not enabled.",
+            error_type="contract_error",
+            error_code="policy_request_not_supported",
+            status_code=400,
+            details={"field": sorted(present)[0]},
+            correlation_id=correlation_id,
+        )
+
+
 def _missing_fields(payload: dict, required_fields: list[str]) -> list[str]:
     return [field for field in required_fields if field not in payload]
 
@@ -845,6 +860,7 @@ def validate_generation_payload(payload: dict | None) -> dict:
     """Validate the generate-policy request contract and normalize fields."""
     correlation_id = _get_correlation_id(payload)
     data = _ensure_payload_object(payload, correlation_id)
+    _reject_unintegrated_policy_request(data, correlation_id)
     missing = _missing_fields(data, POLICY_GENERATION_REQUIRED_FIELDS)
     if missing:
         raise PipelineStepError(
@@ -1024,6 +1040,7 @@ def validate_policy_update_payload(payload: dict | None, path_context_id: str) -
     """Validate the policy-update request contract and current persistence state."""
     correlation_id = _get_correlation_id(payload) or str(path_context_id)
     data = _ensure_payload_object(payload, correlation_id)
+    _reject_unintegrated_policy_request(data, correlation_id)
     missing = _missing_fields(data, POLICY_UPDATE_REQUIRED_FIELDS)
     if missing:
         raise PipelineStepError(
