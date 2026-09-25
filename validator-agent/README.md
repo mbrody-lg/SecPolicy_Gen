@@ -169,35 +169,10 @@ Initiates validation of a policy from the Policy Agent.
 
     GET /validation/<context_id>
 
-- Path parameter: context_id (String with ObjectId).
-- Answer (200 OK): 
-
-        [
-            {
-                "_id": "650b8a1e5f4c2a0001d2f3b4",
-                "context_id": "642e4f50e9f1a3b2c7d8e9f0",
-                "round": 1,
-                "results": {
-                "AWC": { "result": "accepted", "reasons": [], "recommendations": [] },
-                "AWL": { "result": "review", "reasons": ["Inconsistency X."], "recommendations": ["Review Y."] },
-                "AWT": { "result": "accepted", "reasons": [], "recommendations": [] },
-                "EVA": { "result": "review", "reasons": ["GDPR chapter not found."], "recommendations": ["Add GDPR chapter."] }
-                },
-                "timestamp": "2025-06-02T18:02:15.123456"
-            },
-            {
-                "_id": "650b8a1e5f4c2a0001d2f3b5",
-                "context_id": "642e4f50e9f1a3b2c7d8e9f0",
-                "round": 2,
-                "results": {
-                "AWC": { "result": "rejected", "reasons": ["CIS controls not detailed."], "recommendations": ["Add CIS Controls."] },
-                "AWL": { "result": "accepted", "reasons": [], "recommendations": [] },
-                "AWT": { "result": "accepted", "reasons": [], "recommendations": [] },
-                "EVA": { "result": "accepted", "reasons": [], "recommendations": [] }
-                },
-                "timestamp": "2025-06-02T18:04:20.654321"
-            }
-        ]
+- Returns `404 {"success": false, "error_code": "validation_read_unavailable"}`.
+  Reads are disabled until INIT-26 stores tenant-owned validation records and
+  authenticates the exact tenant and context before querying them. The former
+  unauthenticated trace response must not be used as an integration contract.
 
 ### Delete all validations from a context (in TESTING mode only)
 
