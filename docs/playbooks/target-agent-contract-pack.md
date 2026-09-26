@@ -221,13 +221,13 @@ Validation-critical conditions:
 - `unresolved_gaps` is empty;
 - `retrieval_hints.collection_families` is not empty.
 
-### `secpolicy.policy_request` v1.0
+### `secpolicy.policy_request` v1.0 and v1.1
 
 Represents explicit Policy intent bound to an approved context snapshot.
 
-Layer: specified cross-service contract. The pure validator and conservative
-v0 projection are implemented, but Context Agent does not yet emit this
-request and Policy/Validator intentionally reject explicit `policy_request`
+Layer: specified cross-service contract. Pure version-specific validators and
+the conservative v0 projection are implemented, but Context Agent does not
+yet emit this request. Policy/Validator intentionally reject explicit `policy_request`
 ingress. Current generation and validation payloads below remain unchanged.
 
 The canonical shape, provenance rules, approval binding, limits, and
