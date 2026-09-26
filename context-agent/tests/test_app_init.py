@@ -4,10 +4,12 @@ from uuid import UUID
 import pytest
 
 import app as app_module
+from workload_test_keys import configure_ephemeral_workload_env
 
 
 def _set_common_env(monkeypatch):
     monkeypatch.setattr(app_module, "load_dotenv", lambda: None)
+    configure_ephemeral_workload_env(monkeypatch)
     monkeypatch.setenv("MONGO_URI", "mongodb://mongo:27017/contextdb")
     monkeypatch.setenv("POLICY_AGENT_URL", "http://policy-agent:5000")
     monkeypatch.setenv("VALIDATOR_AGENT_URL", "http://validator-agent:5000")

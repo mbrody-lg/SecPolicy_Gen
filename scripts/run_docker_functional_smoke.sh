@@ -576,12 +576,33 @@ raise SystemExit(1)
 PY
 }
 
+smoke_rag_auth_token() {
+  docker exec -i -e "SMOKE_WORKLOAD_TENANT_ID=$SMOKE_ORGANIZATION_ID" "$CONTEXT_CONTAINER" python - <<'PY'
+import os
+
+from app import create_app
+from app.workload_token import mint_token
+
+app = create_app()
+with app.app_context():
+    print(mint_token(
+        key=app.config["WORKLOAD_CONTEXT_SIGNING_KEY"],
+        kid=app.config["WORKLOAD_CONTEXT_SIGNING_KID"],
+        subject="context-agent",
+        audience="policy-agent",
+        scope="policy:rag:refresh",
+        tenant_id=os.environ["SMOKE_WORKLOAD_TENANT_ID"],
+        path="/rag/refresh",
+    ))
+PY
+}
+
 wait_for_rag_ready() {
   if is_mock_mode || ! is_truthy "$REQUIRE_RAG_READY"; then
     return 0
   fi
 
-  local payload_file refresh_body http_code deadline now
+  local payload_file refresh_body http_code deadline now auth_token
   payload_file="$(mktemp)"
   refresh_body="$(mktemp)"
 
@@ -608,7 +629,13 @@ wait_for_rag_ready() {
   fi
 
   log "RAG runtime requires refresh; starting controlled refresh"
-  http_code="$(curl -sS -X POST -H "X-Correlation-ID: functional-smoke-rag-refresh" -o "$refresh_body" -w "%{http_code}" "http://localhost:5002/rag/refresh" || echo 000)"
+  if ! auth_token="$(smoke_rag_auth_token)"; then
+    log "RAG refresh credential could not be issued"
+    rm -f "$payload_file" "$refresh_body"
+    return 1
+  fi
+  http_code="$(curl -sS -X POST -H "Authorization: Bearer $auth_token" -H "X-Correlation-ID: functional-smoke-rag-refresh" -o "$refresh_body" -w "%{http_code}" "http://localhost:5002/rag/refresh" || echo 000)"
+  unset auth_token
   if [[ "$http_code" != "202" ]]; then
     log "RAG refresh returned HTTP $http_code"
     collect_rag_preflight_diagnostics

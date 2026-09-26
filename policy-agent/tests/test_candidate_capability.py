@@ -6,7 +6,6 @@ from flask import g
 from app import mongo
 from app.candidate_contract import authorize_candidate_request
 
-SERVICE_HEADERS = {"Authorization": "Bearer test-only-service-auth-token"}
 
 
 def _headers(**overrides):
@@ -67,7 +66,7 @@ def test_candidate_contract_stays_blocked_without_deadline_enforcer(app):
     assert error[0]["error_code"] == "candidate_execution_unavailable"
 
 
-def test_candidate_generation_uses_domain_code_without_persistence(client):
+def test_candidate_generation_uses_domain_code_without_persistence(client, workload_headers):
     payload = {
         "context_id": "ctx-candidate",
         "refined_prompt": "Generate an access control policy.",
@@ -92,7 +91,7 @@ def test_candidate_generation_uses_domain_code_without_persistence(client):
             "retrieval_evidence": [],
         }) as run_agent,
     ):
-        response = client.post("/candidate/generate-policy", json=payload, headers=_headers(**SERVICE_HEADERS))
+        response = client.post("/candidate/generate-policy", json=payload, headers=_headers(**workload_headers("/candidate/generate-policy")))
 
     assert response.status_code == 200
     assert response.get_json()["ownership"] == {
@@ -106,13 +105,13 @@ def test_candidate_generation_uses_domain_code_without_persistence(client):
     assert run_agent.call_args.kwargs["store_config"] is False
 
 
-def test_candidate_route_enforces_fixed_bounded_json_limit(client, app, monkeypatch):
+def test_candidate_route_enforces_fixed_bounded_json_limit(client, app, monkeypatch, workload_headers):
     monkeypatch.setitem(app.config, "MAX_CONTENT_LENGTH", 512 * 1024)
     response = client.post(
         "/candidate/generate-policy",
         data="x" * ((256 * 1024) + 1),
         content_type="application/json",
-        headers=_headers(**SERVICE_HEADERS),
+        headers=_headers(**workload_headers("/candidate/generate-policy")),
     )
 
     assert response.status_code == 413
@@ -139,7 +138,7 @@ def test_candidate_contract_rejects_overflowing_deadline(app):
     assert error[0]["error_code"] == "candidate_deadline_invalid"
 
 
-def test_candidate_route_accepts_service_identity_principal(client):
+def test_candidate_route_accepts_service_identity_principal(client, workload_headers):
     payload = {
         "context_id": "ctx-candidate",
         "refined_prompt": "Generate an access control policy.",
@@ -153,7 +152,7 @@ def test_candidate_route_accepts_service_identity_principal(client):
     }
 
     with patch("app.routes.routes.run_generation_pipeline", return_value={"success": True, "policy": policy}) as pipeline:
-        response = client.post("/candidate/generate-policy", json=payload, headers=_headers(**SERVICE_HEADERS))
+        response = client.post("/candidate/generate-policy", json=payload, headers=_headers(**workload_headers("/candidate/generate-policy")))
 
     assert response.status_code == 200
     assert response.get_json()["candidate"] == {

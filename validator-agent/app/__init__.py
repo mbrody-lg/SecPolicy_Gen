@@ -162,11 +162,32 @@ def create_app():
         is_testing=is_testing,
         test_default="/validator-agent/app/config/validator_agent.yaml",
     )
-    app.config["SERVICE_AUTH_TOKEN"] = _get_required_env(
-        "SERVICE_AUTH_TOKEN",
-        is_testing=is_testing,
-        test_default="test-only-service-auth-token",
+    from app.workload_token import (
+        KEY_ID_PATTERN, combine_verifier_keys, load_signing_key, load_verifier_keys,
     )
+
+    app.config["WORKLOAD_VALIDATOR_SIGNING_KID"] = _get_required_env(
+        "WORKLOAD_VALIDATOR_SIGNING_KID", is_testing=is_testing,
+    )
+    if not KEY_ID_PATTERN.fullmatch(app.config["WORKLOAD_VALIDATOR_SIGNING_KID"]):
+        raise ValueError("WORKLOAD_VALIDATOR_SIGNING_KID must be a valid key ID.")
+    app.config["WORKLOAD_VALIDATOR_SIGNING_KEY"] = load_signing_key(
+        "WORKLOAD_VALIDATOR_SIGNING_PRIVATE_KEY_B64", _get_required_env(
+            "WORKLOAD_VALIDATOR_SIGNING_PRIVATE_KEY_B64", is_testing=is_testing,
+        ),
+        testing=is_testing,
+    )
+    app.config["WORKLOAD_CALLER_KEYS"] = combine_verifier_keys(*(
+        load_verifier_keys(
+            name, _get_required_env(name, is_testing=is_testing),
+            subject=subject, single_tenant=subject == "docker-agent",
+            testing=is_testing,
+        )
+        for subject, name in (
+            ("context-agent", "WORKLOAD_CONTEXT_VERIFY_KEYS"),
+            ("docker-agent", "WORKLOAD_CANDIDATE_VERIFY_KEYS"),
+        )
+    ))
     app.config["TESTING"] = is_testing
     app.config["DEBUG"] = _get_env_bool("DEBUG", default=False)
     app.config["POLICY_AGENT_URL"] = _validate_http_url(
@@ -188,6 +209,11 @@ def create_app():
 
     # Initialize Mongo with app
     mongo.init_app(app)
+    if not is_testing:
+        from app.workload_token import initialize_replay_store
+
+        with app.app_context():
+            initialize_replay_store(mongo.db)
 
     # Import and register blueprints
     from app.routes.routes import routes

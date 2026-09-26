@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-SERVICE_HEADERS = {"Authorization": "Bearer test-only-service-auth-token"}
 
 
 class FakeCoordinator:
@@ -20,7 +19,7 @@ class FakeCoordinator:
         }
 
 
-def test_validate_policy_route(client):
+def test_validate_policy_route(client, workload_headers):
     payload = {
         "context_id": "6648748a7b3d2a2c77e1fc04",
         "language": "en",
@@ -31,7 +30,7 @@ def test_validate_policy_route(client):
     }
 
     with patch("app.services.logic.Coordinator", return_value=FakeCoordinator()):
-        response = client.post("/validate-policy", json=payload, headers=SERVICE_HEADERS)
+        response = client.post("/validate-policy", json=payload, headers=workload_headers("/validate-policy"))
 
     assert response.status_code == 200
     data = response.get_json()

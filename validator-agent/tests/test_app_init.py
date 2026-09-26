@@ -1,12 +1,15 @@
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 import app as app_module
+from workload_test_keys import configure_ephemeral_workload_env
 
 
 def _set_common_env(monkeypatch):
     monkeypatch.setattr(app_module, "load_dotenv", lambda: None)
+    configure_ephemeral_workload_env(monkeypatch)
     monkeypatch.setenv("MONGO_URI", "mongodb://mongo:27017/validatordb")
     monkeypatch.setenv(
         "CONFIG_PATH",
@@ -22,6 +25,19 @@ def test_create_app_requires_secret_key_outside_testing(monkeypatch):
 
     with pytest.raises(ValueError, match="FLASK_SECRET_KEY must be set"):
         app_module.create_app()
+
+
+def test_non_testing_startup_initializes_replay_ttl_index(monkeypatch):
+    _set_common_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "false")
+    monkeypatch.setenv("FLASK_SECRET_KEY", "configured-secret")
+    monkeypatch.setenv("POLICY_AGENT_URL", "http://policy-agent:5000")
+
+    with patch("app.workload_token.initialize_replay_store") as initialize:
+        app = app_module.create_app()
+
+    assert app.config["TESTING"] is False
+    initialize.assert_called_once()
 
 
 @pytest.mark.parametrize(

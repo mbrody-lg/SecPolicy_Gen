@@ -75,7 +75,7 @@ def authorize_candidate_request(*, audience: str, scope: str) -> tuple[dict | No
         return None, _error(503, "candidate_execution_unavailable", "Candidate execution is unavailable.")
 
     return {
-        "tenant_id": tenant_id,
+        "tenant_id": principal["tenant_id"],
         "idempotency_key": idempotency_key,
         "deadline": deadline,
     }, None

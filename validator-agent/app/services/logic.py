@@ -143,14 +143,32 @@ def _get_correlation_id(payload: dict | None) -> str | None:
     return request_correlation_id or header_correlation_id or payload.get("correlation_id") or payload.get("context_id")
 
 
-def _dependency_headers(correlation_id: str | None) -> dict:
-    """Build outbound dependency headers with correlation metadata when available."""
+def _dependency_headers(correlation_id: str | None, *, path: str) -> dict:
+    """Sign a Policy update using only a verified inbound tenant."""
+    from app.workload_token import mint_token
+
+    principal = getattr(g, "service_principal", None) if has_request_context() else None
+    if (
+        not isinstance(principal, dict)
+        or principal.get("identity") != "context-agent"
+        or principal.get("audience") != "validator-agent"
+        or "policy:validate" not in principal.get("scopes", [])
+    ):
+        raise ValueError("Verified validation principal is required.")
+    key = current_app.config["WORKLOAD_VALIDATOR_SIGNING_KEY"]
+    token = mint_token(
+        key=key,
+        kid=current_app.config["WORKLOAD_VALIDATOR_SIGNING_KID"],
+        subject="validator-agent",
+        audience="policy-agent",
+        scope="policy:update",
+        tenant_id=principal.get("tenant_id"),
+        path=path,
+    )
     headers = {}
     if correlation_id:
         headers["X-Correlation-ID"] = correlation_id
-    service_token = current_app.config.get("SERVICE_AUTH_TOKEN") if has_app_context() else os.getenv("SERVICE_AUTH_TOKEN")
-    if service_token:
-        headers["Authorization"] = f"Bearer {service_token}"
+    headers["Authorization"] = f"Bearer {token}"
     return headers
 
 
@@ -565,7 +583,10 @@ def send_policy_update_to_policy_agent(
         response = requests.post(
             update_endpoint,
             json=payload,
-            headers=_dependency_headers(correlation_id),
+            headers=_dependency_headers(
+                correlation_id,
+                path=f"/generate_policy/{context_id}/update",
+            ),
             timeout=timeout_seconds,
         )
         response.raise_for_status()
@@ -583,6 +604,13 @@ def send_policy_update_to_policy_agent(
             duration_ms=round((perf_counter() - started_perf) * 1000, 3),
         )
         return response.json()
+    except ValueError:
+        return _error_payload(
+            error_type="authorization_error",
+            error_code="workload_identity_unavailable",
+            message="Verified workload identity is unavailable.",
+            correlation_id=correlation_id or context_id,
+        )
     except requests.exceptions.RequestException as exc:
         response = exc.response if isinstance(exc, requests.exceptions.HTTPError) else None
         logger.warning(
