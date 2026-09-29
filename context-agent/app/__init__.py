@@ -189,10 +189,18 @@ def create_app():
         is_testing=is_testing,
         test_default="test-only-policy-callback-token",
     )
-    app.config["SERVICE_AUTH_TOKEN"] = _get_required_env(
-        "SERVICE_AUTH_TOKEN",
-        is_testing=is_testing,
-        test_default="test-only-service-auth-token",
+    from app.workload_token import KEY_ID_PATTERN, load_signing_key
+
+    app.config["WORKLOAD_CONTEXT_SIGNING_KID"] = _get_required_env(
+        "WORKLOAD_CONTEXT_SIGNING_KID", is_testing=is_testing,
+    )
+    if not KEY_ID_PATTERN.fullmatch(app.config["WORKLOAD_CONTEXT_SIGNING_KID"]):
+        raise ValueError("WORKLOAD_CONTEXT_SIGNING_KID must be a valid key ID.")
+    app.config["WORKLOAD_CONTEXT_SIGNING_KEY"] = load_signing_key(
+        "WORKLOAD_CONTEXT_SIGNING_PRIVATE_KEY_B64", _get_required_env(
+            "WORKLOAD_CONTEXT_SIGNING_PRIVATE_KEY_B64", is_testing=is_testing,
+        ),
+        testing=is_testing,
     )
     app.config["TESTING"] = is_testing
     app.config["DEBUG"] = _get_env_bool("DEBUG", default=False)

@@ -5,6 +5,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "service-tests.yml"
 RUNNER = ROOT / "scripts" / "run_service_tests_ci.sh"
 OVERLAY = ROOT / "infrastructure" / "docker-compose.service-tests.yml"
+SMOKE_ENV = ROOT / "infrastructure" / ".env.smoke.example"
 
 
 def test_service_test_workflow_has_three_isolated_matrix_checks():
@@ -37,4 +38,10 @@ def test_service_test_overlay_is_isolated_and_uses_test_only_credentials():
     assert "container_name: !reset null" in overlay
     assert "ports: !reset []" in overlay
     assert "POLICY_CALLBACK_TOKEN: test-only-policy-callback-token" in overlay
-    assert overlay.count("SERVICE_AUTH_TOKEN: test-only-service-auth-token") == 3
+    assert "SERVICE_AUTH_TOKEN" not in overlay
+    assert "WORKLOAD_CONTEXT_SIGNING_PRIVATE_KEY_B64" not in overlay
+    assert "WORKLOAD_VALIDATOR_SIGNING_PRIVATE_KEY_B64" not in overlay
+    smoke = SMOKE_ENV.read_text(encoding="utf-8")
+    assert "WORKLOAD_CONTEXT_SIGNING_KID=context-test-v1" in smoke
+    assert "WORKLOAD_VALIDATOR_SIGNING_KID=validator-test-v1" in smoke
+    assert "WORKLOAD_CANDIDATE_VERIFY_KEYS=" in smoke

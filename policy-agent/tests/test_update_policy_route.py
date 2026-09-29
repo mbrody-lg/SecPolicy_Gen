@@ -3,10 +3,9 @@ from unittest.mock import patch
 
 from bson import ObjectId
 
-SERVICE_HEADERS = {"Authorization": "Bearer test-only-service-auth-token"}
 
 
-def test_update_policy_with_openaiagent(client):
+def test_update_policy_with_openaiagent(client, workload_headers):
     context_id = ObjectId()
     data = {
         "context_id": str(context_id),
@@ -55,7 +54,7 @@ def test_update_policy_with_openaiagent(client):
             },
         },
     ) as run_policy_update_pipeline:
-        response = client.post(f"/generate_policy/{context_id}/update", json=data, headers=SERVICE_HEADERS)
+        response = client.post(f"/generate_policy/{context_id}/update", json=data, headers=workload_headers(f"/generate_policy/{context_id}/update"))
 
     assert response.status_code == 200
     json_data = response.get_json()
@@ -74,7 +73,7 @@ def test_update_policy_with_openaiagent(client):
     assert "incident" in json_data["policy_text"].lower() or "access" in json_data["policy_text"].lower()
 
 
-def test_update_policy_returns_404_when_canonical_policy_is_missing(client):
+def test_update_policy_returns_404_when_canonical_policy_is_missing(client, workload_headers):
     context_id = ObjectId()
     data = {
         "context_id": str(context_id),
@@ -99,7 +98,7 @@ def test_update_policy_returns_404_when_canonical_policy_is_missing(client):
             "status_code": 404,
         },
     ):
-        response = client.post(f"/generate_policy/{context_id}/update", json=data, headers=SERVICE_HEADERS)
+        response = client.post(f"/generate_policy/{context_id}/update", json=data, headers=workload_headers(f"/generate_policy/{context_id}/update"))
 
     assert response.status_code == 404
     assert response.get_json() == {
@@ -112,7 +111,7 @@ def test_update_policy_returns_404_when_canonical_policy_is_missing(client):
     }
 
 
-def test_update_policy_returns_contract_error_when_context_id_mismatches(client):
+def test_update_policy_returns_contract_error_when_context_id_mismatches(client, workload_headers):
     context_id = ObjectId()
     data = {
         "context_id": str(ObjectId()),
@@ -141,7 +140,7 @@ def test_update_policy_returns_contract_error_when_context_id_mismatches(client)
             "status_code": 400,
         },
     ):
-        response = client.post(f"/generate_policy/{context_id}/update", json=data, headers=SERVICE_HEADERS)
+        response = client.post(f"/generate_policy/{context_id}/update", json=data, headers=workload_headers(f"/generate_policy/{context_id}/update"))
 
     assert response.status_code == 400
     assert response.get_json() == {
@@ -158,7 +157,7 @@ def test_update_policy_returns_contract_error_when_context_id_mismatches(client)
     }
 
 
-def test_update_policy_hides_internal_exception_details(client):
+def test_update_policy_hides_internal_exception_details(client, workload_headers):
     context_id = ObjectId()
     data = {
         "context_id": str(context_id),
@@ -183,7 +182,7 @@ def test_update_policy_hides_internal_exception_details(client):
             "status_code": 500,
         },
     ):
-        response = client.post(f"/generate_policy/{context_id}/update", json=data, headers=SERVICE_HEADERS)
+        response = client.post(f"/generate_policy/{context_id}/update", json=data, headers=workload_headers(f"/generate_policy/{context_id}/update"))
 
     assert response.status_code == 500
     assert response.get_json() == {

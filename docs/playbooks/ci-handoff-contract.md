@@ -170,13 +170,19 @@ INIT-11 defines the first service-to-service authentication boundary using
 bearer workload tokens managed under the environment contract:
 
 - `POLICY_CALLBACK_TOKEN` protects Policy Agent to Context Agent callback writes.
-- `SERVICE_AUTH_TOKEN` protects internal agent requests between Context Agent,
-  Policy Agent, and Validator Agent.
+- Context and Validator hold distinct `WORKLOAD_*_SIGNING_PRIVATE_KEY_B64`
+  values and current signing `kid`s. Policy/Validator receive only the
+  corresponding `WORKLOAD_*_VERIFY_KEYS` public registries; the candidate
+  caller holds its own private key. Receivers verify caller, scope, audience,
+  route and tenant allowlist before mutation. Mongo-backed nonces reject
+  replay; the TTL index is created at receiver startup, not per request.
 - Service-auth failures are represented as `401` responses with a
   `service_authentication_required` error code and a bearer challenge.
 - CI may provide service-auth secrets only through repository or environment
   secret management; logs and artifacts must continue to redact raw values.
-- Token rotation must happen by changing secret values without changing app code.
+- Rotate by publishing a new public key before changing the caller's signing
+  `kid`; keep at most one previous key with `accept_until` no more than 600
+  seconds ahead, then remove it. Do not reuse a public key for two callers.
 
 ## Non-Interactive Requirements
 

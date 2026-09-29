@@ -5,6 +5,13 @@ authentication:
   source: init11_verified_principal
   external_identity_headers_allowed: false
   required_principal_fields: [identity, audience, scopes, tenant_id]
+  token: signed_one_use_workload_bearer
+  caller_signing_key: WORKLOAD_CANDIDATE_SIGNING_PRIVATE_KEY_B64
+  caller_signing_kid: WORKLOAD_CANDIDATE_SIGNING_KID
+  receiver_verifier_registry: WORKLOAD_CANDIDATE_VERIFY_KEYS
+  verifier_key_fields: [public_key_b64, tenant_ids]
+  previous_key_accept_until: bounded_epoch_seconds
+  maximum_age_seconds: 60
 request_headers:
   X-Correlation-ID:
     required: true

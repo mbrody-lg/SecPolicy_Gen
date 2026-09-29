@@ -376,9 +376,23 @@ def refresh_system_state() -> dict:
         operation="rag_refresh",
     )
     try:
+        workload_headers = _dependency_headers(
+            correlation_id,
+            audience="policy-agent",
+            scope="policy:rag:refresh",
+            path="/rag/refresh",
+        )
+    except ValueError:
+        return {
+            "success": False,
+            "error_code": "workload_identity_unavailable",
+            "message": "Verified organization context is unavailable.",
+            "status": get_system_status(),
+        }
+    try:
         response = requests.post(
             f"{policy_agent_url.rstrip('/')}/rag/refresh",
-            headers=_dependency_headers(correlation_id),
+            headers=workload_headers,
             timeout=_dependency_timeout("POLICY_AGENT_TIMEOUT_SECONDS"),
         )
         payload = response.json() if response.content else {}
@@ -2335,14 +2349,26 @@ def _get_correlation_id(payload: dict | None = None, context_id: str | None = No
     return None
 
 
-def _dependency_headers(correlation_id: str | None) -> dict:
-    """Build outbound service headers with correlation metadata when available."""
+def _dependency_headers(
+    correlation_id: str | None, *, audience: str, scope: str, path: str,
+) -> dict:
+    """Sign outbound authority using the verified request or worker tenant."""
+    from app.workload_token import mint_token
+
+    tenant_id = getattr(g, "organization_id", None) if has_request_context() else None
+    token = mint_token(
+        key=current_app.config["WORKLOAD_CONTEXT_SIGNING_KEY"],
+        kid=current_app.config["WORKLOAD_CONTEXT_SIGNING_KID"],
+        subject="context-agent",
+        audience=audience,
+        scope=scope,
+        tenant_id=tenant_id,
+        path=path,
+    )
     headers = {}
     if correlation_id:
         headers["X-Correlation-ID"] = correlation_id
-    service_token = current_app.config.get("SERVICE_AUTH_TOKEN")
-    if service_token:
-        headers["Authorization"] = f"Bearer {service_token}"
+    headers["Authorization"] = f"Bearer {token}"
     return headers
 
 
@@ -2604,7 +2630,12 @@ def call_policy_agent(context_payload: dict) -> dict:
         response = requests.post(
             f"{policy_agent_url}/generate_policy",
             json=context_payload,
-            headers=_dependency_headers(correlation_id),
+            headers=_dependency_headers(
+                correlation_id,
+                audience="policy-agent",
+                scope="policy:generate",
+                path="/generate_policy",
+            ),
             timeout=timeout_seconds,
         )
         response.raise_for_status()
@@ -2754,7 +2785,12 @@ def call_validator_agent(policy_data: dict) -> dict:
         response = requests.post(
             f"{validator_agent_url}/validate-policy",
             json=policy_data,
-            headers=_dependency_headers(correlation_id),
+            headers=_dependency_headers(
+                correlation_id,
+                audience="validator-agent",
+                scope="policy:validate",
+                path="/validate-policy",
+            ),
             timeout=timeout_seconds,
         )
         response.raise_for_status()

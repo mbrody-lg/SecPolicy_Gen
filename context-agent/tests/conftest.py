@@ -7,6 +7,7 @@ import mongomock
 import pytest
 
 from test_base import *
+from workload_test_keys import configure_test_workload_env
 from app import create_app
 from app import mongo
 
@@ -18,8 +19,8 @@ if str(ROOT_PATH) not in sys.path:
 os.environ.setdefault("TESTING", "true")
 os.environ.setdefault("DEBUG", "false")
 os.environ.setdefault("FLASK_SECRET_KEY", "test-only-secret-key")
-os.environ.setdefault("SERVICE_AUTH_TOKEN", "test-only-service-auth-token")
 os.environ.setdefault("MONGO_URI", "mongodb://mongo:27017/context-testdb")
+configure_test_workload_env()
 
 TEST_PRINCIPAL = {
     "issuer": "https://identity.test/tenant/secpolicygen",

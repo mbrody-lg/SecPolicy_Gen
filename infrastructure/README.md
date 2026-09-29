@@ -18,6 +18,22 @@ Do not treat it as a production deployment template.
 
 Create a `.env` file in the `infrastructure/` directory:
 
+The tracked `.env.example` contains deterministic workload keys for tests only;
+`TESTING=false` rejects them. Before `make up`, install `cryptography` in a local
+Python environment and generate fresh keys for the organization ID you will use:
+
+```bash
+cp infrastructure/.env.example infrastructure/.env
+.venv/bin/python scripts/provision_local_workload_keys.py --tenant-id YOUR_LOCAL_ORGANIZATION_ID
+make up
+```
+
+Run `make bootstrap-test-env` first if `.venv` is absent. The script replaces
+workload keys in the ignored `infrastructure/.env` and writes the candidate-only
+private key to ignored `infrastructure/.env.candidate.local`; keep both files
+private. Re-running it rotates all keys and invalidates existing workload
+tokens. This does not configure a real OIDC provider or paid model access.
+
 ```env
 # Required for all agents
 OPENAI_API_KEY=fake-local-openai-key

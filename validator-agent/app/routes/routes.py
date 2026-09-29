@@ -126,32 +126,9 @@ def validate_candidate_policy():
 
 @routes.route("/validation/<context_id>", methods=["GET"])
 def get_validations_by_context(context_id):
-    """Return stored validation rounds for a given context identifier."""
-    try:
-        ObjectId(context_id)
-    except Exception:
-        return jsonify({
-            "success": False,
-            "error_type": "contract_error",
-            "error_code": "invalid_context_id",
-            "message": "Invalid context_id format.",
-            "details": {"context_id": context_id},
-            "correlation_id": context_id,
-        }), 400
-
-    validations = list(mongo.db.validations.find({"context_id": context_id}).sort("round", 1))
-
-    if not validations:
-        return jsonify({"message": "No validation records found for this context."}), 404
-
-    # Serialize ObjectId and timestamps for JSON response
-    for v in validations:
-        v["_id"] = str(v["_id"])
-        v["context_id"] = str(v["context_id"])
-        if "timestamp" in v:
-            v["timestamp"] = v["timestamp"].isoformat()
-
-    return jsonify(validations), 200
+    """Fail closed until validation records have tenant-bound ownership."""
+    del context_id
+    return jsonify({"success": False, "error_code": "validation_read_unavailable"}), 404
 
 @routes.route("/validation/<context_id>", methods=["DELETE"])
 def delete_validations_by_context(context_id):

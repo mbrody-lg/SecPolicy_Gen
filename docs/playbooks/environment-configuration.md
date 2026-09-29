@@ -46,7 +46,8 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | `OIDC_REDIRECT_URI` | `required` | Required outside `TESTING` | Exact OIDC callback URI | HTTPS outside localhost; register exact value at the provider |
 | `OIDC_SCOPES` | `runtime knob` | `openid profile email` | Requested identity claims | Must contain `openid` |
 | `POLICY_CALLBACK_TOKEN` | `secret`, `required` | Required outside `TESTING` | Policy Agent workload authentication for the Context Agent callback | Send only as `Authorization: Bearer`; rotate independently from browser/OIDC secrets |
-| `SERVICE_AUTH_TOKEN` | `secret`, `required` | Required outside `TESTING` | Shared local service-to-service bearer token for internal agent requests | Send only as `Authorization: Bearer`; rotate independently from browser/OIDC secrets |
+| `WORKLOAD_CONTEXT_SIGNING_KID` | `required` | Required outside `TESTING` | Select Context signing key ID | Match the current `WORKLOAD_CONTEXT_VERIFY_KEYS` entry at receivers |
+| `WORKLOAD_CONTEXT_SIGNING_PRIVATE_KEY_B64` | `secret`, `required` | Required outside `TESTING`; deterministic seed only in test examples | Context-only Ed25519 signing seed | 32 raw bytes encoded as base64; never distribute to Policy/Validator |
 | `CONTEXT_IMPORT_ORGANIZATION_ID` | `operation input` | Required by fixture import | Organization owning imported contexts | Must reference an active, locally provisioned organization |
 | `TESTING` | `safe default` | Defaults to `false` | App factory/tests | Parse as explicit truthy flag |
 | `DEBUG` | `runtime knob` | Defaults to `false` | App factory/log behavior | Example defaults to `false`; dev override only |
@@ -73,7 +74,9 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | Variable | Class | Default policy | Used by | Validation expectation |
 |----------|-------|----------------|---------|------------------------|
 | `FLASK_SECRET_KEY` | `secret`, `required` | Required outside `TESTING`; fake local only in examples | Flask session signing | App init fails safely when missing outside tests |
-| `SERVICE_AUTH_TOKEN` | `secret`, `required` | Required outside `TESTING` | Shared local service-to-service bearer token for internal agent requests | Send only as `Authorization: Bearer`; rotate independently from browser/OIDC secrets |
+| `WORKLOAD_CONTEXT_VERIFY_KEYS` | `required` | Required outside `TESTING` | Verify Context Agent requests | Public Ed25519 key registry with `kid`, explicit `tenant_ids`, optional previous-key `accept_until`; no private seed |
+| `WORKLOAD_VALIDATOR_VERIFY_KEYS` | `required` | Required outside `TESTING` | Verify Validator Agent policy updates | Distinct public key registry; no Validator private seed |
+| `WORKLOAD_CANDIDATE_VERIFY_KEYS` | `required` | Required outside `TESTING` | Verify Docker Agent candidate generation | Candidate public key registry; bind each key to one tenant ID |
 | `TESTING` | `safe default` | Defaults to `false` | App factory/tests | Parse as explicit truthy flag |
 | `DEBUG` | `runtime knob` | Defaults to `false` | App factory/log behavior | Example defaults to `false`; dev override only |
 | `MONGO_URI` | `required` | Local Docker default may be documented | Flask-PyMongo | Missing/malformed handling should be deterministic |
@@ -99,7 +102,10 @@ real secrets, add service-to-service authentication, or implement CI workflows.
 | Variable | Class | Default policy | Used by | Validation expectation |
 |----------|-------|----------------|---------|------------------------|
 | `FLASK_SECRET_KEY` | `secret`, `required` | Required outside `TESTING`; fake local only in examples | Flask session signing | App init fails safely when missing outside tests |
-| `SERVICE_AUTH_TOKEN` | `secret`, `required` | Required outside `TESTING` | Shared local service-to-service bearer token for internal agent requests | Send only as `Authorization: Bearer`; rotate independently from browser/OIDC secrets |
+| `WORKLOAD_CONTEXT_VERIFY_KEYS` | `required` | Required outside `TESTING` | Verify Context Agent validation requests | Context public keys and explicit tenant allowlist only |
+| `WORKLOAD_VALIDATOR_SIGNING_KID` | `required` | Required outside `TESTING` | Select Validator signing key ID | Match the current `WORKLOAD_VALIDATOR_VERIFY_KEYS` entry at Policy |
+| `WORKLOAD_VALIDATOR_SIGNING_PRIVATE_KEY_B64` | `secret`, `required` | Required outside `TESTING`; deterministic seed only in test examples | Validator-only Ed25519 signing seed | 32 raw bytes encoded as base64; never distribute to Policy/Context |
+| `WORKLOAD_CANDIDATE_VERIFY_KEYS` | `required` | Required outside `TESTING` | Verify Docker Agent candidate validation | Candidate public key registry; bind each key to one tenant ID |
 | `TESTING` | `safe default` | Defaults to `false` | App factory/tests | Parse as explicit truthy flag |
 | `DEBUG` | `runtime knob` | Defaults to `false` | App factory/log behavior | Example defaults to `false`; dev override only |
 | `MONGO_URI` | `required` | Local Docker default may be documented | Flask-PyMongo | Missing/malformed handling should be deterministic |
@@ -204,7 +210,15 @@ mappings, and bind mounts. The default local contract keeps
 override.
 
 Developer stack commands use the ignored `infrastructure/.env`, bootstrapped
-from `.env.example` when appropriate. Default functional smoke runs are
+from `.env.example` when appropriate. Functional smoke runs may use
+deterministic workload fixtures with `TESTING=true`; normal
+`make up` with `TESTING=false` rejects those keys. Run
+`.venv/bin/python scripts/provision_local_workload_keys.py --tenant-id <local-organization-id>`
+before normal startup to replace them with fresh Ed25519 keys in the ignored
+env file. The candidate private key is written separately to ignored
+`infrastructure/.env.candidate.local`; never distribute a caller private key
+to a receiver. The command rotates keys on every run, so coordinate restarts.
+Default functional smoke runs are
 isolated from that personal file: they use ignored `.env.smoke`, or an
 ephemeral copy of the versioned fake-only `.env.smoke.example` when the local
 smoke file is absent. Only an explicit
@@ -263,8 +277,32 @@ the service handles that variable correctly.
 
 - INIT-04 should consume this contract when deciding GitHub Actions variables,
   repository secrets, and informational versus required gates.
-- INIT-11 defines the service-auth trust model through `POLICY_CALLBACK_TOKEN`
-  and `SERVICE_AUTH_TOKEN`; future service-to-service credentials should follow
-  the same secret-handling and redaction contract.
+- INIT-11 keeps `POLICY_CALLBACK_TOKEN` for the separate Policy-to-Context
+  callback. Policy and Validator mutations require Ed25519-signed workload
+  tokens; the former `SERVICE_AUTH_TOKEN` is not accepted. Context alone holds
+  `WORKLOAD_CONTEXT_SIGNING_PRIVATE_KEY_B64` and
+  `WORKLOAD_CONTEXT_SIGNING_KID`; Validator alone holds
+  `WORKLOAD_VALIDATOR_SIGNING_PRIVATE_KEY_B64` and
+  `WORKLOAD_VALIDATOR_SIGNING_KID`. Policy/Validator receive only the relevant
+  `WORKLOAD_*_VERIFY_KEYS` public registries. Candidate callers must hold
+  their own private key and `kid`; receivers get only
+  `WORKLOAD_CANDIDATE_VERIFY_KEYS`.
+  Each caller sends a fresh `Authorization: Bearer` token with its fixed service
+  identity, target audience, one allowed route scope, verified tenant, exact
+  POST path, issued/expiry times (60 seconds), and random nonce. The target
+  checks the signature and claims, then atomically records the nonce in Mongo
+  with TTL to reject replay across workers. Mongo unavailable fails closed.
+  `X-Tenant-ID` is metadata only and must match the signed tenant when sent.
+  Context signs the organization resolved from the human session or tenant-
+  validated pipeline job; Validator signs only the tenant from its verified
+  Context request. Each verifier registry binds a `kid` and public key to an
+  explicit tenant allowlist; candidate keys bind to one tenant. Provision
+  distinct random signing seeds per deployment outside source control. Rotate
+  by publishing the new public key first, then switching the caller's signing
+  `kid`; retain at most one previous public key with `accept_until` bounded to
+  600 seconds, and remove it after the overlap. Never log bearer values. The
+  deterministic seeds and broad tenant IDs in `.env*.example` are test-only,
+  not a deployment authorization policy. This does not make Policy or
+  Validator persistence tenant-bound; that remains INIT-26 work.
 - INIT-13 and INIT-15 remain responsible for retrieval behavior, indexing
   quality, and benchmark promotion. INIT-02 only governs the config surface.

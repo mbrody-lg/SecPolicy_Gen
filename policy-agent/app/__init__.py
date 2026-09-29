@@ -129,11 +129,20 @@ def create_app():
         is_testing=is_testing,
         test_default="/config/policy_agent.yaml",
     )
-    app.config["SERVICE_AUTH_TOKEN"] = _get_required_env(
-        "SERVICE_AUTH_TOKEN",
-        is_testing=is_testing,
-        test_default="test-only-service-auth-token",
-    )
+    from app.workload_token import combine_verifier_keys, load_verifier_keys
+
+    app.config["WORKLOAD_CALLER_KEYS"] = combine_verifier_keys(*(
+        load_verifier_keys(
+            name, _get_required_env(name, is_testing=is_testing),
+            subject=subject, single_tenant=subject == "docker-agent",
+            testing=is_testing,
+        )
+        for subject, name in (
+            ("context-agent", "WORKLOAD_CONTEXT_VERIFY_KEYS"),
+            ("validator-agent", "WORKLOAD_VALIDATOR_VERIFY_KEYS"),
+            ("docker-agent", "WORKLOAD_CANDIDATE_VERIFY_KEYS"),
+        )
+    ))
     app.config["TESTING"] = is_testing
     app.config["DEBUG"] = _get_env_bool("DEBUG", default=False)
     app.config["MAX_CONTENT_LENGTH"] = _get_env_int("MAX_CONTENT_LENGTH", 256 * 1024)
@@ -150,6 +159,11 @@ def create_app():
 
     # Initialize Mongo with app
     mongo.init_app(app)
+    if not is_testing:
+        from app.workload_token import initialize_replay_store
+
+        with app.app_context():
+            initialize_replay_store(mongo.db)
 
     # Import and register blueprints
     from app.routes.routes import routes

@@ -1,5 +1,7 @@
 """Static coverage checks for the repository environment contract."""
 
+import base64
+import json
 import re
 from pathlib import Path
 
@@ -72,7 +74,13 @@ REQUIRED_ENV_EXAMPLE_VARIABLES = {
     "POLICY_AGENT_URL",
     "PIPELINE_JOB_STALE_AFTER_SECONDS",
     "RAG_VALIDATE_CHROMA",
-    "SERVICE_AUTH_TOKEN",
+    "WORKLOAD_CONTEXT_SIGNING_KID",
+    "WORKLOAD_CONTEXT_SIGNING_PRIVATE_KEY_B64",
+    "WORKLOAD_CONTEXT_VERIFY_KEYS",
+    "WORKLOAD_VALIDATOR_SIGNING_KID",
+    "WORKLOAD_VALIDATOR_SIGNING_PRIVATE_KEY_B64",
+    "WORKLOAD_VALIDATOR_VERIFY_KEYS",
+    "WORKLOAD_CANDIDATE_VERIFY_KEYS",
     "SESSION_COOKIE_SECURE",
     "TESTING",
     "TRUSTED_HOSTS",
@@ -92,7 +100,17 @@ SECRET_EXAMPLE_VARIABLES = {
     "MISTRAL_API_KEY",
     "OPENAI_API_KEY",
     "POLICY_CALLBACK_TOKEN",
-    "SERVICE_AUTH_TOKEN",
+    "WORKLOAD_CONTEXT_SIGNING_PRIVATE_KEY_B64",
+    "WORKLOAD_VALIDATOR_SIGNING_PRIVATE_KEY_B64",
+}
+SIGNING_SEEDS = {
+    "WORKLOAD_CONTEXT_SIGNING_PRIVATE_KEY_B64",
+    "WORKLOAD_VALIDATOR_SIGNING_PRIVATE_KEY_B64",
+}
+VERIFIER_REGISTRIES = {
+    "WORKLOAD_CONTEXT_VERIFY_KEYS",
+    "WORKLOAD_VALIDATOR_VERIFY_KEYS",
+    "WORKLOAD_CANDIDATE_VERIFY_KEYS",
 }
 LIVE_SECRET_PATTERNS = (
     re.compile(r"sk-(?:proj|or-v1)-", re.IGNORECASE),
@@ -203,7 +221,8 @@ def test_env_example_covers_contract_surface_with_fake_secrets():
     unsafe_secret_examples = {
         key: env_values[key]
         for key in SECRET_EXAMPLE_VARIABLES
-        if key in env_values and not env_values[key].startswith("fake-local-")
+        if key in env_values and key not in SIGNING_SEEDS
+        and not env_values[key].startswith("fake-local-")
     }
     live_like_values = {
         key: value
@@ -226,7 +245,8 @@ def test_smoke_env_example_is_complete_and_fake_only():
     unsafe_secret_examples = {
         key: env_values[key]
         for key in SECRET_EXAMPLE_VARIABLES
-        if key in env_values and not env_values[key].startswith("fake-local-")
+        if key in env_values and key not in SIGNING_SEEDS
+        and not env_values[key].startswith("fake-local-")
     }
     live_like_values = {
         key: value
@@ -268,7 +288,8 @@ def test_service_env_examples_use_fake_local_secret_values():
             {
                 f"{path.name}:{key}": env_values[key]
                 for key in SECRET_EXAMPLE_VARIABLES
-                if key in env_values and not env_values[key].startswith("fake-local-")
+                if key in env_values and key not in SIGNING_SEEDS
+                and not env_values[key].startswith("fake-local-")
             }
         )
         live_like_values.update(
@@ -282,3 +303,35 @@ def test_service_env_examples_use_fake_local_secret_values():
     assert undocumented == set()
     assert unsafe_secret_examples == {}
     assert live_like_values == {}
+
+
+@pytest.mark.fast
+def test_workload_examples_separate_signers_from_verifiers():
+    context = _env_file_values(SERVICE_ENV_EXAMPLE_PATHS[0])
+    policy = _env_file_values(SERVICE_ENV_EXAMPLE_PATHS[1])
+    validator = _env_file_values(SERVICE_ENV_EXAMPLE_PATHS[2])
+    expected = {
+        "context": {"WORKLOAD_CONTEXT_SIGNING_KID", "WORKLOAD_CONTEXT_SIGNING_PRIVATE_KEY_B64"},
+        "policy": VERIFIER_REGISTRIES,
+        "validator": {"WORKLOAD_CONTEXT_VERIFY_KEYS", "WORKLOAD_CANDIDATE_VERIFY_KEYS",
+                      "WORKLOAD_VALIDATOR_SIGNING_KID", "WORKLOAD_VALIDATOR_SIGNING_PRIVATE_KEY_B64"},
+    }
+    for name, values in (("context", context), ("policy", policy), ("validator", validator)):
+        assert {key for key in values if key.startswith("WORKLOAD_")} == expected[name]
+        assert "SERVICE_AUTH_TOKEN" not in values
+
+    for path in (ENV_EXAMPLE_PATH, SMOKE_ENV_EXAMPLE_PATH):
+        values = _env_file_values(path)
+        assert {key for key in values if key.startswith("WORKLOAD_")} == (
+            SIGNING_SEEDS | VERIFIER_REGISTRIES
+            | {"WORKLOAD_CONTEXT_SIGNING_KID", "WORKLOAD_VALIDATOR_SIGNING_KID"}
+        )
+        assert "test" in _read(path).lower()
+        for key in SIGNING_SEEDS:
+            assert len(base64.b64decode(values[key], validate=True)) == 32
+        for key in VERIFIER_REGISTRIES:
+            registry = json.loads(values[key])
+            assert len(registry) == 1
+            assert all(set(record) == {"public_key_b64", "tenant_ids"}
+                       and record["tenant_ids"] for record in registry.values())
+        assert len(json.loads(values["WORKLOAD_CANDIDATE_VERIFY_KEYS"])["candidate-test-v1"]["tenant_ids"]) == 1

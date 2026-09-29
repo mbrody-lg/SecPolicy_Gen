@@ -12,6 +12,7 @@ BROWSER_RUNNER = ROOT / "scripts" / "run_context_browser_smoke.sh"
 SEED_RUNNER = ROOT / "context-agent" / "scripts" / "seed_browser_smoke_contexts.py"
 BROWSER_SPEC = ROOT / "tests" / "browser" / "context-workflow.spec.js"
 OVERLAY = ROOT / "infrastructure" / "docker-compose.critical-path.yml"
+SMOKE_ENV = ROOT / "infrastructure" / ".env.smoke.example"
 
 
 def test_critical_path_workflow_starts_informational_and_retains_evidence():
@@ -71,7 +72,21 @@ def test_critical_path_overlay_uses_test_only_credentials():
     overlay = OVERLAY.read_text(encoding="utf-8")
 
     assert "POLICY_CALLBACK_TOKEN: test-only-policy-callback-token" in overlay
-    assert overlay.count("SERVICE_AUTH_TOKEN: test-only-service-auth-token") == 3
+    assert "SERVICE_AUTH_TOKEN" not in overlay
+    assert "WORKLOAD_CONTEXT_SIGNING_PRIVATE_KEY_B64" not in overlay
+    assert "WORKLOAD_VALIDATOR_SIGNING_PRIVATE_KEY_B64" not in overlay
+    smoke = SMOKE_ENV.read_text(encoding="utf-8")
+    assert "WORKLOAD_CONTEXT_SIGNING_KID=context-test-v1" in smoke
+    assert "WORKLOAD_VALIDATOR_SIGNING_KID=validator-test-v1" in smoke
+    assert "WORKLOAD_CONTEXT_VERIFY_KEYS=" in smoke
+    assert "WORKLOAD_VALIDATOR_VERIFY_KEYS=" in smoke
+
+
+def test_rag_refresh_smoke_uses_signed_context_workload_credential():
+    smoke_script = (ROOT / "scripts" / "run_docker_functional_smoke.sh").read_text(encoding="utf-8")
+    assert 'auth_token="$(smoke_rag_auth_token)"' in smoke_script
+    assert '"Authorization: Bearer $auth_token"' in smoke_script
+    assert 'scope="policy:rag:refresh"' in smoke_script
 
 
 def test_context_browser_smoke_accepts_critical_path_compose_contract():

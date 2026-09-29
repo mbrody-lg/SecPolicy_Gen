@@ -6,7 +6,6 @@ from flask import g
 from app.agents.roles.coordinator import Coordinator
 from app.candidate_contract import authorize_candidate_request
 
-SERVICE_HEADERS = {"Authorization": "Bearer test-only-service-auth-token"}
 
 
 def _headers(**overrides):
@@ -77,7 +76,7 @@ def test_read_only_validation_runs_once_without_side_effects():
     update_policy.assert_not_called()
 
 
-def test_candidate_validation_route_preserves_authoritative_store(client):
+def test_candidate_validation_route_preserves_authoritative_store(client, workload_headers):
     payload = {
         "context_id": "ctx-candidate",
         "policy_text": "Candidate policy",
@@ -107,14 +106,14 @@ def test_candidate_validation_route_preserves_authoritative_store(client):
             "validation": validation,
         }) as pipeline,
     ):
-        response = client.post("/candidate/validate-policy", json=payload, headers=_headers(**SERVICE_HEADERS))
+        response = client.post("/candidate/validate-policy", json=payload, headers=_headers(**workload_headers("/candidate/validate-policy")))
 
     assert response.status_code == 200
     assert response.get_json()["candidate"]["authoritative"] is False
     assert pipeline.call_args.kwargs["read_only"] is True
 
 
-def test_candidate_validation_accepts_service_identity_principal(client):
+def test_candidate_validation_accepts_service_identity_principal(client, workload_headers):
     payload = {
         "context_id": "ctx-candidate",
         "policy_text": "Candidate policy",
@@ -135,7 +134,7 @@ def test_candidate_validation_accepts_service_identity_principal(client):
         "app.routes.routes.run_validation_pipeline",
         return_value={"success": True, "stage": "completed", "validation": validation},
     ) as pipeline:
-        response = client.post("/candidate/validate-policy", json=payload, headers=_headers(**SERVICE_HEADERS))
+        response = client.post("/candidate/validate-policy", json=payload, headers=_headers(**workload_headers("/candidate/validate-policy")))
 
     assert response.status_code == 200
     assert response.get_json()["candidate"] == {

@@ -7,7 +7,6 @@ from flask import g
 from app.routes import routes as routes_module
 
 pytestmark = [pytest.mark.route]
-SERVICE_HEADERS = {"Authorization": "Bearer test-only-service-auth-token"}
 
 
 def test_health_route_returns_lightweight_service_status(client):
@@ -154,7 +153,7 @@ def test_rag_status_route_escapes_reflected_collection_names(client):
     ]
 
 
-def test_rag_refresh_route_runs_controlled_refresh(client):
+def test_rag_refresh_route_runs_controlled_refresh(client, workload_headers):
     with patch(
         "app.routes.routes.refresh_rag_runtime",
         return_value=(
@@ -167,7 +166,7 @@ def test_rag_refresh_route_runs_controlled_refresh(client):
             202,
         ),
     ):
-        response = client.post("/rag/refresh", headers=SERVICE_HEADERS)
+        response = client.post("/rag/refresh", headers=workload_headers("/rag/refresh"))
 
     assert response.status_code == 202
     assert response.get_json()["job"] == {"id": "job-1", "status": "running"}
@@ -180,7 +179,7 @@ def test_rag_refresh_route_requires_service_identity(client):
     assert response.get_json()["error_code"] == "service_authentication_required"
 
 
-def test_rag_refresh_route_escapes_reflected_job_metadata(client):
+def test_rag_refresh_route_escapes_reflected_job_metadata(client, workload_headers):
     with patch(
         "app.routes.routes.refresh_rag_runtime",
         return_value=(
@@ -193,14 +192,14 @@ def test_rag_refresh_route_escapes_reflected_job_metadata(client):
             202,
         ),
     ):
-        response = client.post("/rag/refresh", headers=SERVICE_HEADERS)
+        response = client.post("/rag/refresh", headers=workload_headers("/rag/refresh"))
 
     assert response.status_code == 202
     assert b"<script>alert(1)</script>" not in response.data
     assert response.get_json()["message"] == "&lt;script&gt;alert(1)&lt;/script&gt;"
 
 
-def test_rag_refresh_route_reports_disabled_runtime(client):
+def test_rag_refresh_route_reports_disabled_runtime(client, workload_headers):
     with patch(
         "app.routes.routes.refresh_rag_runtime",
         return_value=(
@@ -214,13 +213,13 @@ def test_rag_refresh_route_reports_disabled_runtime(client):
             403,
         ),
     ):
-        response = client.post("/rag/refresh", headers=SERVICE_HEADERS)
+        response = client.post("/rag/refresh", headers=workload_headers("/rag/refresh"))
 
     assert response.status_code == 403
     assert response.get_json()["error_code"] == "rag_refresh_disabled"
 
 
-def test_generate_policy_route_rejects_missing_required_fields(client):
+def test_generate_policy_route_rejects_missing_required_fields(client, workload_headers):
     with patch(
         "app.routes.routes.run_generation_pipeline",
         return_value={
@@ -237,7 +236,7 @@ def test_generate_policy_route_rejects_missing_required_fields(client):
             "/generate_policy",
             data=json.dumps({"context_id": "ctx-1", "refined_prompt": "prompt only"}),
             content_type="application/json",
-            headers=SERVICE_HEADERS,
+            headers=workload_headers("/generate_policy"),
         )
 
     assert response.status_code == 400
@@ -261,6 +260,7 @@ def test_generate_policy_route_with_openai(
     openai_model_version,
     default_language,
     monkeypatch,
+    workload_headers,
 ):
     monkeypatch.setattr(
         routes_module,
@@ -322,7 +322,7 @@ def test_generate_policy_route_with_openai(
             "/generate_policy",
             data=json.dumps(payload),
             content_type="application/json",
-            headers=SERVICE_HEADERS,
+            headers=workload_headers("/generate_policy"),
         )
 
     assert response.status_code == 200
@@ -345,7 +345,7 @@ def test_generate_policy_route_with_openai(
     assert data["revision_count"] == 0
 
 
-def test_generate_policy_route_returns_deterministic_internal_error(client):
+def test_generate_policy_route_returns_deterministic_internal_error(client, workload_headers):
     payload = {
         "context_id": "ctx-err",
         "refined_prompt": "Generate a policy",
@@ -369,7 +369,7 @@ def test_generate_policy_route_returns_deterministic_internal_error(client):
             "/generate_policy",
             data=json.dumps(payload),
             content_type="application/json",
-            headers=SERVICE_HEADERS,
+            headers=workload_headers("/generate_policy"),
         )
 
     assert response.status_code == 500
@@ -383,7 +383,7 @@ def test_generate_policy_route_returns_deterministic_internal_error(client):
     }
 
 
-def test_generate_policy_route_adds_security_headers(client):
+def test_generate_policy_route_adds_security_headers(client, workload_headers):
     with patch(
         "app.routes.routes.run_generation_pipeline",
         return_value={
@@ -399,7 +399,7 @@ def test_generate_policy_route_adds_security_headers(client):
             "/generate_policy",
             data="[]",
             content_type="application/json",
-            headers=SERVICE_HEADERS,
+            headers=workload_headers("/generate_policy"),
         )
 
     assert response.status_code == 400
@@ -407,7 +407,7 @@ def test_generate_policy_route_adds_security_headers(client):
     assert response.headers["Cache-Control"] == "no-store"
 
 
-def test_generate_policy_route_preserves_request_correlation_id(client):
+def test_generate_policy_route_preserves_request_correlation_id(client, workload_headers):
     captured = {}
 
     def fake_run_generation_pipeline(payload):
@@ -426,7 +426,7 @@ def test_generate_policy_route_preserves_request_correlation_id(client):
             "/generate_policy",
             data="[]",
             content_type="application/json",
-            headers={**SERVICE_HEADERS, "X-Correlation-ID": "request-correlation-id"},
+            headers={**workload_headers("/generate_policy"), "X-Correlation-ID": "request-correlation-id"},
         )
 
     assert captured["correlation_id"] == "request-correlation-id"
@@ -434,7 +434,7 @@ def test_generate_policy_route_preserves_request_correlation_id(client):
     assert response.get_json()["correlation_id"] == "request-correlation-id"
 
 
-def test_generate_policy_route_generates_request_correlation_id_when_missing(client):
+def test_generate_policy_route_generates_request_correlation_id_when_missing(client, workload_headers):
     captured = {}
 
     def fake_run_generation_pipeline(payload):
@@ -453,7 +453,7 @@ def test_generate_policy_route_generates_request_correlation_id_when_missing(cli
             "/generate_policy",
             data="[]",
             content_type="application/json",
-            headers=SERVICE_HEADERS,
+            headers=workload_headers("/generate_policy"),
         )
 
     correlation_id = response.headers["X-Correlation-ID"]

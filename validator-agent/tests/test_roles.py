@@ -1,6 +1,5 @@
 from unittest.mock import patch
 
-SERVICE_HEADERS = {"Authorization": "Bearer test-only-service-auth-token"}
 
 
 class FakeCoordinator:
@@ -19,14 +18,14 @@ class FakeCoordinator:
         }
 
 
-def test_validator_agent_all_roles(client, default_prompt, default_context_id):
+def test_validator_agent_all_roles(client, default_prompt, default_context_id, workload_headers):
     with patch("app.services.logic.Coordinator", return_value=FakeCoordinator()):
         response = client.post("/validate-policy", json={
             "context_id": default_context_id,
             "policy_text": default_prompt,
             "structured_plan": "Fake structure",
             "generated_at": "2025-05-21T12:00:00Z"
-        }, headers=SERVICE_HEADERS)
+        }, headers=workload_headers("/validate-policy"))
 
     assert response.status_code == 200
     data = response.get_json()

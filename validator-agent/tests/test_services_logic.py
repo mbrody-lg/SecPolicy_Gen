@@ -1,6 +1,9 @@
 from unittest.mock import MagicMock, patch
 
 import requests
+from flask import g
+
+from app.workload_token import VerifierKey, verify_token
 
 from app.services.logic import (
     get_health_status,
@@ -52,7 +55,26 @@ def test_get_readiness_status_returns_dependency_error_when_mongo_fails(app, mon
     }
 
 
-def test_send_policy_update_to_policy_agent_posts_expected_payload():
+def _verified_principal():
+    g.service_principal = {
+        "identity": "context-agent", "audience": "validator-agent",
+        "scopes": ["policy:validate"], "tenant_id": "tenant-a",
+    }
+
+
+def test_policy_update_without_verified_principal_makes_no_outbound_call(app):
+    with app.test_request_context("/validate-policy", method="POST"):
+        with patch("app.services.logic.requests.post") as post:
+            result = send_policy_update_to_policy_agent(
+                context_id="ctx-1", language="en", policy_text="draft",
+                policy_agent_version="0.1.0", generated_at="2026-03-05T00:00:00+00:00",
+                status="review", reasons=[], recommendations=[],
+            )
+    assert result["error_code"] == "workload_identity_unavailable"
+    post.assert_not_called()
+
+
+def test_send_policy_update_to_policy_agent_posts_expected_payload(app):
     response_payload = {
         "context_id": "ctx-1",
         "language": "en",
@@ -64,8 +86,10 @@ def test_send_policy_update_to_policy_agent_posts_expected_payload():
     response.raise_for_status.return_value = None
     response.json.return_value = response_payload
 
-    with patch("app.services.logic.requests.post", return_value=response) as post:
-        result = send_policy_update_to_policy_agent(
+    with app.test_request_context("/validate-policy", method="POST"):
+        _verified_principal()
+        with patch("app.services.logic.requests.post", return_value=response) as post:
+            result = send_policy_update_to_policy_agent(
             context_id="ctx-1",
             language="en",
             policy_text="current policy",
@@ -74,12 +98,12 @@ def test_send_policy_update_to_policy_agent_posts_expected_payload():
             status="review",
             reasons=["Missing scope"],
             recommendations=["Add scope"],
-        )
+            )
 
     assert result == response_payload
-    post.assert_called_once_with(
-        "http://policy-agent:5000/generate_policy/ctx-1/update",
-        json={
+    assert post.call_count == 1
+    assert post.call_args.args == ("http://policy-agent:5000/generate_policy/ctx-1/update",)
+    assert post.call_args.kwargs["json"] == {
             "context_id": "ctx-1",
             "language": "en",
             "policy_text": "current policy",
@@ -88,21 +112,31 @@ def test_send_policy_update_to_policy_agent_posts_expected_payload():
             "status": "review",
             "reasons": ["Missing scope"],
             "recommendations": ["Add scope"],
-        },
-        headers={
-            "Authorization": "Bearer test-only-service-auth-token",
-            "X-Correlation-ID": "ctx-1",
-        },
-        timeout=30.0,
+    }
+    assert post.call_args.kwargs["timeout"] == 30.0
+    headers = post.call_args.kwargs["headers"]
+    assert headers["X-Correlation-ID"] == "ctx-1"
+    claims = verify_token(
+        headers["Authorization"].removeprefix("Bearer "),
+        caller_keys={app.config["WORKLOAD_VALIDATOR_SIGNING_KID"]: VerifierKey(
+            "validator-agent", app.config["WORKLOAD_VALIDATOR_SIGNING_KEY"].public_key(),
+            frozenset({"tenant-a"}), None,
+        )},
+        allowed_scopes={"validator-agent": frozenset({"policy:update"})},
+        audience="policy-agent", scope="policy:update", method="POST",
+        path="/generate_policy/ctx-1/update",
     )
+    assert claims["tenant_id"] == "tenant-a"
 
 
-def test_send_policy_update_to_policy_agent_returns_deterministic_error():
-    with patch(
-        "app.services.logic.requests.post",
-        side_effect=requests.exceptions.RequestException("boom"),
-    ):
-        result = send_policy_update_to_policy_agent(
+def test_send_policy_update_to_policy_agent_returns_deterministic_error(app):
+    with app.test_request_context("/validate-policy", method="POST"):
+        _verified_principal()
+        with patch(
+            "app.services.logic.requests.post",
+            side_effect=requests.exceptions.RequestException("boom"),
+        ):
+            result = send_policy_update_to_policy_agent(
             context_id="ctx-1",
             language="en",
             policy_text="current policy",
@@ -111,7 +145,7 @@ def test_send_policy_update_to_policy_agent_returns_deterministic_error():
             status="review",
             reasons=["Missing scope"],
             recommendations=["Add scope"],
-        )
+            )
 
     assert result == {
         "success": False,
@@ -148,6 +182,7 @@ def test_send_policy_update_to_policy_agent_surfaces_dependency_error_metadata(c
     http_error.response = response
 
     with client.application.test_request_context("/validate-policy", method="POST"):
+        _verified_principal()
         with patch(
             "app.services.logic.requests.post",
             side_effect=http_error,
@@ -200,6 +235,7 @@ def test_send_policy_update_to_policy_agent_prefers_request_correlation_id(clien
         method="POST",
         headers={"X-Correlation-ID": "corr-request"},
     ):
+        _verified_principal()
         with patch("app.services.logic.requests.post", return_value=response) as post:
             send_policy_update_to_policy_agent(
                 context_id="ctx-1",
@@ -212,21 +248,21 @@ def test_send_policy_update_to_policy_agent_prefers_request_correlation_id(clien
                 recommendations=["Add scope"],
             )
 
-    assert post.call_args.kwargs["headers"] == {
-        "Authorization": "Bearer test-only-service-auth-token",
-        "X-Correlation-ID": "corr-request",
-    }
+    assert post.call_args.kwargs["headers"]["X-Correlation-ID"] == "corr-request"
+    assert post.call_args.kwargs["headers"]["Authorization"].startswith("Bearer ")
 
 
-def test_send_policy_update_to_policy_agent_emits_structured_logs(caplog):
+def test_send_policy_update_to_policy_agent_emits_structured_logs(app, caplog):
     response = MagicMock()
     response.raise_for_status.return_value = None
     response.status_code = 200
     response.json.return_value = {"policy_text": "revised"}
 
-    with patch("app.services.logic.requests.post", return_value=response):
-        with caplog.at_level("INFO"):
-            send_policy_update_to_policy_agent(
+    with app.test_request_context("/validate-policy", method="POST"):
+        _verified_principal()
+        with patch("app.services.logic.requests.post", return_value=response):
+            with caplog.at_level("INFO"):
+                send_policy_update_to_policy_agent(
                 context_id="ctx-log",
                 language="en",
                 policy_text="current policy",
@@ -235,7 +271,7 @@ def test_send_policy_update_to_policy_agent_emits_structured_logs(caplog):
                 status="review",
                 reasons=["Missing scope"],
                 recommendations=["Add scope"],
-            )
+                )
 
     assert '"event": "validator.policy_update.request"' in caplog.text
     assert '"event": "validator.policy_update.response"' in caplog.text

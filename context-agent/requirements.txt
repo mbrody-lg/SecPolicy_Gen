@@ -1,4 +1,6 @@
 Flask
+cryptography
+PyJWT
 Authlib>=1.6.9,<2
 flask-pymongo
 python-dotenv

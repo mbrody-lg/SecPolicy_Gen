@@ -3,12 +3,35 @@ from types import SimpleNamespace
 import pytest
 import requests
 from bson import ObjectId
+from flask import g
 
 from test_base import *
 from app.agents.openai.structured import ProviderTimeoutError
 from app.services import logic
+from app.workload_token import VerifierKey, verify_token
 
 ORGANIZATION_ID = "test-organization"
+
+
+@pytest.fixture
+def verified_workload_tenant(app):
+    with app.test_request_context("/"):
+        g.organization_id = ORGANIZATION_ID
+        yield
+
+
+def _assert_signed_header(headers, *, audience, scope, path):
+    assert headers["Authorization"].startswith("Bearer ")
+    claims = verify_token(
+        headers["Authorization"].removeprefix("Bearer "),
+        caller_keys={logic.current_app.config["WORKLOAD_CONTEXT_SIGNING_KID"]: VerifierKey(
+            "context-agent", logic.current_app.config["WORKLOAD_CONTEXT_SIGNING_KEY"].public_key(),
+            frozenset({ORGANIZATION_ID}), None,
+        )},
+        allowed_scopes={"context-agent": frozenset({scope})},
+        audience=audience, scope=scope, method="POST", path=path,
+    )
+    assert claims["tenant_id"] == ORGANIZATION_ID
 
 
 class FakeCollection:
@@ -1794,7 +1817,7 @@ def test_get_system_status_returns_ready_when_services_and_rag_are_ready(app_con
     assert result["rag"]["status"] == "ready"
 
 
-def test_refresh_system_state_calls_policy_rag_refresh(app_context, monkeypatch):
+def test_refresh_system_state_calls_policy_rag_refresh(app_context, verified_workload_tenant, monkeypatch):
     calls = []
 
     def fake_post(url, timeout, headers):
@@ -1813,14 +1836,14 @@ def test_refresh_system_state_calls_policy_rag_refresh(app_context, monkeypatch)
     assert result["success"] is True
     assert calls[0][0].endswith("/rag/refresh")
     assert "X-Correlation-ID" in calls[0][2]
-    assert calls[0][2]["Authorization"] == "Bearer test-only-service-auth-token"
+    _assert_signed_header(calls[0][2], audience="policy-agent", scope="policy:rag:refresh", path="/rag/refresh")
     assert result["status"]["status"] == "ready"
 
 
-def test_refresh_system_state_reports_policy_refresh_failure(app_context, monkeypatch):
+def test_refresh_system_state_reports_policy_refresh_failure(app_context, verified_workload_tenant, monkeypatch):
     def fake_post(url, timeout, headers):
         assert "X-Correlation-ID" in headers
-        assert headers["Authorization"] == "Bearer test-only-service-auth-token"
+        _assert_signed_header(headers, audience="policy-agent", scope="policy:rag:refresh", path="/rag/refresh")
         return FakeResponse(
             {
                 "success": False,
@@ -1845,7 +1868,7 @@ def test_refresh_system_state_reports_policy_refresh_failure(app_context, monkey
     assert result["status"]["status"] == "not_ready"
 
 
-def test_refresh_system_state_handles_unreachable_policy_agent(app_context, monkeypatch):
+def test_refresh_system_state_handles_unreachable_policy_agent(app_context, verified_workload_tenant, monkeypatch):
     def fake_post(url, timeout, headers):
         assert "X-Correlation-ID" in headers
         raise requests.exceptions.ConnectionError("policy-agent unavailable")
@@ -2012,7 +2035,7 @@ def test_generate_full_policy_pipeline_returns_structured_stage_error(monkeypatc
     }
 
 
-def test_call_policy_agent_propagates_timeout_and_correlation_headers(app_context, monkeypatch):
+def test_call_policy_agent_propagates_timeout_and_correlation_headers(app_context, verified_workload_tenant, monkeypatch):
     captured = {}
 
     def fake_post(url, json, headers, timeout):
@@ -2037,14 +2060,20 @@ def test_call_policy_agent_propagates_timeout_and_correlation_headers(app_contex
 
     assert result == {"success": True, "policy_text": "generated"}
     assert captured["url"].endswith("/generate_policy")
-    assert captured["headers"] == {
-        "Authorization": "Bearer test-only-service-auth-token",
-        "X-Correlation-ID": "corr-1",
-    }
+    assert captured["headers"]["X-Correlation-ID"] == "corr-1"
+    _assert_signed_header(captured["headers"], audience="policy-agent", scope="policy:generate", path="/generate_policy")
     assert captured["timeout"] == 12.5
 
 
-def test_call_policy_agent_surfaces_dependency_error_metadata(app_context, monkeypatch):
+def test_call_policy_agent_without_verified_tenant_makes_no_outbound_call(app_context, monkeypatch):
+    calls = []
+    monkeypatch.setattr(logic.requests, "post", lambda *args, **kwargs: calls.append((args, kwargs)))
+    with pytest.raises(ValueError, match="verified tenant"):
+        logic.call_policy_agent({"context_id": "ctx-1"})
+    assert calls == []
+
+
+def test_call_policy_agent_surfaces_dependency_error_metadata(app_context, verified_workload_tenant, monkeypatch):
     def fake_post(url, json, headers, timeout):
         return FakeResponse(
             {
@@ -2080,7 +2109,7 @@ def test_call_policy_agent_surfaces_dependency_error_metadata(app_context, monke
     }
 
 
-def test_call_validator_agent_propagates_timeout_and_correlation_headers(app_context, monkeypatch):
+def test_call_validator_agent_propagates_timeout_and_correlation_headers(app_context, verified_workload_tenant, monkeypatch):
     captured = {}
 
     def fake_post(url, json, headers, timeout):
@@ -2105,14 +2134,12 @@ def test_call_validator_agent_propagates_timeout_and_correlation_headers(app_con
 
     assert result == {"status": "accepted"}
     assert captured["url"].endswith("/validate-policy")
-    assert captured["headers"] == {
-        "Authorization": "Bearer test-only-service-auth-token",
-        "X-Correlation-ID": "corr-3",
-    }
+    assert captured["headers"]["X-Correlation-ID"] == "corr-3"
+    _assert_signed_header(captured["headers"], audience="validator-agent", scope="policy:validate", path="/validate-policy")
     assert captured["timeout"] == 18.0
 
 
-def test_call_validator_agent_surfaces_dependency_error_metadata(app_context, monkeypatch):
+def test_call_validator_agent_surfaces_dependency_error_metadata(app_context, verified_workload_tenant, monkeypatch):
     def fake_post(url, json, headers, timeout):
         return FakeResponse(
             {
@@ -2184,6 +2211,7 @@ def test_call_policy_agent_prefers_request_correlation_id_over_payload(app, monk
 
     with app.test_request_context("/", headers={"X-Correlation-ID": "corr-request"}):
         app.preprocess_request()
+        g.organization_id = ORGANIZATION_ID
         result = logic.call_policy_agent(
             {
                 "context_id": "ctx-1",
@@ -2195,13 +2223,12 @@ def test_call_policy_agent_prefers_request_correlation_id_over_payload(app, monk
         )
 
     assert result == {"success": True, "policy_text": "generated"}
-    assert captured["headers"] == {
-        "Authorization": "Bearer test-only-service-auth-token",
-        "X-Correlation-ID": "corr-request",
-    }
+    assert captured["headers"]["X-Correlation-ID"] == "corr-request"
+    with app.app_context():
+        _assert_signed_header(captured["headers"], audience="policy-agent", scope="policy:generate", path="/generate_policy")
 
 
-def test_call_policy_agent_emits_structured_logs(app_context, monkeypatch, caplog):
+def test_call_policy_agent_emits_structured_logs(app_context, verified_workload_tenant, monkeypatch, caplog):
     def fake_post(url, json, headers, timeout):
         return FakeResponse({"success": True}, status_code=200)
 
