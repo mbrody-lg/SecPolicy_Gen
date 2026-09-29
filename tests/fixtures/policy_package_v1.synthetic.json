@@ -1,0 +1,65 @@
+{
+  "profile": {
+    "contract": "secpolicy.generation_profile", "version": "1.0", "id": "profile-synthetic-001",
+    "policy_request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "document_profile": "standard", "coverage_mode": "risk_based", "effort_tier": "balanced", "language": "en",
+    "generation_limits": {"max_sections": 8, "max_requirements": 32, "max_evidence_units": 32}
+  },
+  "coverage_plan": {
+    "contract": "secpolicy.coverage_plan", "version": "1.0", "id": "plan-synthetic-001",
+    "profile_id": "profile-synthetic-001", "policy_request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "source_inventory_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "items": [{
+      "id": "cov-synthetic-001", "source_unit_id": "unit-synthetic-001", "disposition": "applicable",
+      "obligation": "mandatory", "rationale": "Synthetic unit applies to the stated test scope.",
+      "fact_refs": ["fact-synthetic-001"], "rule_ids": ["rule-synthetic-001"],
+      "evidence_ids": ["ev-synthetic-001"], "requirement_ids": ["req-synthetic-001"],
+      "review_disposition": "none", "gap_ids": []
+    }],
+    "conflicts": [], "unresolved_gaps": []
+  },
+  "package": {
+    "contract": "secpolicy.policy_package", "version": "1.0", "revision_id": "rev-synthetic-001",
+    "previous_revision_id": null, "profile_id": "profile-synthetic-001", "coverage_plan_id": "plan-synthetic-001",
+    "policy_request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "purpose": "Protect synthetic records.", "scope": "Synthetic Exampleland organization.",
+    "sections": [{"id": "sec-synthetic-001", "title": "Access governance", "body": "Synthetic access owners shall review permissions.", "requirement_ids": ["req-synthetic-001"]}],
+    "requirements": [{
+      "id": "req-synthetic-001", "section_id": "sec-synthetic-001", "coverage_id": "cov-synthetic-001",
+      "obligation": "mandatory", "statement": "Review synthetic permissions monthly.",
+      "rationale": "The synthetic unit requires review.", "owner": "Security lead",
+      "evidence_ids": ["ev-synthetic-001"], "action_ids": ["act-synthetic-001"], "no_action_reason": null
+    }],
+    "evidence": [{
+      "id": "ev-synthetic-001", "source_id": "source-synthetic-001", "source_unit_id": "unit-synthetic-001",
+      "source_version": "fixture-1", "source_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "locator": "synthetic:section-1", "corpus_status": "synthetic",
+      "excerpt_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "role": "grounding", "candidate_reason": null
+    }],
+    "actions": [{
+      "id": "act-synthetic-001", "requirement_id": "req-synthetic-001", "owner": "Security lead",
+      "trigger": "Monthly review cycle", "target": "Complete permission review",
+      "completion_evidence": "Signed review log"
+    }],
+    "assumptions": ["Synthetic fixture only"], "exclusions": [], "conflicts": [],
+    "exception_process": "Security lead records and reviews exceptions.",
+    "review_cadence": "Annually and after material changes.",
+    "provenance": {
+      "context_revision_id": "rev-synthetic-context-001",
+      "source_inventory_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "generator_version": "synthetic-fixture-1"
+    },
+    "errors": []
+  },
+  "budget_quote": {
+    "contract": "secpolicy.generation_budget_quote", "version": "1.0", "id": "quote-synthetic-001",
+    "profile_id": "profile-synthetic-001", "coverage_plan_id": "plan-synthetic-001",
+    "policy_request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "price_catalog_version": "synthetic-fixture-1", "currency": "EUR",
+    "estimated_amount": "0.000000", "unrounded_upper_bound": "0.000000",
+    "reserved_upper_bound": "0.00", "run_cap": "0.00",
+    "estimated_calls": 0, "max_calls": 0, "estimated_tokens": 0, "max_tokens": 0,
+    "status": "estimate_only", "reason_code": null
+  }
+}
