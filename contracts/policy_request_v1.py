@@ -33,10 +33,22 @@ _BUSINESS_FACTS = {
     "constraints": "strings",
     "governance_owner": "string",
 }
+_SCOPE_PARTS = {
+    "legal_entities": "strings", "size_band": "short_string",
+    "jurisdictions": "strings", "sectors": "strings",
+    "services": "strings", "data_categories": "strings",
+}
+_BUSINESS_FACTS_V1_1 = {
+    **_BUSINESS_FACTS,
+    "entity_scope": "entity_scope_decisions",
+    "business_priorities": "strings",
+    "critical_processes": "strings",
+}
 _MANDATORY = {"policy_type", "scope", "audience", "document_profile", "coverage_mode", "language"}
 _PROFILES = {"executive", "standard", "detailed"}
 _COVERAGE = {"risk_based", "all_applicable", "full_instrument"}
 _EXCLUSION_KINDS = {"entity", "jurisdiction", "instrument"}
+_CONFIDENCE = {"confirmed", "qualified", "unknown"}
 
 
 class PolicyRequestError(ValueError):
@@ -104,6 +116,8 @@ def _exclusions(value: object, field: str) -> list[str]:
 def _value(value: object, kind: str, field: str) -> None:
     if kind == "string":
         _text(value, field, max_length=2000)
+    elif kind == "short_string":
+        _text(value, field)
     elif kind == "strings":
         _strings(value, field)
     elif kind == "exclusions":
@@ -116,12 +130,21 @@ def _value(value: object, kind: str, field: str) -> None:
             _fail("invalid_value", field)
     elif kind == "entity_scope":
         scope = _keys(value,
-                      {"legal_entities", "size_band", "jurisdictions", "sectors", "services", "data_categories"},
-                      {"legal_entities", "size_band", "jurisdictions", "sectors", "services", "data_categories"}, field)
+                      set(_SCOPE_PARTS), set(_SCOPE_PARTS), field)
         for part in ("legal_entities", "jurisdictions", "sectors", "services", "data_categories"):
             _strings(scope[part], f"{field}.{part}")
         if scope["size_band"] is not None:
             _text(scope["size_band"], f"{field}.size_band")
+    elif kind == "entity_scope_decisions":
+        scope = _keys(value, set(_SCOPE_PARTS), set(_SCOPE_PARTS), field)
+        for part, part_kind in _SCOPE_PARTS.items():
+            decision = _decision(
+                scope[part], part_kind, f"{field}.{part}", require_confidence=True,
+            )
+            if part_kind == "strings" and decision["source"] != "unknown":
+                values = decision["value"]
+                if len({item.casefold() for item in values}) != len(values):
+                    _fail("duplicate_value", f"{field}.{part}.value")
     elif kind == "instruments":
         if not isinstance(value, list) or len(value) > 32:
             _fail("invalid_type" if not isinstance(value, list) else "too_large", field)
@@ -136,12 +159,20 @@ def _value(value: object, kind: str, field: str) -> None:
             _fail("duplicate_value", field)
 
 
-def _decision(value: object, kind: str, field: str) -> dict:
-    decision = _keys(value, {"value", "source", "source_ref"},
-                     {"value", "source", "source_ref"}, field)
+def _decision(value: object, kind: str, field: str, *, require_confidence: bool = False) -> dict:
+    fields = {"value", "source", "source_ref"}
+    if require_confidence:
+        fields.add("confidence")
+    decision = _keys(value, fields, fields, field)
     source = decision["source"]
     if source not in ("provided", "derived", "unknown"):
         _fail("invalid_source", f"{field}.source")
+    if require_confidence:
+        confidence = decision["confidence"]
+        if not isinstance(confidence, str) or confidence not in _CONFIDENCE:
+            _fail("invalid_confidence", f"{field}.confidence")
+        if (source == "unknown") != (confidence == "unknown"):
+            _fail("conflicting_confidence", f"{field}.confidence")
     if source == "unknown":
         if decision["value"] is not None or decision["source_ref"] is not None:
             _fail("unknown_has_value", field)
@@ -173,12 +204,46 @@ def compute_policy_input_hash_v1(request: dict) -> str:
     return sha256(canonical).hexdigest()
 
 
+def compute_policy_input_hash_v1_1(request: dict) -> str:
+    """Hash 1.1 inputs with the same canonical preimage, including the version."""
+    if not isinstance(request, dict) or request.get("version") != "1.1":
+        _fail("unsupported_version", "$.version")
+    return compute_policy_input_hash_v1(request)
+
+
 def validate_policy_request_v1(
     request: object, *, expected_context_id: str | None = None,
     expected_tenant_id: str | None = None, expected_plan_revision_id: str | None = None,
     expected_snapshot_hash: str | None = None,
 ) -> dict:
     """Validate an approved, complete v1 request and return a defensive copy."""
+    return _validate_policy_request(
+        request, version=VERSION, expected_context_id=expected_context_id,
+        expected_tenant_id=expected_tenant_id,
+        expected_plan_revision_id=expected_plan_revision_id,
+        expected_snapshot_hash=expected_snapshot_hash,
+    )
+
+
+def validate_policy_request_v1_1(
+    request: object, *, expected_context_id: str | None = None,
+    expected_tenant_id: str | None = None, expected_plan_revision_id: str | None = None,
+    expected_snapshot_hash: str | None = None,
+) -> dict:
+    """Validate an approved 1.1 request without accepting it in service ingress."""
+    return _validate_policy_request(
+        request, version="1.1", expected_context_id=expected_context_id,
+        expected_tenant_id=expected_tenant_id,
+        expected_plan_revision_id=expected_plan_revision_id,
+        expected_snapshot_hash=expected_snapshot_hash,
+    )
+
+
+def _validate_policy_request(
+    request: object, *, version: str, expected_context_id: str | None,
+    expected_tenant_id: str | None, expected_plan_revision_id: str | None,
+    expected_snapshot_hash: str | None,
+) -> dict:
     try:
         encoded = json.dumps(request, ensure_ascii=False, allow_nan=False).encode("utf-8")
     except (TypeError, ValueError, OverflowError) as exc:
@@ -189,14 +254,15 @@ def validate_policy_request_v1(
     data = _keys(request, fields, fields, "$")
     if data["contract"] != CONTRACT:
         _fail("invalid_contract", "$.contract")
-    if data["version"] != VERSION:
+    if data["version"] != version:
         _fail("unsupported_version", "$.version")
     context_id = _text(data["context_id"], "$.context_id")
     approved = _keys(data["approved_context"],
                      {"approval_status", "context_id", "tenant_id", "plan_revision_id", "snapshot_hash", "legacy_handoff_hash", "hash_scope", "policy_handoff_context"},
                      {"approval_status", "context_id", "tenant_id", "plan_revision_id", "snapshot_hash", "legacy_handoff_hash", "hash_scope", "policy_handoff_context"},
                      "$.approved_context")
-    if approved["approval_status"] != "approved" or approved["hash_scope"] != "policy_input_v1":
+    hash_scope = "policy_input_v1" if version == VERSION else "policy_input_v1_1"
+    if approved["approval_status"] != "approved" or approved["hash_scope"] != hash_scope:
         _fail("unapproved_context", "$.approved_context.approval_status")
     if approved["context_id"] != context_id:
         _fail("context_mismatch", "$.approved_context.context_id")
@@ -260,16 +326,26 @@ def validate_policy_request_v1(
     defaults = _keys(origin["defaults"], {"document_profile", "coverage_mode"}, set(), "$.origin.defaults")
     intent = _keys(data["policy_intent"], set(_POLICY_INTENT), set(_POLICY_INTENT), "$.policy_intent")
     for field, kind in _POLICY_INTENT.items():
-        decision = _decision(intent[field], kind, f"$.policy_intent.{field}")
+        decision = _decision(
+            intent[field], kind, f"$.policy_intent.{field}",
+            require_confidence=version != VERSION,
+        )
         if field in _MANDATORY and decision["source"] == "unknown":
             _fail("unresolved_intent", f"$.policy_intent.{field}")
         if field == "audience" and not decision["value"]:
             _fail("unresolved_intent", "$.policy_intent.audience")
         if field in defaults and (decision["source"] != "derived" or decision["value"] != defaults[field]):
             _fail("conflicting_default", f"$.policy_intent.{field}")
-    facts = _keys(data["business_facts"], set(_BUSINESS_FACTS), set(_BUSINESS_FACTS), "$.business_facts")
-    for field, kind in _BUSINESS_FACTS.items():
-        _decision(facts[field], kind, f"$.business_facts.{field}")
+    fact_fields = _BUSINESS_FACTS if version == VERSION else _BUSINESS_FACTS_V1_1
+    facts = _keys(data["business_facts"], set(fact_fields), set(fact_fields), "$.business_facts")
+    for field, kind in fact_fields.items():
+        if kind == "entity_scope_decisions":
+            _value(facts[field], kind, f"$.business_facts.{field}")
+        else:
+            _decision(
+                facts[field], kind, f"$.business_facts.{field}",
+                require_confidence=version != VERSION,
+            )
     if (intent["coverage_mode"]["value"] == "full_instrument"
             and (intent["requested_instruments"]["source"] == "unknown"
                  or not intent["requested_instruments"]["value"])):
@@ -277,10 +353,18 @@ def validate_policy_request_v1(
     excluded = {(kind, identifier.casefold()) for kind, identifier in (
         entry.split(":", 1) for entry in (intent["exclusions"]["value"] or [])
     )}
-    entity_scope = facts["entity_scope"]["value"] if facts["entity_scope"]["source"] != "unknown" else None
-    if entity_scope and excluded.intersection(
-        {("entity", entity.casefold()) for entity in entity_scope["legal_entities"]}
-        | {("jurisdiction", jurisdiction.casefold()) for jurisdiction in entity_scope["jurisdictions"]}
+    if version == VERSION:
+        scope_decision = facts["entity_scope"]
+        entity_scope = scope_decision["value"] if scope_decision["source"] != "unknown" else None
+        entities = entity_scope["legal_entities"] if entity_scope else []
+        jurisdictions = entity_scope["jurisdictions"] if entity_scope else []
+    else:
+        scope = facts["entity_scope"]
+        entities = scope["legal_entities"]["value"] or []
+        jurisdictions = scope["jurisdictions"]["value"] or []
+    if excluded.intersection(
+        {("entity", entity.casefold()) for entity in entities}
+        | {("jurisdiction", jurisdiction.casefold()) for jurisdiction in jurisdictions}
     ):
         _fail("conflicting_intent", "$.policy_intent.exclusions")
     requested = intent["requested_instruments"]["value"] or []
