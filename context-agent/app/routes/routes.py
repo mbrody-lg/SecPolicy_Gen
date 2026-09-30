@@ -1,5 +1,6 @@
 """HTTP routes for context creation, iteration, and policy handoff."""
 
+from copy import deepcopy
 from datetime import datetime, timezone
 import logging
 import os
@@ -9,7 +10,15 @@ from flask import Blueprint, current_app, g, render_template, request, redirect,
 from markupsafe import escape
 
 from app import mongo
+from app.context_analysis import SecurityContextValidationError
 from app.metrics import metrics_response
+from app.context_analysis.policy_input import (
+    PolicyInputError,
+    approved_request_is_current,
+    build_approved_request,
+    material_questions,
+    validate_answer_patch,
+)
 from app.observability import log_event
 from app.routes.input_contracts import (
     CORRELATION_ID_PATTERN,
@@ -50,6 +59,7 @@ from app.services.logic import (
     run_context_building_review,
     run_context_planning_review,
     load_questions,
+    policy_handoff_context_from_context_record,
     render_markdown,
     synthesize_final_context,
     store_validated_policy,
@@ -485,6 +495,19 @@ def _policy_generation_blocker(context: dict | None) -> dict | None:
             "message": "Context not found.",
             "status_code": 404,
         }
+    if context.get("policy_input"):
+        handoff = _policy_input_handoff(context)
+        if not handoff or not approved_request_is_current(context, handoff, tenant_id=g.organization_id):
+            return {
+                "error_code": "policy_input_not_approved",
+                "message": "Review and approve the current policy input before generation.",
+                "status_code": 409,
+            }
+        return {
+            "error_code": "policy_request_ingress_not_available",
+            "message": "PolicyRequest 1.1 generation is not enabled in Policy Agent yet.",
+            "status_code": 409,
+        }
     context_building = context.get("context_building")
     if isinstance(context_building, dict) and context_building.get("status") == "needs_information":
         return {
@@ -729,6 +752,155 @@ def get_context_plan(context_id):
         "context_id": context_id,
         "context_intelligence_plan": plan,
         "active_revision": context_plan_revision(plan),
+    }), 200
+
+
+def _policy_input_error(error: PolicyInputError):
+    return jsonify({
+        "success": False, "error_type": "contract_error", "error_code": error.code,
+        "details": {"field": error.field},
+    }), 409 if error.code in {
+        "material_questions_open", "handoff_not_ready", "handoff_facts_missing",
+        "handoff_facts_invalid", "context_fact_conflict",
+    } else 400
+
+
+def _policy_input_context(context_id):
+    object_id = parse_object_id(context_id)
+    return mongo.db.contexts.find_one(tenant_query({"_id": object_id})), object_id
+
+
+def _policy_input_handoff(context):
+    try:
+        return policy_handoff_context_from_context_record(context)
+    except (SecurityContextValidationError, KeyError, TypeError, ValueError):
+        return None
+
+
+@main.route("/context/<context_id>/policy-input", methods=["GET"])
+def get_policy_input(context_id):
+    """Expose the reviewable Context-owned 1.1 input, never a generation grant."""
+    try:
+        context, _ = _policy_input_context(context_id)
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
+    if not context:
+        return jsonify({"success": False, "error_code": "context_not_found"}), 404
+    state = context.get("policy_input") or {}
+    handoff = _policy_input_handoff(context)
+    current = bool(handoff) and approved_request_is_current(context, handoff, tenant_id=g.organization_id)
+    approval = state.get("approval") or {}
+    return jsonify({
+        "success": True, "version": "1.1", "revision": state.get("revision", 0),
+        "answers": state.get("answers", {}),
+        "material_questions": material_questions(state.get("answers") or {}),
+        "approval_status": "approved" if current else "stale" if approval else "draft",
+        "approved_request": approval.get("request") if current else None,
+        "generation_available": False,
+    }), 200
+
+
+@main.route("/context/<context_id>/policy-input/answers", methods=["POST"])
+def update_policy_input_answers(context_id):
+    """Append one immutable answer revision with tenant- and revision-CAS."""
+    try:
+        context, object_id = _policy_input_context(context_id)
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
+    if not context:
+        return jsonify({"success": False, "error_code": "context_not_found"}), 404
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or set(payload) != {"expected_revision", "answers"}:
+        return jsonify({"success": False, "error_code": "invalid_policy_input_payload"}), 400
+    expected = payload["expected_revision"]
+    if not isinstance(expected, int) or isinstance(expected, bool) or not 0 <= expected < 64:
+        return jsonify({"success": False, "error_code": "invalid_policy_input_revision"}), 400
+    state = context.get("policy_input") or {}
+    if state.get("revision", 0) != expected:
+        return jsonify({"success": False, "error_code": "stale_policy_input_revision"}), 409
+    try:
+        patch = validate_answer_patch(payload["answers"])
+        answers = dict(state.get("answers") or {})
+        for field, answer in patch.items():
+            if answer is None:
+                answers.pop(field, None)
+            else:
+                answers[field] = answer
+        if answers:
+            validate_answer_patch(answers)
+    except PolicyInputError as exc:
+        return _policy_input_error(exc)
+    now = datetime.now(timezone.utc).isoformat()
+    revision = expected + 1
+    entry = {
+        "revision": revision, "answers": answers, "recorded_at": now,
+        "recorded_by": g.principal["subject"],
+    }
+    new_state = {
+        "version": "1.1", "revision": revision, "answers": answers,
+        "revisions": [*(state.get("revisions") or []), entry],
+        "approvals": state.get("approvals") or [], "approval": None,
+    }
+    version_match = ({"policy_input": {"$exists": False}} if expected == 0 else
+                     {"policy_input.revision": expected})
+    result = mongo.db.contexts.update_one(
+        tenant_query({"_id": object_id, **version_match}),
+        {"$set": {"policy_input": new_state}},
+    )
+    if result.matched_count != 1:
+        return jsonify({"success": False, "error_code": "stale_policy_input_revision"}), 409
+    return jsonify({
+        "success": True, "revision": revision,
+        "material_questions": material_questions(answers), "approval_status": "draft",
+    }), 200
+
+
+@main.route("/context/<context_id>/policy-input/approve", methods=["POST"])
+def approve_policy_input(context_id):
+    """Approve exactly one full 1.1 hash, never the legacy subset hash."""
+    try:
+        context, object_id = _policy_input_context(context_id)
+    except RouteInputError as exc:
+        return route_input_error_response(exc)
+    if not context:
+        return jsonify({"success": False, "error_code": "context_not_found"}), 404
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or set(payload) != {"expected_revision"}:
+        return jsonify({"success": False, "error_code": "invalid_policy_input_payload"}), 400
+    expected = payload["expected_revision"]
+    state = context.get("policy_input") or {}
+    if not isinstance(expected, int) or isinstance(expected, bool) or expected < 1 or state.get("revision") != expected:
+        return jsonify({"success": False, "error_code": "stale_policy_input_revision"}), 409
+    handoff = _policy_input_handoff(context)
+    if not handoff:
+        return _policy_input_error(PolicyInputError("handoff_not_ready", "policy_handoff_context"))
+    try:
+        approved_request = build_approved_request(context, handoff, tenant_id=g.organization_id)
+    except PolicyInputError as exc:
+        return _policy_input_error(exc)
+    now = datetime.now(timezone.utc).isoformat()
+    approval = {
+        "revision": expected, "request": approved_request,
+        "answer_snapshot": deepcopy(state["revisions"][-1]["answers"]),
+        "approved_at": now, "approved_by": g.principal["subject"],
+    }
+    new_state = {
+        **state, "approval": approval,
+        "approvals": [*(state.get("approvals") or []), approval],
+    }
+    result = mongo.db.contexts.update_one(tenant_query({
+        "_id": object_id, "policy_input.revision": expected,
+        "policy_input.approval": None,
+        "final_context": context.get("final_context"),
+        "security_context": context.get("security_context"),
+        "context_intelligence_plan": context.get("context_intelligence_plan"),
+    }), {"$set": {"policy_input": new_state}})
+    if result.matched_count != 1:
+        return jsonify({"success": False, "error_code": "stale_policy_input_revision"}), 409
+    return jsonify({
+        "success": True, "revision": expected, "approval_status": "approved",
+        "snapshot_hash": approved_request["approved_context"]["snapshot_hash"],
+        "generation_available": False,
     }), 200
 
 
