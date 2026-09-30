@@ -24,7 +24,12 @@ TOKEN_LIFETIME_SECONDS = 60
 MAX_CLOCK_SKEW_SECONDS = 5
 MAX_ROTATION_OVERLAP_SECONDS = 600
 TOKEN_TYPE = "secpolicy-workload-v1"
+CONTEXT_BOUND_TOKEN_TYPE = "secpolicy-workload-v2"
+CONTEXT_BOUND_SCOPES = frozenset({
+    "policy:generate", "policy:validate", "policy:update",
+})
 TENANT_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
+CONTEXT_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 KEY_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 NONCE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{24,64}$")
 
@@ -153,7 +158,7 @@ def combine_verifier_keys(*registries: dict[str, VerifierKey]) -> dict[str, Veri
 
 def mint_token(
     *, key: Ed25519PrivateKey, kid: str, subject: str, audience: str,
-    scope: str, tenant_id: str, path: str,
+    scope: str, tenant_id: str, path: str, context_id: str | None = None,
 ) -> str:
     """Mint a scoped request from an already verified tenant context."""
     if not isinstance(tenant_id, str) or not TENANT_PATTERN.fullmatch(tenant_id):
@@ -162,9 +167,15 @@ def mint_token(
         raise ValueError("A configured workload key ID is required.")
     if not path.startswith("/") or "?" in path or not scope:
         raise ValueError("A fixed workload route and scope are required.")
+    is_context_bound = scope in CONTEXT_BOUND_SCOPES
+    if is_context_bound:
+        if not isinstance(context_id, str) or not CONTEXT_ID_PATTERN.fullmatch(context_id):
+            raise ValueError("A canonical context ID is required for this workload scope.")
+    elif context_id is not None:
+        raise ValueError("This workload scope does not accept a context ID.")
     issued_at = int(time.time())
-    return jwt.encode({
-        "version": 1,
+    claims = {
+        "version": 2 if is_context_bound else 1,
         "sub": subject,
         "aud": audience,
         "scopes": [scope],
@@ -174,7 +185,13 @@ def mint_token(
         "iat": issued_at,
         "exp": issued_at + TOKEN_LIFETIME_SECONDS,
         "jti": secrets.token_urlsafe(24),
-    }, key, algorithm="EdDSA", headers={"kid": kid, "typ": TOKEN_TYPE})
+    }
+    if is_context_bound:
+        claims["context_id"] = context_id
+    return jwt.encode(
+        claims, key, algorithm="EdDSA",
+        headers={"kid": kid, "typ": CONTEXT_BOUND_TOKEN_TYPE if is_context_bound else TOKEN_TYPE},
+    )
 
 
 def verify_token(
@@ -195,7 +212,9 @@ def verify_token(
         if (
             set(header) != {"alg", "kid", "typ"}
             or header["alg"] != "EdDSA"
-            or header["typ"] != TOKEN_TYPE
+            or header["typ"] != (
+                CONTEXT_BOUND_TOKEN_TYPE if scope in CONTEXT_BOUND_SCOPES else TOKEN_TYPE
+            )
             or not isinstance(header["kid"], str)
         ):
             raise InvalidWorkloadToken
@@ -216,7 +235,7 @@ def verify_token(
     scopes = claims.get("scopes")
     if (
         type(claims.get("version")) is not int
-        or claims["version"] != 1
+        or claims["version"] != (2 if scope in CONTEXT_BOUND_SCOPES else 1)
         or type(issued_at) is not int
         or type(expires_at) is not int
         or issued_at > now + MAX_CLOCK_SKEW_SECONDS
@@ -234,6 +253,14 @@ def verify_token(
         or not scopes
         or any(not isinstance(item, str) for item in scopes)
     ):
+        raise InvalidWorkloadToken
+    if scope in CONTEXT_BOUND_SCOPES:
+        if (
+            not isinstance(claims.get("context_id"), str)
+            or not CONTEXT_ID_PATTERN.fullmatch(claims["context_id"])
+        ):
+            raise InvalidWorkloadToken
+    elif "context_id" in claims:
         raise InvalidWorkloadToken
     if claims["tenant_id"] not in verifier.tenant_ids:
         raise ForbiddenWorkloadToken

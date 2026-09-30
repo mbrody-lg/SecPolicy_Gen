@@ -2,6 +2,7 @@ from app import mongo
 from app.services import logic
 import app.routes.routes as routes_module
 from bson import ObjectId
+from flask import g
 
 
 def test_security_context_create_to_policy_payload_contract(client, monkeypatch):
@@ -73,7 +74,9 @@ def test_security_context_create_to_policy_payload_contract(client, monkeypatch)
     synthesis = logic.synthesize_final_context(str(context["_id"]))
     assert synthesis["success"] is True
 
-    payload = logic.get_context_and_prompt(str(context["_id"]))
+    with client.application.test_request_context("/"):
+        g.organization_id = context["organization_id"]
+        payload = logic.get_context_and_prompt(str(context["_id"]))
 
     assert "Patient data" in payload["refined_prompt"]
     assert payload["business_context"]["country"] == "Spain"

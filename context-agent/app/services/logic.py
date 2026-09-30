@@ -2351,11 +2351,43 @@ def _get_correlation_id(payload: dict | None = None, context_id: str | None = No
 
 def _dependency_headers(
     correlation_id: str | None, *, audience: str, scope: str, path: str,
+    context_id: str | None = None,
 ) -> dict:
     """Sign outbound authority using the verified request or worker tenant."""
-    from app.workload_token import mint_token
+    from app.workload_token import CONTEXT_BOUND_SCOPES, TENANT_PATTERN, mint_token
 
     tenant_id = getattr(g, "organization_id", None) if has_request_context() else None
+    if not isinstance(tenant_id, str) or not TENANT_PATTERN.fullmatch(tenant_id):
+        raise PipelineStepError(
+            stage="workload_authentication", message="Verified organization context is unavailable.",
+            error_type="authorization_error", error_code="organization_context_required",
+            status_code=403, correlation_id=correlation_id,
+        )
+    if scope in CONTEXT_BOUND_SCOPES:
+        try:
+            object_id = ObjectId(context_id)
+        except (TypeError, ValueError) as exc:
+            raise PipelineStepError(
+                stage="workload_authentication", message="Invalid context_id format.",
+                error_type="contract_error", error_code="invalid_context_id",
+                status_code=400, correlation_id=correlation_id,
+            ) from exc
+        if str(object_id) != context_id:
+            raise PipelineStepError(
+                stage="workload_authentication", message="Invalid context_id format.",
+                error_type="contract_error", error_code="invalid_context_id",
+                status_code=400, correlation_id=correlation_id,
+            )
+        if not mongo.db.contexts.find_one(
+            {"_id": object_id, "organization_id": tenant_id},
+        ):
+            raise PipelineStepError(
+                stage="workload_authentication", message="Context not found.",
+                error_type="authorization_error", error_code="context_not_found",
+                status_code=404, correlation_id=correlation_id,
+            )
+    elif context_id is not None:
+        raise ValueError("This workload scope does not accept a context ID.")
     token = mint_token(
         key=current_app.config["WORKLOAD_CONTEXT_SIGNING_KEY"],
         kid=current_app.config["WORKLOAD_CONTEXT_SIGNING_KID"],
@@ -2364,6 +2396,7 @@ def _dependency_headers(
         scope=scope,
         tenant_id=tenant_id,
         path=path,
+        context_id=context_id,
     )
     headers = {}
     if correlation_id:
@@ -2428,12 +2461,6 @@ def _upsert_pipeline_diagnostic(
 ) -> None:
     """Persist a bounded cross-service diagnostic view keyed by correlation id."""
     organization_id = getattr(g, "organization_id", None) if has_request_context() else None
-    if not organization_id and context_id:
-        try:
-            context_owner = mongo.db.contexts.find_one({"_id": ObjectId(context_id)})
-        except Exception:
-            context_owner = None
-        organization_id = (context_owner or {}).get("organization_id")
     if not correlation_id or not organization_id:
         return
 
@@ -2515,8 +2542,28 @@ def get_context_and_prompt(context_id: str) -> dict:
             details={"context_id": context_id},
             correlation_id=correlation_id,
         ) from exc
+    if str(context_obj_id) != context_id:
+        raise PipelineStepError(
+            stage="context_fetch", message="Invalid context_id format.",
+            error_type="contract_error", error_code="invalid_context_id",
+            status_code=400, correlation_id=correlation_id,
+        )
 
-    context = mongo.db.contexts.find_one({"_id": context_obj_id})
+    from app.workload_token import TENANT_PATTERN
+
+    organization_id = getattr(g, "organization_id", None) if has_request_context() else None
+    if not isinstance(organization_id, str) or not TENANT_PATTERN.fullmatch(organization_id):
+        raise PipelineStepError(
+            stage="context_fetch",
+            message="Verified organization context is unavailable.",
+            error_type="authorization_error",
+            error_code="organization_context_required",
+            status_code=403,
+            correlation_id=correlation_id,
+        )
+    context = mongo.db.contexts.find_one(
+        {"_id": context_obj_id, "organization_id": organization_id}
+    )
     if not context:
         raise PipelineStepError(
             stage="context_fetch",
@@ -2542,7 +2589,11 @@ def get_context_and_prompt(context_id: str) -> dict:
     refined_prompt = (context.get("refined_prompt") or "").strip()
     if not refined_prompt:
         prompt_entry = mongo.db.interactions.find_one(
-            {"context_id": context_obj_id, "question_id": "refined_prompt"}
+            {
+                "context_id": context_obj_id,
+                "organization_id": organization_id,
+                "question_id": "refined_prompt",
+            }
         )
         if not prompt_entry:
             if "refined_prompt" in context:
@@ -2635,6 +2686,7 @@ def call_policy_agent(context_payload: dict) -> dict:
                 audience="policy-agent",
                 scope="policy:generate",
                 path="/generate_policy",
+                context_id=context_payload.get("context_id"),
             ),
             timeout=timeout_seconds,
         )
@@ -2790,6 +2842,7 @@ def call_validator_agent(policy_data: dict) -> dict:
                 audience="validator-agent",
                 scope="policy:validate",
                 path="/validate-policy",
+                context_id=policy_data.get("context_id"),
             ),
             timeout=timeout_seconds,
         )
@@ -2896,6 +2949,12 @@ def store_validated_policy(context_id: str, validated_data: dict) -> dict:
             details={"missing_fields": missing, "context_id": context_id},
             correlation_id=correlation_id,
         )
+    if data.get("context_id") != context_id:
+        raise PipelineStepError(
+            stage="persistence", message="Validated policy context does not match the verified context.",
+            error_type="contract_error", error_code="validation_context_mismatch",
+            status_code=502, correlation_id=correlation_id,
+        )
 
     try:
         context_obj_id = ObjectId(context_id)
@@ -2910,19 +2969,25 @@ def store_validated_policy(context_id: str, validated_data: dict) -> dict:
             correlation_id=correlation_id,
         ) from exc
 
+    from app.workload_token import TENANT_PATTERN
+
     organization_id = getattr(g, "organization_id", None) if has_request_context() else None
-    if not organization_id:
-        context_owner = mongo.db.contexts.find_one({"_id": context_obj_id})
-        organization_id = (context_owner or {}).get("organization_id")
-    if not organization_id:
+    if not isinstance(organization_id, str) or not TENANT_PATTERN.fullmatch(organization_id):
         raise PipelineStepError(
             stage="persistence",
             message="Context ownership is unavailable.",
             error_type="authorization_error",
             error_code="context_organization_missing",
-            status_code=409,
-            details={"context_id": context_id},
+            status_code=403,
             correlation_id=correlation_id,
+        )
+    if str(context_obj_id) != context_id or not mongo.db.contexts.find_one(
+        {"_id": context_obj_id, "organization_id": organization_id},
+    ):
+        raise PipelineStepError(
+            stage="persistence", message="Context not found.",
+            error_type="authorization_error", error_code="context_not_found",
+            status_code=404, correlation_id=correlation_id,
         )
 
     validated_at = datetime.now(timezone.utc)
@@ -3038,7 +3103,25 @@ def generate_full_policy_pipeline(context_id: str) -> dict:
             return policy_result
 
         policy_data = policy_result["policy_data"]
+        if not isinstance(policy_data, dict) or policy_data.get("context_id") != context_id:
+            raise PipelineStepError(
+                stage="policy_generation",
+                message="Policy response context does not match the verified context.",
+                error_type="contract_error",
+                error_code="policy_context_mismatch",
+                status_code=502,
+                correlation_id=correlation_id,
+            )
         validated_data = call_validator_agent(policy_data)
+        if not isinstance(validated_data, dict) or validated_data.get("context_id") != context_id:
+            raise PipelineStepError(
+                stage="validation",
+                message="Validation response context does not match the verified context.",
+                error_type="contract_error",
+                error_code="validation_context_mismatch",
+                status_code=502,
+                correlation_id=correlation_id,
+            )
         persistence_result = store_validated_policy(context_id, validated_data)
         _upsert_pipeline_diagnostic(
             correlation_id=_get_correlation_id(validated_data, context_id),

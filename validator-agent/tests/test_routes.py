@@ -111,7 +111,7 @@ def test_validate_policy_route_rejects_missing_required_fields(client, workload_
             "/validate-policy",
             data=json.dumps({"context_id": "ctx-1", "policy_text": "policy"}),
             content_type="application/json",
-            headers=workload_headers("/validate-policy"),
+            headers=workload_headers("/validate-policy", context_id="ctx-1"),
         )
 
     assert response.status_code == 400
@@ -138,22 +138,12 @@ def test_validate_policy_route_rejects_invalid_json_body(client, workload_header
         headers=workload_headers("/validate-policy"),
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 403
     payload = response.get_json()
-    assert payload == {
-        "success": False,
-        "error_type": "contract_error",
-        "error_code": "invalid_json_body",
-        "message": "Request body must be a JSON object.",
-        "details": {
-            "stage": "contract_validation",
-            "expected_type": "object",
-        },
-        "correlation_id": payload["correlation_id"],
-    }
+    assert payload["error_code"] == "service_context_forbidden"
     assert response.headers["X-Content-Type-Options"] == "nosniff"
     assert response.headers["Cache-Control"] == "no-store"
-    assert response.headers["X-Correlation-ID"] == payload["correlation_id"]
+    assert response.headers["X-Correlation-ID"]
 
 
 def test_validate_policy_route(client, default_context_id, workload_headers):
@@ -262,7 +252,7 @@ def test_validate_policy_route_propagates_dependency_error(client, workload_head
             "/validate-policy",
             data=json.dumps(payload),
             content_type="application/json",
-            headers=workload_headers("/validate-policy"),
+            headers=workload_headers("/validate-policy", context_id="ctx-dep"),
         )
 
     assert response.status_code == 502
@@ -294,7 +284,7 @@ def test_validate_policy_route_hides_internal_exception_details(client, workload
             "/validate-policy",
             data=json.dumps(payload),
             content_type="application/json",
-            headers=workload_headers("/validate-policy"),
+            headers=workload_headers("/validate-policy", context_id="ctx-int"),
         )
 
     assert response.status_code == 500

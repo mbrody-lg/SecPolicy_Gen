@@ -30,7 +30,10 @@ def test_validate_policy_route(client, workload_headers):
     }
 
     with patch("app.services.logic.Coordinator", return_value=FakeCoordinator()):
-        response = client.post("/validate-policy", json=payload, headers=workload_headers("/validate-policy"))
+        response = client.post(
+            "/validate-policy", json=payload,
+            headers=workload_headers("/validate-policy", context_id=payload["context_id"]),
+        )
 
     assert response.status_code == 200
     data = response.get_json()

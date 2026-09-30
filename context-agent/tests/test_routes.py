@@ -1904,6 +1904,7 @@ def test_send_policy_to_context_persists_policy_snapshot_with_workload_owner(cli
         "organization_id": "test-organization",
     })
     payload = {
+        "context_id": context_id,
         "policy_text": "Validated policy text",
         "generated_at": "2026-04-10T10:00:00+00:00",
         "policy_agent_version": "0.1.0",

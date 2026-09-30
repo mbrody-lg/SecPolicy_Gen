@@ -2,7 +2,7 @@
 
 import logging
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 from markupsafe import escape
 
 from app.candidate_contract import authorize_candidate_request
@@ -16,10 +16,33 @@ from app.services.logic import (
     run_generation_pipeline,
     run_policy_update_pipeline,
 )
+from app.workload_token import TENANT_PATTERN
 
 
 routes = Blueprint("routes", __name__)
 logger = logging.getLogger(__name__)
+
+
+def _authoritative_organization_id(scope: str) -> str | None:
+    principal = getattr(g, "service_principal", None)
+    if not isinstance(principal, dict) or scope not in {"policy:generate", "policy:update"}:
+        return None
+    expected_identity = "context-agent" if scope == "policy:generate" else "validator-agent"
+    if (principal.get("authentication") != "signed_workload_token"
+            or principal.get("audience") != "policy-agent"
+            or principal.get("identity") != expected_identity):
+        return None
+    scopes = principal.get("scopes")
+    if not isinstance(scopes, list) or scope not in scopes:
+        return None
+    organization_id = principal.get("tenant_id")
+    if not isinstance(organization_id, str) or not TENANT_PATTERN.fullmatch(organization_id):
+        return None
+    return organization_id
+
+
+def _tenant_unavailable():
+    return jsonify({"success": False, "error_code": "service_authentication_unavailable"}), 503
 
 
 def _jsonify_escaped(payload):
@@ -120,7 +143,12 @@ def rag_refresh():
 @routes.route("/generate_policy", methods=["POST"])
 def generate_policy():
     """Generate a policy from refined context data via policy-agent pipeline."""
-    pipeline_result = run_generation_pipeline(request.get_json(silent=True))
+    organization_id = _authoritative_organization_id("policy:generate")
+    if organization_id is None:
+        return _tenant_unavailable()
+    pipeline_result = run_generation_pipeline(
+        request.get_json(silent=True), organization_id=organization_id,
+    )
     if not pipeline_result["success"]:
         status_code = pipeline_result.pop("status_code")
         return jsonify(pipeline_result), status_code
@@ -138,7 +166,9 @@ def generate_candidate_policy():
         payload, status_code = contract_error
         return jsonify(payload), status_code
 
-    pipeline_result = run_generation_pipeline(request.get_json(silent=True), persist=False)
+    pipeline_result = run_generation_pipeline(
+        request.get_json(silent=True), persist=False,
+    )
     if not pipeline_result["success"]:
         status_code = pipeline_result.pop("status_code")
         return jsonify(pipeline_result), status_code
@@ -155,7 +185,12 @@ def generate_candidate_policy():
 @routes.route("/generate_policy/<context_id>/update", methods=["POST"])
 def update_policy(context_id):
     """Regenerate policy text after validator feedback for a context."""
-    pipeline_result = run_policy_update_pipeline(request.get_json(silent=True), str(context_id))
+    organization_id = _authoritative_organization_id("policy:update")
+    if organization_id is None:
+        return _tenant_unavailable()
+    pipeline_result = run_policy_update_pipeline(
+        request.get_json(silent=True), str(context_id), organization_id=organization_id,
+    )
     if not pipeline_result["success"]:
         status_code = pipeline_result.pop("status_code")
         return jsonify(pipeline_result), status_code

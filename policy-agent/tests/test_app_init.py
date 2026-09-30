@@ -35,11 +35,27 @@ def test_non_testing_startup_initializes_replay_ttl_index(monkeypatch):
     monkeypatch.setenv("TESTING", "false")
     monkeypatch.setenv("FLASK_SECRET_KEY", "configured-secret")
 
-    with patch("app.workload_token.initialize_replay_store") as initialize:
+    with (patch("app.workload_token.initialize_replay_store") as initialize,
+          patch("app.policy_persistence.initialize_policy_index") as policy_index):
         app = app_module.create_app()
 
     assert app.config["TESTING"] is False
     initialize.assert_called_once()
+    policy_index.assert_called_once()
+
+
+def test_non_testing_startup_fails_closed_when_policy_index_unavailable(monkeypatch):
+    _set_common_env(monkeypatch)
+    monkeypatch.setenv("TESTING", "false")
+    monkeypatch.setenv("FLASK_SECRET_KEY", "configured-secret")
+
+    with (patch("app.workload_token.initialize_replay_store") as replay_index,
+          patch("app.policy_persistence.initialize_policy_index",
+                side_effect=RuntimeError("Policy persistence index initialization failed."))):
+        with pytest.raises(RuntimeError, match="Policy persistence index initialization failed"):
+            app_module.create_app()
+
+    replay_index.assert_not_called()
 
 
 @pytest.mark.parametrize(

@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import List, Dict, Optional
 
 import yaml
-from flask import current_app
+from flask import current_app, has_request_context
 
 from app import mongo
 from app.agents.factory import create_agent_from_config
@@ -226,7 +226,7 @@ class Coordinator:
             raise RuntimeError("Policy update endpoint did not return revised policy text.")
 
         response_context_id = update_response.get("context_id")
-        if response_context_id is not None and str(response_context_id) != str(context_id):
+        if response_context_id != context_id:
             raise RuntimeError("Policy update endpoint returned a mismatched context_id.")
 
         generated_at = update_response.get("generated_at")
@@ -278,8 +278,14 @@ class Coordinator:
         policy_content_hash: str | None = None,
     ):
         """Persist validation trace and metadata in MongoDB."""
+        from app.service_identity import verified_validation_principal
+
+        if not has_request_context():
+            raise ValueError("Verified validation ownership is unavailable.")
+        principal = verified_validation_principal(context_id)
         try:
             log_data = {
+                "organization_id": principal["tenant_id"],
                 "context_id": context_id,
                 "correlation_id": correlation_id or context_id,
                 "timestamp": datetime.now(timezone.utc),

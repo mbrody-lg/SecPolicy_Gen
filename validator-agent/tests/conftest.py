@@ -46,8 +46,8 @@ def client(app):
 
 
 @pytest.fixture()
-def workload_headers(app):
-    def issue(path, *, subject=None, scope=None, audience="validator-agent", tenant_id="tenant-a"):
+def workload_headers(app, default_context_id):
+    def issue(path, *, subject=None, scope=None, audience="validator-agent", tenant_id="tenant-a", context_id=None):
         if path == "/candidate/validate-policy":
             subject = subject or "docker-agent"
             scope = scope or "policy:candidate:validate"
@@ -62,6 +62,7 @@ def workload_headers(app):
             scope=scope,
             tenant_id=tenant_id,
             path=path,
+            context_id=(context_id or default_context_id) if scope == "policy:validate" else None,
         )
         return {"Authorization": f"Bearer {token}"}
 

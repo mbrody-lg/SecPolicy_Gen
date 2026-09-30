@@ -748,6 +748,7 @@ from pymongo import MongoClient
 
 organization_id = os.environ["MIGRATION_SMOKE_ORGANIZATION_ID"]
 client = MongoClient("mongo", 27017)
+service_db = MongoClient(os.environ["MONGO_URI"]).get_default_database()
 context_ids = [
     str(document["_id"])
     for document in client.contextdb.contexts.find(
@@ -767,10 +768,9 @@ client.contextdb.pipeline_events.delete_many(tenant_filter)
 client.contextdb.pipeline_diagnostics.delete_many(tenant_filter)
 if context_ids:
     context_filter = {"context_id": {"$in": context_ids}}
-    client.policydb.policies.delete_many(context_filter)
-    client.contextdb.policies.delete_many(context_filter)
-    client.validatordb.validations.delete_many(context_filter)
-    client.contextdb.validations.delete_many(context_filter)
+    service_db.policies.delete_many({**context_filter, "organization_id": organization_id})
+    validation_filter = {**context_filter, "organization_id": organization_id}
+    service_db.validations.delete_many(validation_filter)
 if context_object_ids:
     object_context_filter = {"context_id": {"$in": context_object_ids}}
     client.contextdb.interactions.delete_many(object_context_filter)
@@ -1334,9 +1334,9 @@ for context_id in context_ids:
 
 client = MongoClient("mongo", 27017)
 context_db = client.contextdb
-policy_db = client.policydb
-validator_db = client.validatordb
-fallback_db = client.contextdb
+service_db = MongoClient(os.environ["MONGO_URI"]).get_default_database()
+policy_db = service_db
+validator_db = service_db
 
 contexts = []
 failed = []
@@ -1349,23 +1349,18 @@ for context_id in context_ids:
         "context_id": context_oid,
         "question_id": "validated_policy",
     })
-    policy_records = policy_db.policies.count_documents({"context_id": context_id})
-    policy_doc = policy_db.policies.find_one({"context_id": context_id})
-    if policy_records == 0:
-        policy_records = fallback_db.policies.count_documents({"context_id": context_id})
-        policy_doc = fallback_db.policies.find_one({"context_id": context_id})
+    policy_filter = {"context_id": context_id, "organization_id": SMOKE_ORGANIZATION_ID}
+    policy_records = policy_db.policies.count_documents(policy_filter)
+    policy_doc = policy_db.policies.find_one(policy_filter)
     retrieval_evidence = []
     if isinstance(policy_doc, dict) and isinstance(policy_doc.get("retrieval_evidence"), list):
         retrieval_evidence = policy_doc["retrieval_evidence"]
     retrieval_evidence_count = len(retrieval_evidence)
 
+    validation_filter = {"context_id": context_id, "organization_id": SMOKE_ORGANIZATION_ID}
     validation_docs = list(
-        validator_db.validations.find({"context_id": context_id}).sort("timestamp", -1)
+        validator_db.validations.find(validation_filter).sort("timestamp", -1)
     )
-    if not validation_docs:
-        validation_docs = list(
-            fallback_db.validations.find({"context_id": context_id}).sort("timestamp", -1)
-        )
 
     reasons = []
     generate_status = status_by_context.get(context_id, 0)

@@ -10,13 +10,13 @@ def test_generation_rejects_explicit_policy_request_before_execution():
         "context_id": "synthetic-context", "refined_prompt": "Synthetic prompt",
         "language": "en", "model_version": "mock", "policy_request": None,
     }
-    result = run_generation_pipeline(payload)
+    result = run_generation_pipeline(payload, organization_id="tenant-a")
     assert result["error_code"] == "policy_request_not_supported"
     assert result["status_code"] == 400
 
 
 def test_update_rejects_explicit_policy_request_before_persistence():
-    result = run_policy_update_pipeline({"policy_request": {}}, "synthetic-context")
+    result = run_policy_update_pipeline({"policy_request": {}}, "synthetic-context", organization_id="tenant-a")
     assert result["error_code"] == "policy_request_not_supported"
     assert result["status_code"] == 400
 
@@ -33,7 +33,7 @@ def test_unwrapped_canonical_markers_never_fall_through_legacy_generation(marker
         "context_id": "synthetic-context", "refined_prompt": "Synthetic prompt",
         "language": "en", "model_version": "mock", marker: value,
     }
-    result = run_generation_pipeline(payload)
+    result = run_generation_pipeline(payload, organization_id="tenant-a")
     assert result["error_code"] == "policy_request_not_supported"
     assert result["status_code"] == 400
 

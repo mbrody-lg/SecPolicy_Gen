@@ -1,5 +1,6 @@
 import hashlib
 from unittest.mock import MagicMock, patch
+from flask import g
 
 from app.agents.roles import coordinator as coordinator_module
 from app.agents.roles.coordinator import Coordinator
@@ -92,6 +93,7 @@ def test_validate_policy_review_flow_updates_prompt_then_accepts():
     }
 
     update_response = {
+        "context_id": "ctx-2",
         "policy_text": "revised policy from policy-agent",
         "policy_agent_version": "0.2.0",
         "generated_at": "2026-03-05T01:00:00+00:00",
@@ -175,6 +177,7 @@ def test_validate_policy_uses_final_vote_when_no_consensus():
         "app.services.logic.send_policy_update_to_policy_agent",
         side_effect=[
             {
+                "context_id": "ctx-3",
                 "policy_text": "revised after round one",
                 "policy_agent_version": "0.2.0",
                 "generated_at": "2026-03-05T01:00:00+00:00",
@@ -305,6 +308,7 @@ def test_validate_policy_review_flow_accepts_reason_key_fallback():
     }
 
     update_response = {
+        "context_id": "ctx-review-fallback",
         "policy_text": "revised policy from policy-agent",
         "policy_agent_version": "0.2.0",
         "generated_at": "2026-03-05T01:00:00+00:00",
@@ -364,7 +368,7 @@ def test_validate_policy_update_response_rejects_mismatched_context_id():
         raise AssertionError("Expected runtime validation failure for mismatched context id")
 
 
-def test_log_validation_persists_ownership_and_policy_reference():
+def test_log_validation_persists_ownership_and_policy_reference(app):
     coordinator = Coordinator.__new__(Coordinator)
     coordinator.validation = {"rounds": 3, "consensus_threshold": 2, "vote_strategy": "majority"}
     coordinator.debug_mode = False
@@ -378,25 +382,32 @@ def test_log_validation_persists_ownership_and_policy_reference():
     fake_db = MagicMock()
     fake_db.validations = FakeValidations()
 
-    with patch.object(coordinator_module.mongo, "db", fake_db, create=True):
-        coordinator.log_validation(
-            context_id="ctx-ownership",
-            results=[{"role": "AWC", "status": "accepted"}],
-            decision="accepted",
-            round_num=1,
-            consensus=True,
-            correlation_id="corr-ownership",
-            retrieval_evidence=[
-                {
-                    "citation": "normativa:rgpd",
-                    "collection": "normativa",
-                    "family": "legal_norms",
-                    "text": "not persisted in summary",
-                }
-            ],
-        )
+    with app.test_request_context("/validate-policy", method="POST"):
+        g.service_principal = {
+            "authentication": "signed_workload_token", "identity": "context-agent",
+            "audience": "validator-agent", "scopes": ["policy:validate"],
+            "tenant_id": "tenant-a", "context_id": "ctx-ownership",
+        }
+        with patch.object(coordinator_module.mongo, "db", fake_db, create=True):
+            coordinator.log_validation(
+                context_id="ctx-ownership",
+                results=[{"role": "AWC", "status": "accepted"}],
+                decision="accepted",
+                round_num=1,
+                consensus=True,
+                correlation_id="corr-ownership",
+                retrieval_evidence=[
+                    {
+                        "citation": "normativa:rgpd",
+                        "collection": "normativa",
+                        "family": "legal_norms",
+                        "text": "not persisted in summary",
+                    }
+                ],
+            )
 
     assert inserted["document"]["correlation_id"] == "corr-ownership"
+    assert inserted["document"]["organization_id"] == "tenant-a"
     assert inserted["document"]["ownership"] == {
         "owner_service": "validator-agent",
         "source_of_truth": True,

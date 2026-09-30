@@ -89,6 +89,26 @@ def test_rag_refresh_smoke_uses_signed_context_workload_credential():
     assert 'scope="policy:rag:refresh"' in smoke_script
 
 
+def test_smoke_policy_cleanup_and_assertions_are_tenant_scoped():
+    smoke = SMOKE_RUNNER.read_text(encoding="utf-8")
+    assert 'service_db.policies.delete_many({**context_filter, "organization_id": organization_id})' in smoke
+    assert 'service_db = MongoClient(os.environ["MONGO_URI"]).get_default_database()' in smoke
+    assert 'policy_filter = {"context_id": context_id, "organization_id": SMOKE_ORGANIZATION_ID}' in smoke
+    assert 'policy_db.policies.count_documents(policy_filter)' in smoke
+    assert 'policy_db.policies.find_one(policy_filter)' in smoke
+    assert 'fallback_db.policies.find_one({"context_id": context_id})' not in smoke
+
+
+def test_smoke_validation_cleanup_and_assertions_are_tenant_scoped():
+    smoke = SMOKE_RUNNER.read_text(encoding="utf-8")
+    assert 'validation_filter = {**context_filter, "organization_id": organization_id}' in smoke
+    assert 'service_db.validations.delete_many(validation_filter)' in smoke
+    assert 'client.contextdb.validations.delete_many(context_filter)' not in smoke
+    assert 'validation_filter = {"context_id": context_id, "organization_id": SMOKE_ORGANIZATION_ID}' in smoke
+    assert 'validator_db.validations.find(validation_filter)' in smoke
+    assert 'fallback_db.validations.find(validation_filter)' not in smoke
+
+
 def test_context_browser_smoke_accepts_critical_path_compose_contract():
     validation = VALIDATION_RUNNER.read_text(encoding="utf-8")
     browser = BROWSER_RUNNER.read_text(encoding="utf-8")

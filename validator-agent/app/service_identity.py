@@ -6,6 +6,9 @@ from flask import current_app, g, jsonify, request
 
 from app import mongo
 from app.workload_token import (
+    CONTEXT_ID_PATTERN,
+    CONTEXT_BOUND_SCOPES,
+    TENANT_PATTERN,
     ForbiddenWorkloadToken,
     InvalidWorkloadToken,
     WorkloadReplay,
@@ -30,6 +33,26 @@ def _error(status: int, code: str):
     if status == 401:
         response.headers["WWW-Authenticate"] = "Bearer"
     return response, status
+
+
+def verified_validation_principal(context_id: str) -> dict:
+    """Require the authenticated Context principal for an authoritative context."""
+    principal = getattr(g, "service_principal", None)
+    if (
+        not isinstance(principal, dict)
+        or principal.get("authentication") != "signed_workload_token"
+        or principal.get("identity") != "context-agent"
+        or principal.get("audience") != "validator-agent"
+        or not isinstance(principal.get("scopes"), list)
+        or "policy:validate" not in principal["scopes"]
+        or not isinstance(principal.get("tenant_id"), str)
+        or not TENANT_PATTERN.fullmatch(principal["tenant_id"])
+        or not isinstance(principal.get("context_id"), str)
+        or not CONTEXT_ID_PATTERN.fullmatch(principal["context_id"])
+        or context_id != principal["context_id"]
+    ):
+        raise ValueError("Verified validation context is required.")
+    return principal
 
 
 def require_service_identity():
@@ -61,6 +84,10 @@ def require_service_identity():
         return _error(403, "service_tenant_forbidden")
     if request.endpoint == "routes.validate_candidate_policy" and not claimed_tenant_header:
         return _error(400, "candidate_metadata_invalid")
+    if scope in CONTEXT_BOUND_SCOPES:
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict) or body.get("context_id") != claims["context_id"]:
+            return _error(403, "service_context_forbidden")
     try:
         consume_token(mongo.db, credential, claims)
     except WorkloadReplay:
@@ -74,6 +101,7 @@ def require_service_identity():
         "audience": claims["aud"],
         "scopes": claims["scopes"],
         "tenant_id": claims["tenant_id"],
+        "context_id": claims.get("context_id"),
     }
     if request.endpoint == "routes.validate_candidate_policy":
         g.candidate_deadline_enforced = True
