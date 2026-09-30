@@ -39,7 +39,12 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Build a Docker image for ${{ matrix.agent }}
-      run: docker build -t ${{ matrix.agent }}:test -f ${{ matrix.agent }}/Dockerfile ${{ matrix.agent }}/
+      run: |
+        if [ "${{ matrix.agent }}" = "context-agent" ]; then
+          docker build --build-context contracts=./contracts -t context-agent:test -f context-agent/Dockerfile context-agent/
+        else
+          docker build -t ${{ matrix.agent }}:test -f ${{ matrix.agent }}/Dockerfile ${{ matrix.agent }}/
+        fi
     - name: Check Snyk authentication availability
       id: snyk-auth
       shell: bash

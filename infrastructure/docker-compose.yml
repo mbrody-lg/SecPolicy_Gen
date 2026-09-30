@@ -25,7 +25,10 @@ services:
     networks:
       - internal
   context-agent:
-    build: ../context-agent
+    build:
+      context: ../context-agent
+      additional_contexts:
+        contracts: ../contracts
     container_name: context_agent_web
     ports:
       - "127.0.0.1:5003:5000"

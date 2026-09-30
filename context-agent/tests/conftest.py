@@ -12,9 +12,12 @@ from app import create_app
 from app import mongo
 
 ROOT_PATH = Path(__file__).resolve().parents[1]
+REPO_PATH = ROOT_PATH.parent
 
 if str(ROOT_PATH) not in sys.path:
     sys.path.insert(0, str(ROOT_PATH))
+if str(REPO_PATH) not in sys.path:
+    sys.path.insert(0, str(REPO_PATH))
 
 os.environ.setdefault("TESTING", "true")
 os.environ.setdefault("DEBUG", "false")

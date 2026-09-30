@@ -24,8 +24,9 @@ from app import (
 from app.agents.openai.structured import ProviderCallError
 from app.context_output_schemas import context_phase_output_schema
 from app.agents.factory import create_agent_from_config
-from app.context_analysis import SECURITY_CONTEXT_VERSION, build_security_context_from_answers
+from app.context_analysis import SECURITY_CONTEXT_VERSION, SecurityContextValidationError, build_security_context_from_answers
 from app.context_analysis import security_context_to_business_context
+from app.context_analysis.policy_input import approved_request_is_current
 from app.observability import build_log_event, log_event
 from app.policy_handoff_contract import (
     FINAL_CONTEXT_VERSION,
@@ -2524,6 +2525,26 @@ def get_context_and_prompt(context_id: str) -> dict:
             error_type="validation_error",
             error_code="context_not_found",
             status_code=404,
+            details={"context_id": context_id},
+            correlation_id=correlation_id,
+        )
+
+    if context.get("policy_input"):
+        try:
+            handoff = policy_handoff_context_from_context_record(context)
+            current = approved_request_is_current(
+                context, handoff, tenant_id=getattr(g, "organization_id", "") or "",
+            )
+        except (SecurityContextValidationError, KeyError, TypeError, ValueError):
+            current = False
+        raise PipelineStepError(
+            stage="context_fetch",
+            message=("PolicyRequest 1.1 ingress is not enabled." if current
+                     else "Policy input requires current approval."),
+            error_type="workflow_error",
+            error_code=("policy_request_ingress_not_available" if current
+                        else "policy_input_not_approved"),
+            status_code=409,
             details={"context_id": context_id},
             correlation_id=correlation_id,
         )
