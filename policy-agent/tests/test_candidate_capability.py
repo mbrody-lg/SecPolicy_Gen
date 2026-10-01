@@ -105,6 +105,26 @@ def test_candidate_generation_uses_domain_code_without_persistence(client, workl
     assert "store_config" not in run_agent.call_args.kwargs
 
 
+def test_candidate_cannot_claim_approved_policy_request(client, workload_headers):
+    metadata = {
+        "tenant_id": "tenant-a",
+        "idempotency_key": "attempt-1",
+        "deadline": datetime.now(timezone.utc) + timedelta(minutes=1),
+    }
+    with (
+        patch("app.routes.routes.authorize_candidate_request", return_value=(metadata, None)),
+        patch("app.routes.routes.run_generation_pipeline") as pipeline,
+    ):
+        response = client.post(
+            "/candidate/generate-policy",
+            json={"context_id": "ctx-candidate", "policy_request": {"approved_context": {}}},
+            headers=_headers(**workload_headers("/candidate/generate-policy")),
+        )
+    assert response.status_code == 400
+    assert response.get_json()["error_code"] == "candidate_policy_request_forbidden"
+    pipeline.assert_not_called()
+
+
 def test_candidate_route_enforces_fixed_bounded_json_limit(client, app, monkeypatch, workload_headers):
     monkeypatch.setitem(app.config, "MAX_CONTENT_LENGTH", 512 * 1024)
     response = client.post(

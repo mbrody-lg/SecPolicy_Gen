@@ -11,7 +11,7 @@ def test_generation_rejects_explicit_policy_request_before_execution():
         "language": "en", "model_version": "mock", "policy_request": None,
     }
     result = run_generation_pipeline(payload, organization_id="tenant-a")
-    assert result["error_code"] == "policy_request_not_supported"
+    assert result["error_code"] == "invalid_type"
     assert result["status_code"] == 400
 
 

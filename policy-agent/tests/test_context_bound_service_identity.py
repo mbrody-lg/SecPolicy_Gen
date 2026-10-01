@@ -11,6 +11,8 @@ from workload_test_keys import KEY_IDS, signing_key
 
 CONTEXT_A = "6825a0e00194d322881db128"
 CONTEXT_B = "6825a0e00194d322881db129"
+SNAPSHOT_HASH = "a" * 64
+PLAN_REVISION_ID = "plan-rev-1"
 
 
 def _headers(path, scope, context_id=CONTEXT_A, subject="context-agent"):
@@ -128,3 +130,87 @@ def test_candidate_capability_remains_v1(app):
     )
     assert claims["version"] == 1
     assert "context_id" not in claims
+
+
+def test_signed_snapshot_matches_body_before_nonce_consumption(client):
+    token = mint_token(
+        key=signing_key("context-agent"), kid=KEY_IDS["context-agent"],
+        subject="context-agent", audience="policy-agent", scope="policy:generate",
+        tenant_id="tenant-a", path="/generate_policy", context_id=CONTEXT_A,
+        snapshot_hash=SNAPSHOT_HASH, plan_revision_id=PLAN_REVISION_ID,
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    body = {"context_id": CONTEXT_A, "policy_request": {
+        "context_id": CONTEXT_A, "approved_context": {
+            "context_id": CONTEXT_A, "tenant_id": "tenant-a",
+            "snapshot_hash": SNAPSHOT_HASH, "plan_revision_id": PLAN_REVISION_ID,
+        },
+    }}
+    with patch("app.routes.routes.run_generation_pipeline", return_value={
+        "success": True, "policy": {"context_id": CONTEXT_A},
+    }) as pipeline:
+        for field, bad in (("snapshot_hash", "b" * 64),
+                           ("plan_revision_id", "plan-rev-2"),
+                           ("tenant_id", "tenant-b"),
+                           ("context_id", CONTEXT_B)):
+            altered = {**body, "policy_request": {
+                **body["policy_request"], "approved_context": {
+                    **body["policy_request"]["approved_context"], field: bad,
+                },
+            }}
+            response = client.post("/generate_policy", json=altered, headers=headers)
+            assert response.status_code == 403
+            assert response.get_json()["error_code"] == "service_snapshot_forbidden"
+        missing = client.post("/generate_policy", json={"context_id": CONTEXT_A}, headers=headers)
+        assert missing.status_code == 403
+        corrected = client.post("/generate_policy", json=body, headers=headers)
+        replay = client.post("/generate_policy", json=body, headers=headers)
+    assert corrected.status_code == 200
+    assert replay.status_code == 401
+    pipeline.assert_called_once()
+
+
+def test_policy_request_without_signed_snapshot_is_forbidden(client):
+    body = {"context_id": CONTEXT_A, "policy_request": {
+        "context_id": CONTEXT_A, "approved_context": {
+            "context_id": CONTEXT_A, "tenant_id": "tenant-a",
+            "snapshot_hash": SNAPSHOT_HASH, "plan_revision_id": PLAN_REVISION_ID,
+        },
+    }}
+    with patch("app.routes.routes.run_generation_pipeline") as pipeline:
+        response = client.post(
+            "/generate_policy", json=body,
+            headers=_headers("/generate_policy", "policy:generate"),
+        )
+    assert response.status_code == 403
+    pipeline.assert_not_called()
+
+
+@pytest.mark.parametrize("change", [
+    {"snapshot_hash": "A" * 64},
+    {"snapshot_hash": "a" * 63},
+    {"snapshot_hash": None},
+    {"plan_revision_id": "bad revision"},
+    {"plan_revision_id": ""},
+    {"plan_revision_id": None},
+])
+def test_malformed_signed_snapshot_claims_are_rejected(app, change):
+    token = mint_token(
+        key=signing_key("context-agent"), kid=KEY_IDS["context-agent"],
+        subject="context-agent", audience="policy-agent", scope="policy:generate",
+        tenant_id="tenant-a", path="/generate_policy", context_id=CONTEXT_A,
+        snapshot_hash=SNAPSHOT_HASH, plan_revision_id=PLAN_REVISION_ID,
+    )
+    claims = jwt.decode(token, options={"verify_signature": False})
+    claims.update(change)
+    forged = jwt.encode(
+        claims, signing_key("context-agent"), algorithm="EdDSA",
+        headers={"kid": KEY_IDS["context-agent"], "typ": "secpolicy-workload-v2"},
+    )
+    with pytest.raises(InvalidWorkloadToken):
+        verify_token(
+            forged, caller_keys=app.config["WORKLOAD_CALLER_KEYS"],
+            allowed_scopes={"context-agent": frozenset({"policy:generate"})},
+            audience="policy-agent", scope="policy:generate", method="POST",
+            path="/generate_policy",
+        )

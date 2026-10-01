@@ -1,6 +1,8 @@
 """Negative workload-capability matrix for protected Policy routes."""
 
 import json
+import importlib.util
+from pathlib import Path
 from dataclasses import replace
 from unittest.mock import patch
 
@@ -201,3 +203,54 @@ def test_replayed_route_token_has_no_second_generation(client, workload_headers)
     assert first.status_code == 200
     assert second.status_code == 401
     assert pipeline.call_count == 1
+
+
+def test_snapshot_token_mint_verify_parity_and_scope_restriction(app):
+    root = Path(__file__).resolve().parents[2]
+    if not all((root / service / "app" / "workload_token.py").is_file()
+               for service in ("context-agent", "policy-agent", "validator-agent")):
+        pytest.skip("cross-service token parity requires a monorepo checkout")
+    modules = []
+    for service in ("context-agent", "policy-agent", "validator-agent"):
+        spec = importlib.util.spec_from_file_location(
+            f"{service.replace('-', '_')}_snapshot_token",
+            root / service / "app" / "workload_token.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        import sys
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        modules.append(module)
+    for module in modules:
+        token = module.mint_token(
+            key=signing_key("context-agent"), kid=KEY_IDS["context-agent"],
+            subject="context-agent", audience="policy-agent", scope="policy:generate",
+            tenant_id="tenant-a", path="/generate_policy", context_id="ctx-1",
+            snapshot_hash="a" * 64, plan_revision_id="plan-rev-1",
+        )
+        for verifier in modules:
+            claims = verifier.verify_token(
+                token, caller_keys=app.config["WORKLOAD_CALLER_KEYS"],
+                allowed_scopes={"context-agent": frozenset({"policy:generate"})},
+                audience="policy-agent", scope="policy:generate", method="POST",
+                path="/generate_policy",
+            )
+            assert claims["snapshot_hash"] == "a" * 64
+            assert claims["plan_revision_id"] == "plan-rev-1"
+        for bad in ({"snapshot_hash": "A" * 64}, {"plan_revision_id": "bad revision"},
+                    {"snapshot_hash": None}, {"plan_revision_id": None}):
+            params = {"snapshot_hash": "a" * 64, "plan_revision_id": "plan-rev-1", **bad}
+            with pytest.raises(ValueError):
+                module.mint_token(
+                    key=signing_key("context-agent"), kid=KEY_IDS["context-agent"],
+                    subject="context-agent", audience="policy-agent", scope="policy:generate",
+                    tenant_id="tenant-a", path="/generate_policy", context_id="ctx-1",
+                    **params,
+                )
+        with pytest.raises(ValueError):
+            module.mint_token(
+                key=signing_key("context-agent"), kid=KEY_IDS["context-agent"],
+                subject="context-agent", audience="policy-agent", scope="policy:rag:refresh",
+                tenant_id="tenant-a", path="/rag/refresh", snapshot_hash="a" * 64,
+                plan_revision_id="plan-rev-1",
+            )

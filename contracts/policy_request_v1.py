@@ -10,6 +10,7 @@ from hashlib import sha256
 CONTRACT = "secpolicy.policy_request"
 VERSION = "1.0"
 MAX_BYTES = 65536
+MAX_GENERATION_PROMPT_BYTES = 20000
 _HASH = re.compile(r"^[0-9a-f]{64}$")
 _POLICY_INTENT = {
     "policy_type": "string",
@@ -209,6 +210,16 @@ def compute_policy_input_hash_v1_1(request: dict) -> str:
     if not isinstance(request, dict) or request.get("version") != "1.1":
         _fail("unsupported_version", "$.version")
     return compute_policy_input_hash_v1(request)
+
+
+def format_policy_request_v1_1_prompt(refined_prompt: str, request: dict) -> str:
+    """Use one bounded canonical prompt representation across Context and Policy."""
+    canonical = json.dumps(request, ensure_ascii=False, allow_nan=False,
+                           sort_keys=True, separators=(",", ":"))
+    prompt = f"{refined_prompt}\n\n[Canonical PolicyRequest 1.1]\n{canonical}"
+    if len(prompt.encode("utf-8")) > MAX_GENERATION_PROMPT_BYTES:
+        _fail("too_large", "$.policy_request")
+    return prompt
 
 
 def validate_policy_request_v1(

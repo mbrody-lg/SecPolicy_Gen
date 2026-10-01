@@ -125,6 +125,10 @@ CONTEXT_BROWSER_COMPOSE_OVERRIDE="$COMPOSE_OVERRIDE" \
   make context-browser-smoke
 make policy-tests
 make validator-tests
+echo "[critical-path] verifying packaged contracts and in-process PolicyRequest 1.1 handoff across service images (HTTP mocked)"
+SECPOLICY_CROSS_SERVICE_DOCKER=1 \
+CRITICAL_PATH_COMPOSE_PROJECT="$COMPOSE_PROJECT_NAME" \
+  python3 tests/integration/test_policy_request_v1_1_cross_service.py
 ENV_FILE="$ENV_FILE" make governance-tests
 
 echo "[critical-path] resetting stack before smoke validation"

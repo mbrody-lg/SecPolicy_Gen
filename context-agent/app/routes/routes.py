@@ -53,6 +53,7 @@ from app.services.logic import (
     refresh_system_state,
     generate_context_plan_prompt,
     generate_context_update_prompt,
+    get_context_and_prompt,
     export_context_lessons,
     mark_final_context_sections_for_improvement,
     regenerate_final_context_sections,
@@ -496,18 +497,13 @@ def _policy_generation_blocker(context: dict | None) -> dict | None:
             "status_code": 404,
         }
     if context.get("policy_input"):
-        handoff = _policy_input_handoff(context)
-        if not handoff or not approved_request_is_current(context, handoff, tenant_id=g.organization_id):
+        generation_error = _policy_input_generation_error(context)
+        if generation_error:
             return {
-                "error_code": "policy_input_not_approved",
-                "message": "Review and approve the current policy input before generation.",
-                "status_code": 409,
+                "error_code": generation_error.error_code,
+                "message": generation_error.message,
+                "status_code": generation_error.status_code,
             }
-        return {
-            "error_code": "policy_request_ingress_not_available",
-            "message": "PolicyRequest 1.1 generation is not enabled in Policy Agent yet.",
-            "status_code": 409,
-        }
     context_building = context.get("context_building")
     if isinstance(context_building, dict) and context_building.get("status") == "needs_information":
         return {
@@ -549,6 +545,14 @@ def _policy_generation_blocker(context: dict | None) -> dict | None:
             "message": "Complete the security context before generating a policy.",
             "status_code": 409,
         }
+    return None
+
+
+def _policy_input_generation_error(context: dict) -> PipelineStepError | None:
+    try:
+        get_context_and_prompt(str(context["_id"]))
+    except PipelineStepError as exc:
+        return exc
     return None
 
 @main.route("/create", methods=["GET", "POST"])
@@ -691,9 +695,16 @@ def context_detail(context_id):
     except RouteInputError as exc:
         return route_input_error_response(exc)
 
+    handoff = _policy_input_handoff(context) if context.get("policy_input") else None
+    policy_input_current = bool(handoff) and approved_request_is_current(
+        context, handoff, tenant_id=g.organization_id,
+    )
+    policy_input_generation_available = policy_input_current and not _policy_input_generation_error(context)
     return render_template(
         "context_detail.html",
         context=context,
+        policy_input_current=policy_input_current,
+        policy_input_generation_available=policy_input_generation_available,
         interactions=interactions,
         system_status=get_system_status(),
         latest_pipeline_job=find_latest_pipeline_job(str(context_obj_id), organization_id=g.organization_id),
@@ -789,6 +800,7 @@ def get_policy_input(context_id):
     state = context.get("policy_input") or {}
     handoff = _policy_input_handoff(context)
     current = bool(handoff) and approved_request_is_current(context, handoff, tenant_id=g.organization_id)
+    generation_error = _policy_input_generation_error(context) if current else None
     approval = state.get("approval") or {}
     return jsonify({
         "success": True, "version": "1.1", "revision": state.get("revision", 0),
@@ -796,7 +808,8 @@ def get_policy_input(context_id):
         "material_questions": material_questions(state.get("answers") or {}),
         "approval_status": "approved" if current else "stale" if approval else "draft",
         "approved_request": approval.get("request") if current else None,
-        "generation_available": False,
+        "generation_available": current and generation_error is None,
+        "generation_blocker": generation_error.error_code if generation_error else None,
     }), 200
 
 
@@ -897,10 +910,12 @@ def approve_policy_input(context_id):
     }), {"$set": {"policy_input": new_state}})
     if result.matched_count != 1:
         return jsonify({"success": False, "error_code": "stale_policy_input_revision"}), 409
+    generation_error = _policy_input_generation_error(context)
     return jsonify({
         "success": True, "revision": expected, "approval_status": "approved",
         "snapshot_hash": approved_request["approved_context"]["snapshot_hash"],
-        "generation_available": False,
+        "generation_available": generation_error is None,
+        "generation_blocker": generation_error.error_code if generation_error else None,
     }), 200
 
 

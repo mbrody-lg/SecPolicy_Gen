@@ -30,6 +30,8 @@ CONTEXT_BOUND_SCOPES = frozenset({
 })
 TENANT_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 CONTEXT_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+SNAPSHOT_HASH_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+PLAN_REVISION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 KEY_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 NONCE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{24,64}$")
 
@@ -159,6 +161,7 @@ def combine_verifier_keys(*registries: dict[str, VerifierKey]) -> dict[str, Veri
 def mint_token(
     *, key: Ed25519PrivateKey, kid: str, subject: str, audience: str,
     scope: str, tenant_id: str, path: str, context_id: str | None = None,
+    snapshot_hash: str | None = None, plan_revision_id: str | None = None,
 ) -> str:
     """Mint a scoped request from an already verified tenant context."""
     if not isinstance(tenant_id, str) or not TENANT_PATTERN.fullmatch(tenant_id):
@@ -173,6 +176,15 @@ def mint_token(
             raise ValueError("A canonical context ID is required for this workload scope.")
     elif context_id is not None:
         raise ValueError("This workload scope does not accept a context ID.")
+    if snapshot_hash is not None or plan_revision_id is not None:
+        if (
+            scope != "policy:generate"
+            or not isinstance(snapshot_hash, str)
+            or not SNAPSHOT_HASH_PATTERN.fullmatch(snapshot_hash)
+            or not isinstance(plan_revision_id, str)
+            or not PLAN_REVISION_ID_PATTERN.fullmatch(plan_revision_id)
+        ):
+            raise ValueError("A valid approved snapshot is required for policy generation.")
     issued_at = int(time.time())
     claims = {
         "version": 2 if is_context_bound else 1,
@@ -188,6 +200,9 @@ def mint_token(
     }
     if is_context_bound:
         claims["context_id"] = context_id
+    if snapshot_hash is not None:
+        claims["snapshot_hash"] = snapshot_hash
+        claims["plan_revision_id"] = plan_revision_id
     return jwt.encode(
         claims, key, algorithm="EdDSA",
         headers={"kid": kid, "typ": CONTEXT_BOUND_TOKEN_TYPE if is_context_bound else TOKEN_TYPE},
@@ -262,6 +277,15 @@ def verify_token(
             raise InvalidWorkloadToken
     elif "context_id" in claims:
         raise InvalidWorkloadToken
+    if "snapshot_hash" in claims or "plan_revision_id" in claims:
+        if (
+            scope != "policy:generate"
+            or not isinstance(claims.get("snapshot_hash"), str)
+            or not SNAPSHOT_HASH_PATTERN.fullmatch(claims["snapshot_hash"])
+            or not isinstance(claims.get("plan_revision_id"), str)
+            or not PLAN_REVISION_ID_PATTERN.fullmatch(claims["plan_revision_id"])
+        ):
+            raise InvalidWorkloadToken
     if claims["tenant_id"] not in verifier.tenant_ids:
         raise ForbiddenWorkloadToken
     if claims.get("aud") != audience or scope not in scopes:

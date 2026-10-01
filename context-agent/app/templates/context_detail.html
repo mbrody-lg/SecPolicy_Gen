@@ -883,9 +883,9 @@
     <h2 class="text-xl font-semibold mb-2">Generate policies</h2>
     {% if context.policy_input %}
       <div class="mb-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950" data-policy-input-v1-1>
-        <div class="font-semibold">Policy input 1.1 is in preparation</div>
+        <div class="font-semibold">Policy input 1.1</div>
         <div class="mt-1">Revision {{ context.policy_input.revision }}. Review the structured answers and material questions through the policy-input API.</div>
-        <div class="mt-1">Generation remains disabled until Policy Agent supports the approved 1.1 handoff.</div>
+        <div class="mt-1">{% if policy_input_generation_available %}Current approval is ready for policy generation.{% elif policy_input_current %}Approved input is not ready for generation. Review the input size and refined prompt.{% else %}Review and approve the current answers before generation.{% endif %}</div>
         <a class="mt-2 inline-block underline" href="{{ url_for('main.get_policy_input', context_id=context._id) }}">Inspect policy input</a>
       </div>
     {% endif %}
@@ -940,7 +940,7 @@
         </div>
       </div>
     {% endif %}
-    {% set can_generate_policy = runtime_ready and not pipeline_active and context_building_ready and context_plan_ready and security_context_ready and final_context_ready and not context.policy_input %}
+    {% set can_generate_policy = runtime_ready and not pipeline_active and context_building_ready and context_plan_ready and security_context_ready and final_context_ready and (not context.policy_input or policy_input_generation_available) %}
     <div id="pipeline-job-panel"
       class="mb-4 rounded border border-blue-300 bg-blue-50 p-3 text-sm text-blue-950"
       data-context-id="{{ context._id }}"
@@ -982,7 +982,7 @@
     {% if not can_generate_policy %}
       <div class="mb-3 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
         {% if context.policy_input %}
-          PolicyRequest 1.1 generation is not enabled in Policy Agent yet.
+          Review and approve the current policy input before generation.
         {% elif not context_building_ready %}
           Complete context-building questions before generating a policy.
         {% elif not context_plan_ready %}
@@ -1002,7 +1002,7 @@
       <button type="submit"
         class="{% if can_generate_policy %}bg-green-600 hover:bg-green-700{% else %}bg-gray-400 cursor-not-allowed{% endif %} text-white px-4 py-2 rounded"
         data-generate-policy-button
-        data-domain-ready="{% if context_building_ready and context_plan_ready and security_context_ready and final_context_ready and not context.policy_input %}1{% else %}0{% endif %}"
+        data-domain-ready="{% if context_building_ready and context_plan_ready and security_context_ready and final_context_ready and (not context.policy_input or policy_input_generation_available) %}1{% else %}0{% endif %}"
         {% if not can_generate_policy %}disabled{% endif %}>
         Generate and validate
       </button>
