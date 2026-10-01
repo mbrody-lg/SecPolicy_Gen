@@ -160,9 +160,11 @@ def create_app():
     # Initialize Mongo with app
     mongo.init_app(app)
     if not is_testing:
+        from app.policy_persistence import initialize_policy_index
         from app.workload_token import initialize_replay_store
 
         with app.app_context():
+            initialize_policy_index(mongo.db)
             initialize_replay_store(mongo.db)
 
     # Import and register blueprints

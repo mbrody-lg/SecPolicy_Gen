@@ -28,8 +28,11 @@ def _token(app, **claims):
         "kid": KEY_IDS["context-agent"],
         "subject": "context-agent", "audience": "policy-agent",
         "scope": "policy:generate", "tenant_id": "tenant-a", "path": "/generate_policy",
+        "context_id": "ctx-1",
     }
     data.update(claims)
+    if data["scope"] not in {"policy:generate", "policy:update", "policy:validate"}:
+        data.pop("context_id", None)
     return mint_token(**data)
 
 
@@ -46,7 +49,7 @@ def _verify(app, token, **expected):
 
 @pytest.mark.parametrize("change,error", [
     ({"audience": "validator-agent"}, ForbiddenWorkloadToken),
-    ({"scope": "policy:rag:refresh"}, ForbiddenWorkloadToken),
+    ({"scope": "policy:rag:refresh"}, InvalidWorkloadToken),
     ({"path": "/rag/refresh"}, InvalidWorkloadToken),
 ])
 def test_wrong_capability_is_rejected(app, change, error):
@@ -181,7 +184,7 @@ def test_replay_ttl_index_is_initialized_before_request(app):
 
 
 def test_wrong_tenant_header_has_no_generation_side_effect(client, workload_headers):
-    headers = workload_headers("/generate_policy", tenant_id="tenant-a")
+    headers = workload_headers("/generate_policy", tenant_id="tenant-a", context_id="ctx-1")
     headers["X-Tenant-ID"] = "tenant-b"
     with patch("app.routes.routes.run_generation_pipeline") as pipeline:
         response = client.post("/generate_policy", json={}, headers=headers)
@@ -191,10 +194,10 @@ def test_wrong_tenant_header_has_no_generation_side_effect(client, workload_head
 
 
 def test_replayed_route_token_has_no_second_generation(client, workload_headers):
-    headers = workload_headers("/generate_policy")
+    headers = workload_headers("/generate_policy", context_id="ctx-1")
     with patch("app.routes.routes.run_generation_pipeline", return_value={"success": True, "policy": {}}) as pipeline:
-        first = client.post("/generate_policy", json={}, headers=headers)
-        second = client.post("/generate_policy", json={}, headers=headers)
+        first = client.post("/generate_policy", json={"context_id": "ctx-1"}, headers=headers)
+        second = client.post("/generate_policy", json={"context_id": "ctx-1"}, headers=headers)
     assert first.status_code == 200
     assert second.status_code == 401
     assert pipeline.call_count == 1

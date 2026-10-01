@@ -55,10 +55,11 @@ def test_get_readiness_status_returns_dependency_error_when_mongo_fails(app, mon
     }
 
 
-def _verified_principal():
+def _verified_principal(context_id="ctx-1"):
     g.service_principal = {
-        "identity": "context-agent", "audience": "validator-agent",
-        "scopes": ["policy:validate"], "tenant_id": "tenant-a",
+        "authentication": "signed_workload_token", "identity": "context-agent",
+        "audience": "validator-agent", "scopes": ["policy:validate"],
+        "tenant_id": "tenant-a", "context_id": context_id,
     }
 
 
@@ -228,7 +229,7 @@ def test_send_policy_update_to_policy_agent_surfaces_dependency_error_metadata(c
 def test_send_policy_update_to_policy_agent_prefers_request_correlation_id(client):
     response = MagicMock()
     response.raise_for_status.return_value = None
-    response.json.return_value = {"policy_text": "revised"}
+    response.json.return_value = {"context_id": "ctx-1", "policy_text": "revised"}
 
     with client.application.test_request_context(
         "/validate-policy",
@@ -256,10 +257,10 @@ def test_send_policy_update_to_policy_agent_emits_structured_logs(app, caplog):
     response = MagicMock()
     response.raise_for_status.return_value = None
     response.status_code = 200
-    response.json.return_value = {"policy_text": "revised"}
+    response.json.return_value = {"context_id": "ctx-log", "policy_text": "revised"}
 
     with app.test_request_context("/validate-policy", method="POST"):
-        _verified_principal()
+        _verified_principal("ctx-log")
         with patch("app.services.logic.requests.post", return_value=response):
             with caplog.at_level("INFO"):
                 send_policy_update_to_policy_agent(

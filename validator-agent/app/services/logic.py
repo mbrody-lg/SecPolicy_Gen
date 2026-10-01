@@ -143,18 +143,22 @@ def _get_correlation_id(payload: dict | None) -> str | None:
     return request_correlation_id or header_correlation_id or payload.get("correlation_id") or payload.get("context_id")
 
 
-def _dependency_headers(correlation_id: str | None, *, path: str) -> dict:
+def _verified_validation_context_id(context_id: str) -> str:
+    """Resolve the outbound context from the authenticated inbound capability."""
+    from app.service_identity import verified_validation_principal
+
+    if not has_request_context():
+        raise ValueError("Verified validation context is required.")
+    principal = verified_validation_principal(context_id)
+    return principal["context_id"]
+
+
+def _dependency_headers(correlation_id: str | None, *, context_id: str) -> dict:
     """Sign a Policy update using only a verified inbound tenant."""
     from app.workload_token import mint_token
 
-    principal = getattr(g, "service_principal", None) if has_request_context() else None
-    if (
-        not isinstance(principal, dict)
-        or principal.get("identity") != "context-agent"
-        or principal.get("audience") != "validator-agent"
-        or "policy:validate" not in principal.get("scopes", [])
-    ):
-        raise ValueError("Verified validation principal is required.")
+    bound_context_id = _verified_validation_context_id(context_id)
+    principal = g.service_principal
     key = current_app.config["WORKLOAD_VALIDATOR_SIGNING_KEY"]
     token = mint_token(
         key=key,
@@ -163,7 +167,8 @@ def _dependency_headers(correlation_id: str | None, *, path: str) -> dict:
         audience="policy-agent",
         scope="policy:update",
         tenant_id=principal.get("tenant_id"),
-        path=path,
+        path=f"/generate_policy/{bound_context_id}/update",
+        context_id=bound_context_id,
     )
     headers = {}
     if correlation_id:
@@ -547,6 +552,16 @@ def send_policy_update_to_policy_agent(
     recommendations: list,
 ):
     """Send validator feedback to policy-agent and return the revised policy payload."""
+    correlation_id = _get_correlation_id({"context_id": context_id})
+    try:
+        context_id = _verified_validation_context_id(context_id)
+    except ValueError:
+        return _error_payload(
+            error_type="authorization_error",
+            error_code="workload_identity_unavailable",
+            message="Verified workload identity is unavailable.",
+            correlation_id=correlation_id,
+        )
     policy_agent_url = (
         current_app.config.get("POLICY_AGENT_URL", "http://policy-agent:5000")
         if has_app_context()
@@ -585,7 +600,7 @@ def send_policy_update_to_policy_agent(
             json=payload,
             headers=_dependency_headers(
                 correlation_id,
-                path=f"/generate_policy/{context_id}/update",
+                context_id=context_id,
             ),
             timeout=timeout_seconds,
         )

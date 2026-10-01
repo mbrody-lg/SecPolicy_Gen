@@ -54,7 +54,7 @@ def test_update_policy_with_openaiagent(client, workload_headers):
             },
         },
     ) as run_policy_update_pipeline:
-        response = client.post(f"/generate_policy/{context_id}/update", json=data, headers=workload_headers(f"/generate_policy/{context_id}/update"))
+        response = client.post(f"/generate_policy/{context_id}/update", json=data, headers=workload_headers(f"/generate_policy/{context_id}/update", context_id=str(context_id)))
 
     assert response.status_code == 200
     json_data = response.get_json()
@@ -98,7 +98,7 @@ def test_update_policy_returns_404_when_canonical_policy_is_missing(client, work
             "status_code": 404,
         },
     ):
-        response = client.post(f"/generate_policy/{context_id}/update", json=data, headers=workload_headers(f"/generate_policy/{context_id}/update"))
+        response = client.post(f"/generate_policy/{context_id}/update", json=data, headers=workload_headers(f"/generate_policy/{context_id}/update", context_id=str(context_id)))
 
     assert response.status_code == 404
     assert response.get_json() == {
@@ -111,7 +111,7 @@ def test_update_policy_returns_404_when_canonical_policy_is_missing(client, work
     }
 
 
-def test_update_policy_returns_contract_error_when_context_id_mismatches(client, workload_headers):
+def test_update_policy_rejects_context_id_mismatch_before_pipeline(client, workload_headers):
     context_id = ObjectId()
     data = {
         "context_id": str(ObjectId()),
@@ -124,37 +124,12 @@ def test_update_policy_returns_contract_error_when_context_id_mismatches(client,
         "recommendations": ["recommendation"],
     }
 
-    with patch(
-        "app.routes.routes.run_policy_update_pipeline",
-        return_value={
-            "success": False,
-            "error_type": "contract_error",
-            "error_code": "context_id_mismatch",
-            "message": "Context ID mismatch.",
-            "details": {
-                "stage": "contract_validation",
-                "path_context_id": str(context_id),
-                "payload_context_id": data["context_id"],
-            },
-            "correlation_id": data["context_id"],
-            "status_code": 400,
-        },
-    ):
-        response = client.post(f"/generate_policy/{context_id}/update", json=data, headers=workload_headers(f"/generate_policy/{context_id}/update"))
+    with patch("app.routes.routes.run_policy_update_pipeline") as pipeline:
+        response = client.post(f"/generate_policy/{context_id}/update", json=data, headers=workload_headers(f"/generate_policy/{context_id}/update", context_id=str(context_id)))
 
-    assert response.status_code == 400
-    assert response.get_json() == {
-        "success": False,
-        "error_type": "contract_error",
-        "error_code": "context_id_mismatch",
-        "message": "Context ID mismatch.",
-        "details": {
-            "stage": "contract_validation",
-            "path_context_id": str(context_id),
-            "payload_context_id": data["context_id"],
-        },
-        "correlation_id": data["context_id"],
-    }
+    assert response.status_code == 403
+    assert response.get_json()["error_code"] == "service_context_forbidden"
+    pipeline.assert_not_called()
 
 
 def test_update_policy_hides_internal_exception_details(client, workload_headers):
@@ -182,7 +157,7 @@ def test_update_policy_hides_internal_exception_details(client, workload_headers
             "status_code": 500,
         },
     ):
-        response = client.post(f"/generate_policy/{context_id}/update", json=data, headers=workload_headers(f"/generate_policy/{context_id}/update"))
+        response = client.post(f"/generate_policy/{context_id}/update", json=data, headers=workload_headers(f"/generate_policy/{context_id}/update", context_id=str(context_id)))
 
     assert response.status_code == 500
     assert response.get_json() == {

@@ -113,7 +113,8 @@ def _run_generation(monkeypatch, provider: FakeProvider) -> dict:
             "refined_prompt": "Generate the policy.",
             "language": "en",
             "model_version": "context-contract-v1",
-        }
+        },
+        organization_id="tenant-a",
     )
 
 
@@ -133,10 +134,8 @@ def test_called_and_persisted_model_come_from_top_level_yaml(app_context, monkey
         "provider": "openai",
         "model": "configured-model",
     }
-    stored_config = mongo.db.policy_configs.find_one(
-        {"model_version": "context-contract-v1"}
-    )
-    assert stored_config["provider_provenance"] == result["policy"]["provider_provenance"]
+    assert mongo.db.policy_configs.count_documents({}) == 0
+    assert mongo.db.policies.find_one({"organization_id": "tenant-a"})["provider_provenance"] == result["policy"]["provider_provenance"]
 
 
 @pytest.mark.parametrize(
@@ -176,7 +175,8 @@ def test_blank_backend_result_makes_no_config_write(app_context, monkeypatch):
             "refined_prompt": "Generate the policy.",
             "language": "en",
             "model_version": "context-contract-v1",
-        }
+        },
+        organization_id="tenant-a",
     )
 
     assert result["success"] is False
@@ -188,6 +188,7 @@ def test_invalid_provider_update_preserves_policy_and_config(app_context, monkey
     context_id = "provider-update-context"
     mongo.db.policies.insert_one(
         {
+            "organization_id": "tenant-a",
             "context_id": context_id,
             "language": "en",
             "policy_text": "Original policy",
@@ -195,6 +196,9 @@ def test_invalid_provider_update_preserves_policy_and_config(app_context, monkey
             "model_version": "context-contract-v1",
             "policy_agent_version": "0.1.0",
             "generated_at": datetime.now(timezone.utc),
+            "revision_count": 0,
+            "lifecycle_status": "generated",
+            "ownership": {"owner_service": "policy-agent", "source_of_truth": True, "collection": "policies"},
         }
     )
     before = mongo.db.policies.find_one({"context_id": context_id})
@@ -216,6 +220,7 @@ def test_invalid_provider_update_preserves_policy_and_config(app_context, monkey
             "recommendations": ["Add detail"],
         },
         context_id,
+        organization_id="tenant-a",
     )
 
     assert result["success"] is False

@@ -820,7 +820,7 @@ def test_run_rag_refresh_job_marks_unhandled_exception_failed(app, monkeypatch):
 
 
 def test_run_generation_pipeline_rejects_invalid_json_body(app_context):
-    result = logic.run_generation_pipeline(None)
+    result = logic.run_generation_pipeline(None, organization_id="tenant-a")
 
     assert result == {
         "success": False,
@@ -840,7 +840,7 @@ def test_run_generation_pipeline_rejects_oversized_prompt(app_context):
         "model_version": "openai",
     }
 
-    result = logic.run_generation_pipeline(payload)
+    result = logic.run_generation_pipeline(payload, organization_id="tenant-a")
 
     assert result == {
         "success": False,
@@ -887,7 +887,8 @@ def test_validate_generation_payload_rejects_invalid_business_context(app_contex
             "language": "en",
             "model_version": "openai",
             "business_context": "country=Spain",
-        }
+        },
+        organization_id="tenant-a",
     )
 
     assert result["success"] is False
@@ -905,7 +906,8 @@ def test_validate_generation_payload_rejects_nested_business_context_list(app_co
             "business_context": {
                 "important_assets": ["Medical records", {"name": "Backups"}],
             },
-        }
+        },
+        organization_id="tenant-a",
     )
 
     assert result["success"] is False
@@ -937,7 +939,8 @@ def test_run_generation_pipeline_persists_policy(app_context, monkeypatch):
             "refined_prompt": "Generate policy",
             "language": "en",
             "model_version": "openai",
-        }
+        },
+        organization_id="tenant-a",
     )
 
     assert result["success"] is True
@@ -973,7 +976,8 @@ def test_run_generation_pipeline_normalizes_optional_policy_lists(app_context, m
             "refined_prompt": "Generate policy",
             "language": "en",
             "model_version": "openai",
-        }
+        },
+        organization_id="tenant-a",
     )
 
     assert result["success"] is True
@@ -998,7 +1002,8 @@ def test_run_generation_pipeline_emits_structured_logs(app_context, monkeypatch,
                 "refined_prompt": "Generate policy",
                 "language": "en",
                 "model_version": "openai",
-            }
+            },
+            organization_id="tenant-a",
         )
 
     assert result["success"] is True
@@ -1031,7 +1036,7 @@ def test_run_policy_update_pipeline_rejects_oversized_feedback_list(app_context)
         "recommendations": ["recommendation"],
     }
 
-    result = logic.run_policy_update_pipeline(payload, context_id)
+    result = logic.run_policy_update_pipeline(payload, context_id, organization_id="tenant-a")
 
     assert result == {
         "success": False,
@@ -1053,6 +1058,7 @@ def test_run_policy_update_pipeline_updates_existing_policy(app_context, monkeyp
     mongo.db.policies.insert_one(
         {
             "_id": "policy-2",
+            "organization_id": "tenant-a",
             "context_id": context_id,
             "language": "en",
             "policy_text": "previous policy",
@@ -1062,6 +1068,8 @@ def test_run_policy_update_pipeline_updates_existing_policy(app_context, monkeyp
             "policy_agent_version": "0.1.0",
             "generated_at": datetime.now(timezone.utc),
             "revision_count": 1,
+            "lifecycle_status": "generated",
+            "ownership": {"owner_service": "policy-agent", "source_of_truth": True, "collection": "policies"},
         }
     )
     monkeypatch.setattr(
@@ -1072,7 +1080,7 @@ def test_run_policy_update_pipeline_updates_existing_policy(app_context, monkeyp
     payload = {
         "context_id": context_id,
         "language": "en",
-        "policy_text": "policy text",
+        "policy_text": "previous policy",
         "policy_agent_version": "0.1.0",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "status": "review",
@@ -1080,7 +1088,7 @@ def test_run_policy_update_pipeline_updates_existing_policy(app_context, monkeyp
         "recommendations": ["recommendation"],
     }
 
-    result = logic.run_policy_update_pipeline(payload, context_id)
+    result = logic.run_policy_update_pipeline(payload, context_id, organization_id="tenant-a")
 
     assert result["success"] is True
     assert result["policy"]["policy_text"] == "Updated policy body"
@@ -1155,7 +1163,6 @@ def test_run_with_agent_propagates_request_correlation_id(app, monkeypatch):
     sdk_client = FakeSdkClient()
     fake_agent = FakeAgent(sdk_client)
     monkeypatch.setattr(logic, "load_policy_config", lambda: {"type": "mock", "name": "fake", "instructions": "", "model": "fake", "roles": [{"MPG": "unused", "instructions": "x"}]})
-    monkeypatch.setattr(logic, "_store_policy_config", lambda *args, **kwargs: None)
     monkeypatch.setattr(logic, "create_agent_from_config", lambda config: fake_agent)
 
     with app.test_request_context(headers={"X-Correlation-ID": "outbound-correlation-id"}):

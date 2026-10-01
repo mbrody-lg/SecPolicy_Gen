@@ -12,6 +12,7 @@ from time import perf_counter
 
 import yaml
 from flask import current_app
+from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from app import CORRELATION_ID_HEADER, get_request_correlation_id, mongo
 from app.agents.factory import create_agent_from_config, load_agent_config, validate_agent_config
@@ -26,6 +27,7 @@ from app.observability import build_log_event, log_event
 from app.rag.context import build_retrieval_context
 from app.rag.planner import build_retrieval_plan
 from app.rag.sources import load_rag_source_manifest
+from app.workload_token import TENANT_PATTERN
 
 
 POLICY_GENERATION_REQUIRED_FIELDS = ["context_id", "refined_prompt", "language", "model_version"]
@@ -119,6 +121,43 @@ def _pipeline_error(exc: PipelineStepError) -> dict:
         details={"stage": exc.stage, **exc.details},
         correlation_id=exc.correlation_id,
     ) | {"status_code": exc.status_code}
+
+
+def _require_organization_id(organization_id: str | None) -> str:
+    if not isinstance(organization_id, str) or not TENANT_PATTERN.fullmatch(organization_id):
+        raise PipelineStepError(
+            stage="tenant_boundary",
+            message="Verified organization is unavailable.",
+            error_type="authorization_error",
+            error_code="organization_identity_unavailable",
+            status_code=503,
+        )
+    return organization_id
+
+
+def _policy_lookup_error(*, correlation_id: str | None, code: str, status_code: int) -> PipelineStepError:
+    return PipelineStepError(
+        stage="persistence_lookup",
+        message="Policy not found." if status_code == 404 else "Policy is unavailable.",
+        error_type="validation_error" if status_code == 404 else "state_error",
+        error_code=code,
+        status_code=status_code,
+        correlation_id=correlation_id,
+    )
+
+
+def _is_authoritative_policy(policy: dict) -> bool:
+    ownership = policy.get("ownership")
+    if not isinstance(ownership, dict):
+        return False
+    if (ownership.get("owner_service") != "policy-agent"
+            or ownership.get("source_of_truth") is not True
+            or ownership.get("collection") != "policies"):
+        return False
+    revision = policy.get("revision_count")
+    return (policy.get("lifecycle_status") in ("generated", "revised")
+            and isinstance(revision, int) and not isinstance(revision, bool)
+            and revision >= 0)
 
 
 def _get_correlation_id(payload: dict | None) -> str | None:
@@ -1036,7 +1075,9 @@ def _validate_business_context_list(
     return normalized
 
 
-def validate_policy_update_payload(payload: dict | None, path_context_id: str) -> tuple[dict, dict]:
+def validate_policy_update_payload(
+    payload: dict | None, path_context_id: str, *, organization_id: str,
+) -> tuple[dict, dict]:
     """Validate the policy-update request contract and current persistence state."""
     correlation_id = _get_correlation_id(payload) or str(path_context_id)
     data = _ensure_payload_object(payload, correlation_id)
@@ -1121,16 +1162,29 @@ def validate_policy_update_payload(payload: dict | None, path_context_id: str) -
             correlation_id=correlation_id,
         )
 
-    policy = mongo.db.policies.find_one({"context_id": str(path_context_id)})
-    if not policy:
-        raise PipelineStepError(
-            stage="persistence_lookup",
-            message="Policy not found.",
-            error_type="validation_error",
-            error_code="policy_not_found",
-            status_code=404,
-            details={"context_id": str(path_context_id)},
-            correlation_id=correlation_id,
+    query = {"organization_id": organization_id, "context_id": str(path_context_id)}
+    try:
+        matches = list(mongo.db.policies.find(query).limit(2))
+    except PyMongoError:
+        raise _policy_lookup_error(
+            correlation_id=correlation_id, code="policy_persistence_unavailable", status_code=503,
+        ) from None
+    if not matches:
+        raise _policy_lookup_error(
+            correlation_id=correlation_id, code="policy_not_found", status_code=404,
+        )
+    if len(matches) != 1:
+        raise _policy_lookup_error(
+            correlation_id=correlation_id, code="policy_ambiguous", status_code=409,
+        )
+    policy = matches[0]
+    if not _is_authoritative_policy(policy):
+        raise _policy_lookup_error(
+            correlation_id=correlation_id, code="policy_not_authoritative", status_code=409,
+        )
+    if normalized_payload["policy_text"] != policy.get("policy_text"):
+        raise _policy_lookup_error(
+            correlation_id=correlation_id, code="policy_revision_conflict", status_code=409,
         )
 
     return normalized_payload, policy
@@ -1160,28 +1214,11 @@ def _validate_agent_result(result: dict, config: dict) -> dict:
     return result
 
 
-def _store_policy_config(model_version: str | None, config: dict) -> None:
-    mongo.db.policy_configs.update_one(
-        {"model_version": model_version},
-        {
-            "$set": {
-                "model_version": model_version,
-                "provider_provenance": _provider_provenance(config),
-                "yaml_content": config,
-                "updated_at": datetime.now(timezone.utc),
-            }
-        },
-        upsert=True,
-    )
-
-
 def run_with_agent(
     refined_prompt: str,
     context_id: str,
     model_version: str,
     business_context: dict | None = None,
-    *,
-    store_config: bool = True,
 ) -> dict:
     """Run full policy-agent role pipeline for initial policy generation."""
     config = load_policy_config()
@@ -1213,7 +1250,6 @@ def run_with_agent(
         agent.run(prompt=refined_prompt, context_id=context_id, retrieval_plan=retrieval_plan),
         config,
     )
-    _store_policy_config(model_version, config)
     return result
 
 
@@ -1238,15 +1274,32 @@ def update_with_agent(prompt: str, context_id: str | None = None, model_version:
         role_count=len(last_role),
     )
     result = _validate_agent_result(agent.run(prompt, context_id), config)
-    _store_policy_config(model_version, config)
     return result
 
 
-def generate_policy_payload(payload: dict | None, *, persist: bool = True) -> dict:
+def generate_policy_payload(
+    payload: dict | None, *, persist: bool = True, organization_id: str | None = None,
+) -> dict:
     """Validate payload, run generation flow, and optionally persist the response."""
+    if persist:
+        organization_id = _require_organization_id(organization_id)
     data = validate_generation_payload(payload)
     correlation_id = data["correlation_id"]
     started_perf = perf_counter()
+
+    if persist:
+        try:
+            existing = mongo.db.policies.find_one({
+                "organization_id": organization_id, "context_id": data["context_id"],
+            })
+        except PyMongoError:
+            raise _policy_lookup_error(
+                correlation_id=correlation_id, code="policy_persistence_unavailable", status_code=503,
+            ) from None
+        if existing is not None:
+            raise _policy_lookup_error(
+                correlation_id=correlation_id, code="policy_already_exists", status_code=409,
+            )
 
     try:
         result_object = run_with_agent(
@@ -1254,7 +1307,6 @@ def generate_policy_payload(payload: dict | None, *, persist: bool = True) -> di
             context_id=data["context_id"],
             model_version=data["model_version"],
             business_context={**data.get("business_context", {}), "language": data["language"]},
-            store_config=persist,
         )
     except FileNotFoundError as exc:
         logger.exception(
@@ -1338,7 +1390,23 @@ def generate_policy_payload(payload: dict | None, *, persist: bool = True) -> di
         },
     }
     if persist:
-        mongo.db.policies.insert_one(result)
+        result["organization_id"] = organization_id
+        result["generation_guard"] = True
+        try:
+            mongo.db.policies.insert_one(dict(result))
+        except DuplicateKeyError:
+            raise _policy_lookup_error(
+                correlation_id=correlation_id, code="policy_already_exists", status_code=409,
+            ) from None
+        except PyMongoError:
+            raise PipelineStepError(
+                stage="persistence_write",
+                message="Policy persistence is unavailable.",
+                error_type="state_error",
+                error_code="policy_persistence_unavailable",
+                status_code=503,
+                correlation_id=correlation_id,
+            ) from None
     log_event(
         logger,
         logging.INFO,
@@ -1353,10 +1421,12 @@ def generate_policy_payload(payload: dict | None, *, persist: bool = True) -> di
     return _pipeline_success(stage="completed", policy=result)
 
 
-def run_generation_pipeline(payload: dict | None, *, persist: bool = True) -> dict:
+def run_generation_pipeline(
+    payload: dict | None, *, persist: bool = True, organization_id: str | None = None,
+) -> dict:
     """Execute policy generation and return a structured success or error envelope."""
     try:
-        return generate_policy_payload(payload, persist=persist)
+        return generate_policy_payload(payload, persist=persist, organization_id=organization_id)
     except PipelineStepError as exc:
         return _pipeline_error(exc)
 
@@ -1370,9 +1440,14 @@ def build_policy_update_prompt(policy_text: str, reasons: list[str], recommendat
     )
 
 
-def update_policy_payload(payload: dict | None, path_context_id: str) -> dict:
+def update_policy_payload(
+    payload: dict | None, path_context_id: str, *, organization_id: str,
+) -> dict:
     """Validate update payload, run revision flow, and normalize the persisted response."""
-    data, policy = validate_policy_update_payload(payload, path_context_id)
+    organization_id = _require_organization_id(organization_id)
+    data, policy = validate_policy_update_payload(
+        payload, path_context_id, organization_id=organization_id,
+    )
     correlation_id = data["correlation_id"]
     started_perf = perf_counter()
     prompt = build_policy_update_prompt(
@@ -1451,6 +1526,7 @@ def update_policy_payload(payload: dict | None, path_context_id: str) -> dict:
     result = {
         "success": True,
         "context_id": data["context_id"],
+        "organization_id": organization_id,
         "correlation_id": correlation_id,
         "language": data["language"],
         "policy_text": result_object["text"],
@@ -1477,28 +1553,52 @@ def update_policy_payload(payload: dict | None, path_context_id: str) -> dict:
         "last_validation_recommendations": data["recommendations"],
     }
 
-    mongo.db.policies.update_one(
-        {"_id": policy["_id"]},
-        {
-            "$set": {
-                "language": result["language"],
-                "policy_text": result["policy_text"],
-                "structured_plan": result["structured_plan"],
-                "retrieval_evidence": result["retrieval_evidence"],
-                "model_version": result["model_version"],
-                "provider_provenance": result["provider_provenance"],
-                "correlation_id": result["correlation_id"],
-                "policy_agent_version": result["policy_agent_version"],
-                "generated_at": result["generated_at"],
-                "lifecycle_status": result["lifecycle_status"],
-                "revision_count": result["revision_count"],
-                "ownership": result["ownership"],
-                "last_validation_status": result["last_validation_status"],
-                "last_validation_reasons": result["last_validation_reasons"],
-                "last_validation_recommendations": result["last_validation_recommendations"],
-            }
-        },
-    )
+    try:
+        write_result = mongo.db.policies.update_one(
+            {
+                "organization_id": organization_id,
+                "context_id": str(path_context_id),
+                "_id": policy["_id"],
+                "revision_count": policy["revision_count"],
+            },
+            {
+                "$set": {
+                    "language": result["language"],
+                    "policy_text": result["policy_text"],
+                    "structured_plan": result["structured_plan"],
+                    "retrieval_evidence": result["retrieval_evidence"],
+                    "model_version": result["model_version"],
+                    "provider_provenance": result["provider_provenance"],
+                    "correlation_id": result["correlation_id"],
+                    "policy_agent_version": result["policy_agent_version"],
+                    "generated_at": result["generated_at"],
+                    "lifecycle_status": result["lifecycle_status"],
+                    "revision_count": result["revision_count"],
+                    "ownership": result["ownership"],
+                    "last_validation_status": result["last_validation_status"],
+                    "last_validation_reasons": result["last_validation_reasons"],
+                    "last_validation_recommendations": result["last_validation_recommendations"],
+                }
+            },
+        )
+    except PyMongoError:
+        raise PipelineStepError(
+            stage="persistence_write",
+            message="Policy persistence is unavailable.",
+            error_type="state_error",
+            error_code="policy_persistence_unavailable",
+            status_code=503,
+            correlation_id=correlation_id,
+        ) from None
+    if write_result.matched_count != 1:
+        raise PipelineStepError(
+            stage="persistence_write",
+            message="Policy revision changed.",
+            error_type="state_error",
+            error_code="policy_revision_conflict",
+            status_code=409,
+            correlation_id=correlation_id,
+        )
 
     log_event(
         logger,
@@ -1515,9 +1615,13 @@ def update_policy_payload(payload: dict | None, path_context_id: str) -> dict:
     return _pipeline_success(stage="completed", policy=result)
 
 
-def run_policy_update_pipeline(payload: dict | None, path_context_id: str) -> dict:
+def run_policy_update_pipeline(
+    payload: dict | None, path_context_id: str, *, organization_id: str | None = None,
+) -> dict:
     """Execute policy update flow and return a structured success or error envelope."""
     try:
-        return update_policy_payload(payload, path_context_id)
+        return update_policy_payload(
+            payload, path_context_id, organization_id=organization_id,
+        )
     except PipelineStepError as exc:
         return _pipeline_error(exc)

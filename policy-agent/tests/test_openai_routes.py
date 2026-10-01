@@ -236,7 +236,7 @@ def test_generate_policy_route_rejects_missing_required_fields(client, workload_
             "/generate_policy",
             data=json.dumps({"context_id": "ctx-1", "refined_prompt": "prompt only"}),
             content_type="application/json",
-            headers=workload_headers("/generate_policy"),
+            headers=workload_headers("/generate_policy", context_id="ctx-1"),
         )
 
     assert response.status_code == 400
@@ -322,7 +322,7 @@ def test_generate_policy_route_with_openai(
             "/generate_policy",
             data=json.dumps(payload),
             content_type="application/json",
-            headers=workload_headers("/generate_policy"),
+            headers=workload_headers("/generate_policy", context_id=payload["context_id"]),
         )
 
     assert response.status_code == 200
@@ -369,7 +369,7 @@ def test_generate_policy_route_returns_deterministic_internal_error(client, work
             "/generate_policy",
             data=json.dumps(payload),
             content_type="application/json",
-            headers=workload_headers("/generate_policy"),
+            headers=workload_headers("/generate_policy", context_id=payload["context_id"]),
         )
 
     assert response.status_code == 500
@@ -397,9 +397,9 @@ def test_generate_policy_route_adds_security_headers(client, workload_headers):
     ):
         response = client.post(
             "/generate_policy",
-            data="[]",
+            data=json.dumps({"context_id": "ctx-1"}),
             content_type="application/json",
-            headers=workload_headers("/generate_policy"),
+            headers=workload_headers("/generate_policy", context_id="ctx-1"),
         )
 
     assert response.status_code == 400
@@ -410,7 +410,8 @@ def test_generate_policy_route_adds_security_headers(client, workload_headers):
 def test_generate_policy_route_preserves_request_correlation_id(client, workload_headers):
     captured = {}
 
-    def fake_run_generation_pipeline(payload):
+    def fake_run_generation_pipeline(payload, *, organization_id):
+        assert organization_id == "tenant-a"
         captured["correlation_id"] = g.correlation_id
         return {
             "success": False,
@@ -424,9 +425,9 @@ def test_generate_policy_route_preserves_request_correlation_id(client, workload
     with patch("app.routes.routes.run_generation_pipeline", side_effect=fake_run_generation_pipeline):
         response = client.post(
             "/generate_policy",
-            data="[]",
+            data=json.dumps({"context_id": "ctx-1"}),
             content_type="application/json",
-            headers={**workload_headers("/generate_policy"), "X-Correlation-ID": "request-correlation-id"},
+            headers={**workload_headers("/generate_policy", context_id="ctx-1"), "X-Correlation-ID": "request-correlation-id"},
         )
 
     assert captured["correlation_id"] == "request-correlation-id"
@@ -437,7 +438,8 @@ def test_generate_policy_route_preserves_request_correlation_id(client, workload
 def test_generate_policy_route_generates_request_correlation_id_when_missing(client, workload_headers):
     captured = {}
 
-    def fake_run_generation_pipeline(payload):
+    def fake_run_generation_pipeline(payload, *, organization_id):
+        assert organization_id == "tenant-a"
         captured["correlation_id"] = g.correlation_id
         return {
             "success": False,
@@ -451,9 +453,9 @@ def test_generate_policy_route_generates_request_correlation_id_when_missing(cli
     with patch("app.routes.routes.run_generation_pipeline", side_effect=fake_run_generation_pipeline):
         response = client.post(
             "/generate_policy",
-            data="[]",
+            data=json.dumps({"context_id": "ctx-1"}),
             content_type="application/json",
-            headers=workload_headers("/generate_policy"),
+            headers=workload_headers("/generate_policy", context_id="ctx-1"),
         )
 
     correlation_id = response.headers["X-Correlation-ID"]

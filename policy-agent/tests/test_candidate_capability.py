@@ -102,7 +102,7 @@ def test_candidate_generation_uses_domain_code_without_persistence(client, workl
     assert response.get_json()["candidate"]["authoritative"] is False
     assert list(mongo.db.policies.find()) == before["policies"]
     assert list(mongo.db.policy_configs.find()) == before["configs"]
-    assert run_agent.call_args.kwargs["store_config"] is False
+    assert "store_config" not in run_agent.call_args.kwargs
 
 
 def test_candidate_route_enforces_fixed_bounded_json_limit(client, app, monkeypatch, workload_headers):

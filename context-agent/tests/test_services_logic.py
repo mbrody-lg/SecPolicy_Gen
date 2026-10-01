@@ -20,7 +20,14 @@ def verified_workload_tenant(app):
         yield
 
 
-def _assert_signed_header(headers, *, audience, scope, path):
+@pytest.fixture
+def owned_context_id(app):
+    context_id = ObjectId()
+    logic.mongo.db.contexts.insert_one({"_id": context_id, "organization_id": ORGANIZATION_ID})
+    return str(context_id)
+
+
+def _assert_signed_header(headers, *, audience, scope, path, context_id=None):
     assert headers["Authorization"].startswith("Bearer ")
     claims = verify_token(
         headers["Authorization"].removeprefix("Bearer "),
@@ -32,6 +39,9 @@ def _assert_signed_header(headers, *, audience, scope, path):
         audience=audience, scope=scope, method="POST", path=path,
     )
     assert claims["tenant_id"] == ORGANIZATION_ID
+    if context_id is not None:
+        assert claims["version"] == 2
+        assert claims["context_id"] == context_id
 
 
 class FakeCollection:
@@ -77,6 +87,10 @@ class FakeCollection:
 
 class FakeDB:
     def __init__(self, contexts=None, interactions=None, pipeline_diagnostics=None):
+        for document in contexts or []:
+            document.setdefault("organization_id", ORGANIZATION_ID)
+        for document in interactions or []:
+            document.setdefault("organization_id", ORGANIZATION_ID)
         self.contexts = FakeCollection(contexts)
         self.interactions = FakeCollection(interactions)
         self.pipeline_diagnostics = FakeCollection(pipeline_diagnostics)
@@ -98,7 +112,7 @@ class FakeResponse:
         return self._payload
 
 
-def test_get_context_and_prompt_prefers_context_refined_prompt(monkeypatch):
+def test_get_context_and_prompt_prefers_context_refined_prompt(monkeypatch, verified_workload_tenant):
     context_id = ObjectId()
     security_context = logic.build_context_security_context(
         {
@@ -137,7 +151,7 @@ def test_get_context_and_prompt_prefers_context_refined_prompt(monkeypatch):
     assert exc_info.value.details["handoff_error_code"] == "final_context_version_unsupported"
 
 
-def test_get_context_and_prompt_falls_back_to_legacy_interaction(monkeypatch):
+def test_get_context_and_prompt_falls_back_to_legacy_interaction(monkeypatch, verified_workload_tenant):
     context_id = ObjectId()
     fake_db = FakeDB(
         contexts=[{"_id": context_id, "status": "context_ready_for_policy", "language": "en", "version": "0.2.0"}],
@@ -159,7 +173,7 @@ def test_get_context_and_prompt_falls_back_to_legacy_interaction(monkeypatch):
     assert exc_info.value.details["handoff_error_code"] == "final_context_version_unsupported"
 
 
-def test_get_context_and_prompt_normalizes_numeric_model_version(monkeypatch):
+def test_get_context_and_prompt_normalizes_numeric_model_version(monkeypatch, verified_workload_tenant):
     context_id = ObjectId()
     fake_db = FakeDB(
         contexts=[
@@ -1232,7 +1246,7 @@ def test_synthesize_final_context_rejects_incomplete_task_status(monkeypatch):
     assert "final_context" not in fake_db.contexts.docs[0]
 
 
-def test_synthesize_final_context_persists_final_context_and_refined_prompt(monkeypatch):
+def test_synthesize_final_context_persists_final_context_and_refined_prompt(monkeypatch, verified_workload_tenant):
     context_id = ObjectId()
     security_context = logic.build_context_security_context({
         "country": "Spain",
@@ -1343,7 +1357,7 @@ def test_build_final_context_keeps_tasks_without_text_results():
     assert task_items[-1]["content"] == "No detailed task response was returned."
 
 
-def test_get_context_and_prompt_includes_structured_policy_handoff(monkeypatch):
+def test_get_context_and_prompt_includes_structured_policy_handoff(monkeypatch, verified_workload_tenant):
     context_id = ObjectId()
     security_context = logic.build_context_security_context({
         "country": "Spain",
@@ -1401,7 +1415,7 @@ def test_get_context_and_prompt_includes_structured_policy_handoff(monkeypatch):
     assert "healthcare access review" in handoff["retrieval_hints"]["query_terms"]
 
 
-def test_get_context_and_prompt_rejects_invalid_policy_handoff(monkeypatch):
+def test_get_context_and_prompt_rejects_invalid_policy_handoff(monkeypatch, verified_workload_tenant):
     context_id = ObjectId()
     security_context = logic.build_context_security_context({
         "country": "Spain",
@@ -1513,7 +1527,7 @@ def test_synthesize_final_context_rejects_plan_revision_mismatch(monkeypatch):
     assert "final_context" not in fake_db.contexts.docs[0]
 
 
-def test_mark_final_context_section_for_improvement_blocks_policy_handoff(monkeypatch):
+def test_mark_final_context_section_for_improvement_blocks_policy_handoff(monkeypatch, verified_workload_tenant):
     context_id = ObjectId()
     context = {
         "_id": context_id,
@@ -1890,13 +1904,14 @@ def test_refresh_system_state_handles_unreachable_policy_agent(app_context, veri
     }
 
 
-def test_store_validated_policy_inserts_agent_interaction(monkeypatch):
+def test_store_validated_policy_inserts_agent_interaction(monkeypatch, verified_workload_tenant):
     context_id = ObjectId()
     fake_db = FakeDB(contexts=[{
         "_id": context_id,
         "organization_id": ORGANIZATION_ID,
     }])
     payload = {
+        "context_id": str(context_id),
         "policy_text": "Validated policy text",
         "generated_at": "2026-04-10T10:00:00+00:00",
         "policy_agent_version": "0.1.0",
@@ -1959,13 +1974,16 @@ def test_store_validated_policy_requires_full_payload(monkeypatch):
     assert exc_info.value.error_code == "validated_policy_missing_fields"
 
 
-def test_generate_full_policy_pipeline_stores_validated_policy_without_internal_http(monkeypatch):
+def test_generate_full_policy_pipeline_stores_validated_policy_without_internal_http(
+    monkeypatch, verified_workload_tenant,
+):
     context_id = ObjectId()
     fake_db = FakeDB(contexts=[{
         "_id": context_id,
         "organization_id": ORGANIZATION_ID,
     }])
     validated_payload = {
+        "context_id": str(context_id),
         "policy_text": "Validated policy text",
         "generated_at": "2026-04-10T10:00:00+00:00",
         "policy_agent_version": "0.1.0",
@@ -2035,7 +2053,9 @@ def test_generate_full_policy_pipeline_returns_structured_stage_error(monkeypatc
     }
 
 
-def test_call_policy_agent_propagates_timeout_and_correlation_headers(app_context, verified_workload_tenant, monkeypatch):
+def test_call_policy_agent_propagates_timeout_and_correlation_headers(
+    app_context, verified_workload_tenant, owned_context_id, monkeypatch,
+):
     captured = {}
 
     def fake_post(url, json, headers, timeout):
@@ -2050,7 +2070,7 @@ def test_call_policy_agent_propagates_timeout_and_correlation_headers(app_contex
 
     result = logic.call_policy_agent(
         {
-            "context_id": "ctx-1",
+            "context_id": owned_context_id,
             "correlation_id": "corr-1",
             "refined_prompt": "prompt",
             "language": "en",
@@ -2061,19 +2081,25 @@ def test_call_policy_agent_propagates_timeout_and_correlation_headers(app_contex
     assert result == {"success": True, "policy_text": "generated"}
     assert captured["url"].endswith("/generate_policy")
     assert captured["headers"]["X-Correlation-ID"] == "corr-1"
-    _assert_signed_header(captured["headers"], audience="policy-agent", scope="policy:generate", path="/generate_policy")
+    _assert_signed_header(
+        captured["headers"], audience="policy-agent", scope="policy:generate",
+        path="/generate_policy", context_id=owned_context_id,
+    )
     assert captured["timeout"] == 12.5
 
 
 def test_call_policy_agent_without_verified_tenant_makes_no_outbound_call(app_context, monkeypatch):
     calls = []
     monkeypatch.setattr(logic.requests, "post", lambda *args, **kwargs: calls.append((args, kwargs)))
-    with pytest.raises(ValueError, match="verified tenant"):
+    with pytest.raises(logic.PipelineStepError) as exc_info:
         logic.call_policy_agent({"context_id": "ctx-1"})
+    assert exc_info.value.error_code == "organization_context_required"
     assert calls == []
 
 
-def test_call_policy_agent_surfaces_dependency_error_metadata(app_context, verified_workload_tenant, monkeypatch):
+def test_call_policy_agent_surfaces_dependency_error_metadata(
+    app_context, verified_workload_tenant, owned_context_id, monkeypatch,
+):
     def fake_post(url, json, headers, timeout):
         return FakeResponse(
             {
@@ -2090,7 +2116,7 @@ def test_call_policy_agent_surfaces_dependency_error_metadata(app_context, verif
     with pytest.raises(logic.PipelineStepError) as exc_info:
         logic.call_policy_agent(
             {
-                "context_id": "ctx-2",
+                "context_id": owned_context_id,
                 "refined_prompt": "prompt",
                 "language": "en",
                 "model_version": "0.1.0",
@@ -2098,7 +2124,7 @@ def test_call_policy_agent_surfaces_dependency_error_metadata(app_context, verif
         )
 
     assert exc_info.value.error_code == "policy_agent_request_failed"
-    assert exc_info.value.correlation_id == "ctx-2"
+    assert exc_info.value.correlation_id == owned_context_id
     assert exc_info.value.details == {
         "target_service": "policy-agent",
         "operation": "generate_policy",
@@ -2109,7 +2135,9 @@ def test_call_policy_agent_surfaces_dependency_error_metadata(app_context, verif
     }
 
 
-def test_call_validator_agent_propagates_timeout_and_correlation_headers(app_context, verified_workload_tenant, monkeypatch):
+def test_call_validator_agent_propagates_timeout_and_correlation_headers(
+    app_context, verified_workload_tenant, owned_context_id, monkeypatch,
+):
     captured = {}
 
     def fake_post(url, json, headers, timeout):
@@ -2124,7 +2152,7 @@ def test_call_validator_agent_propagates_timeout_and_correlation_headers(app_con
 
     result = logic.call_validator_agent(
         {
-            "context_id": "ctx-3",
+            "context_id": owned_context_id,
             "correlation_id": "corr-3",
             "policy_text": "policy",
             "structured_plan": [],
@@ -2135,11 +2163,16 @@ def test_call_validator_agent_propagates_timeout_and_correlation_headers(app_con
     assert result == {"status": "accepted"}
     assert captured["url"].endswith("/validate-policy")
     assert captured["headers"]["X-Correlation-ID"] == "corr-3"
-    _assert_signed_header(captured["headers"], audience="validator-agent", scope="policy:validate", path="/validate-policy")
+    _assert_signed_header(
+        captured["headers"], audience="validator-agent", scope="policy:validate",
+        path="/validate-policy", context_id=owned_context_id,
+    )
     assert captured["timeout"] == 18.0
 
 
-def test_call_validator_agent_surfaces_dependency_error_metadata(app_context, verified_workload_tenant, monkeypatch):
+def test_call_validator_agent_surfaces_dependency_error_metadata(
+    app_context, verified_workload_tenant, owned_context_id, monkeypatch,
+):
     def fake_post(url, json, headers, timeout):
         return FakeResponse(
             {
@@ -2156,7 +2189,7 @@ def test_call_validator_agent_surfaces_dependency_error_metadata(app_context, ve
     with pytest.raises(logic.PipelineStepError) as exc_info:
         logic.call_validator_agent(
             {
-                "context_id": "ctx-4",
+                "context_id": owned_context_id,
                 "policy_text": "policy",
                 "structured_plan": [],
                 "generated_at": "2026-04-22T00:00:00+00:00",
@@ -2164,7 +2197,7 @@ def test_call_validator_agent_surfaces_dependency_error_metadata(app_context, ve
         )
 
     assert exc_info.value.error_code == "validator_agent_request_failed"
-    assert exc_info.value.correlation_id == "ctx-4"
+    assert exc_info.value.correlation_id == owned_context_id
     assert exc_info.value.details == {
         "target_service": "validator-agent",
         "operation": "validate_policy",
@@ -2200,7 +2233,7 @@ def test_get_context_and_prompt_uses_request_correlation_id(monkeypatch, app):
     assert exc_info.value.correlation_id == "corr-request"
 
 
-def test_call_policy_agent_prefers_request_correlation_id_over_payload(app, monkeypatch):
+def test_call_policy_agent_prefers_request_correlation_id_over_payload(app, owned_context_id, monkeypatch):
     captured = {}
 
     def fake_post(url, json, headers, timeout):
@@ -2214,7 +2247,7 @@ def test_call_policy_agent_prefers_request_correlation_id_over_payload(app, monk
         g.organization_id = ORGANIZATION_ID
         result = logic.call_policy_agent(
             {
-                "context_id": "ctx-1",
+                "context_id": owned_context_id,
                 "correlation_id": "corr-payload",
                 "refined_prompt": "prompt",
                 "language": "en",
@@ -2225,10 +2258,15 @@ def test_call_policy_agent_prefers_request_correlation_id_over_payload(app, monk
     assert result == {"success": True, "policy_text": "generated"}
     assert captured["headers"]["X-Correlation-ID"] == "corr-request"
     with app.app_context():
-        _assert_signed_header(captured["headers"], audience="policy-agent", scope="policy:generate", path="/generate_policy")
+        _assert_signed_header(
+            captured["headers"], audience="policy-agent", scope="policy:generate",
+            path="/generate_policy", context_id=owned_context_id,
+        )
 
 
-def test_call_policy_agent_emits_structured_logs(app_context, verified_workload_tenant, monkeypatch, caplog):
+def test_call_policy_agent_emits_structured_logs(
+    app_context, verified_workload_tenant, owned_context_id, monkeypatch, caplog,
+):
     def fake_post(url, json, headers, timeout):
         return FakeResponse({"success": True}, status_code=200)
 
@@ -2237,7 +2275,7 @@ def test_call_policy_agent_emits_structured_logs(app_context, verified_workload_
     with caplog.at_level("INFO"):
         result = logic.call_policy_agent(
             {
-                "context_id": "ctx-log",
+                "context_id": owned_context_id,
                 "refined_prompt": "prompt",
                 "language": "en",
                 "model_version": "0.1.0",
@@ -2247,7 +2285,7 @@ def test_call_policy_agent_emits_structured_logs(app_context, verified_workload_
     assert result == {"success": True}
     assert '"event": "context.policy.request"' in caplog.text
     assert '"event": "context.policy.response"' in caplog.text
-    assert '"context_id": "ctx-log"' in caplog.text
+    assert f'"context_id": "{owned_context_id}"' in caplog.text
 
 
 def test_get_pipeline_diagnostic_returns_serialized_document(monkeypatch):
@@ -2299,6 +2337,26 @@ def test_upsert_pipeline_diagnostic_bounds_hop_history(app, monkeypatch):
     assert len(diagnostic["hops"]) == logic.MAX_PIPELINE_DIAGNOSTIC_HOPS
     assert diagnostic["hops"][0]["operation"] == "step-5"
     assert diagnostic["hops"][-1]["operation"] == f"step-{logic.MAX_PIPELINE_DIAGNOSTIC_HOPS + 4}"
+
+
+def test_upsert_pipeline_diagnostic_does_not_infer_tenant_from_context(app, monkeypatch):
+    context_id = ObjectId()
+    fake_db = FakeDB(contexts=[{"_id": context_id, "organization_id": "other-tenant"}])
+    monkeypatch.setattr(logic.mongo, "db", fake_db, raising=False)
+
+    logic._upsert_pipeline_diagnostic(  # noqa: SLF001 - direct tenant-boundary coverage
+        correlation_id="corr-unverified",
+        context_id=str(context_id),
+        hop={"service": "context-agent", "stage": "pipeline", "outcome": "started"},
+    )
+    with app.test_request_context("/"):
+        logic._upsert_pipeline_diagnostic(  # noqa: SLF001 - direct tenant-boundary coverage
+            correlation_id="corr-unverified",
+            context_id=str(context_id),
+            hop={"service": "context-agent", "stage": "pipeline", "outcome": "started"},
+        )
+
+    assert fake_db.pipeline_diagnostics.docs == []
 
 
 def test_pipeline_error_adds_request_correlation_id_when_exception_lacks_one(app, monkeypatch):

@@ -48,7 +48,7 @@ def client(app):
 
 @pytest.fixture()
 def workload_headers(app):
-    def issue(path, *, subject=None, scope=None, audience="policy-agent", tenant_id="tenant-a"):
+    def issue(path, *, subject=None, scope=None, audience="policy-agent", tenant_id="tenant-a", context_id=None):
         if path == "/generate_policy":
             subject = subject or "context-agent"
             scope = scope or "policy:generate"
@@ -69,6 +69,7 @@ def workload_headers(app):
             scope=scope,
             tenant_id=tenant_id,
             path=path,
+            context_id=context_id,
         )
         return {"Authorization": f"Bearer {token}"}
 
