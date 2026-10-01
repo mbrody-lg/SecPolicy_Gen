@@ -7,7 +7,7 @@ ARG TORCH_CPU_INDEX=https://download.pytorch.org/whl/cpu
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-ENV PYTHONPATH=/policy-agent
+ENV PYTHONPATH=/shared:/policy-agent
 ENV PIP_NO_CACHE_DIR=1
 ENV FLASK_RUN_DEBUG=0
 
@@ -25,5 +25,6 @@ RUN python -m pip install --upgrade "pip==${PIP_VERSION}" \
     && python -m pip check
 
 COPY . .
+COPY --from=contracts . /shared/contracts
 
 CMD ["sh", "-c", "if [ \"$FLASK_RUN_DEBUG\" = \"1\" ] || [ \"$FLASK_RUN_DEBUG\" = \"true\" ]; then exec flask run --host=0.0.0.0 --port=5000 --debug; fi; exec flask run --host=0.0.0.0 --port=5000"]

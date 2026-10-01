@@ -26,6 +26,7 @@ class RetrievalPlan:
     steps: list[RetrievalPlanStep]
     required_families: list[str]
     coverage_notes: list[str] = field(default_factory=list)
+    policy_request: dict[str, Any] | None = None
 
 
 def build_retrieval_plan(context: RetrievalContext, manifest: dict[str, Any]) -> RetrievalPlan:
@@ -56,6 +57,7 @@ def build_retrieval_plan(context: RetrievalContext, manifest: dict[str, Any]) ->
         steps=steps,
         required_families=required_families,
         coverage_notes=coverage_notes,
+        policy_request=context.policy_request,
     )
 
 

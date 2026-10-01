@@ -166,8 +166,12 @@ def generate_candidate_policy():
         payload, status_code = contract_error
         return jsonify(payload), status_code
 
+    candidate_payload = request.get_json(silent=True)
+    if isinstance(candidate_payload, dict) and "policy_request" in candidate_payload:
+        return jsonify({"success": False, "error_code": "candidate_policy_request_forbidden"}), 400
+
     pipeline_result = run_generation_pipeline(
-        request.get_json(silent=True), persist=False,
+        candidate_payload, persist=False,
     )
     if not pipeline_result["success"]:
         status_code = pipeline_result.pop("status_code")

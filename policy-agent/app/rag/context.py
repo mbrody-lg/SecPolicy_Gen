@@ -21,10 +21,28 @@ class RetrievalContext:
     specificity: str | None = None
     need: str | None = None
     data_types: list[str] = field(default_factory=list)
+    policy_request: dict[str, Any] | None = None
 
 
 def build_retrieval_context(payload: dict[str, Any]) -> RetrievalContext:
     """Build a RetrievalContext from the normalized policy-generation payload."""
+    policy_request = payload.get("policy_request")
+    if policy_request is not None:
+        intent = policy_request["policy_intent"]
+        facts = policy_request["business_facts"]
+        scope = facts["entity_scope"]
+        return RetrievalContext(
+            context_id=policy_request["context_id"],
+            refined_prompt=payload["refined_prompt"],
+            language=intent["language"]["value"],
+            country=" ".join(scope["jurisdictions"]["value"] or []) or None,
+            sector=" ".join(scope["sectors"]["value"] or []) or None,
+            important_assets=scope["services"]["value"] or [],
+            critical_assets=facts["critical_processes"]["value"] or [],
+            need=intent["scope"]["value"],
+            data_types=scope["data_categories"]["value"] or [],
+            policy_request=policy_request,
+        )
     business_context = payload.get("business_context")
     if not isinstance(business_context, dict):
         business_context = {}
@@ -84,4 +102,3 @@ def _infer_data_types(text: str) -> list[str]:
     if any(term in normalized for term in ("payment", "ecommerce", "commerce", "pago", "comercio")):
         data_types.append("commerce_data")
     return data_types
-

@@ -73,6 +73,21 @@ def require_service_identity():
             (request.view_args or {}).get("context_id") != claims["context_id"]
         ):
             return _error(403, "service_context_forbidden")
+        if scope == "policy:generate":
+            policy_request = body.get("policy_request")
+            signed_snapshot = "snapshot_hash" in claims or "plan_revision_id" in claims
+            if policy_request is not None or signed_snapshot:
+                approved = policy_request.get("approved_context") if isinstance(policy_request, dict) else None
+                if (
+                    not signed_snapshot
+                    or not isinstance(approved, dict)
+                    or policy_request.get("context_id") != claims["context_id"]
+                    or approved.get("context_id") != claims["context_id"]
+                    or approved.get("tenant_id") != claims["tenant_id"]
+                    or approved.get("snapshot_hash") != claims["snapshot_hash"]
+                    or approved.get("plan_revision_id") != claims["plan_revision_id"]
+                ):
+                    return _error(403, "service_snapshot_forbidden")
     try:
         consume_token(mongo.db, credential, claims)
     except WorkloadReplay:

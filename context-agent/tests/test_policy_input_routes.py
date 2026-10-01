@@ -6,6 +6,7 @@ import pytest
 from bson import ObjectId
 
 import app.routes.routes as routes
+import app.services.logic as context_logic
 from app.services.logic import policy_handoff_context_from_context_record
 from test_policy_input import EXAMPLES, example_answers, structured_answers, synthetic_handoff
 
@@ -15,9 +16,11 @@ def context_id(client, monkeypatch):
     identifier = ObjectId()
     handoff = synthetic_handoff()
     monkeypatch.setattr(routes, "policy_handoff_context_from_context_record", lambda _context: deepcopy(handoff))
+    monkeypatch.setattr(context_logic, "policy_handoff_context_from_context_record", lambda _context: deepcopy(handoff))
     routes.mongo.db.contexts.insert_one({
         "_id": identifier,
         "status": "context_ready_for_policy",
+        "refined_prompt": "Draft a synthetic policy.",
         "context_intelligence_plan": {
             "status": "approved", "approved_revision_id": "synthetic-plan-001",
         },
@@ -54,7 +57,7 @@ def test_opt_in_answers_approval_invalidation_and_generation_gate(client, contex
     assert second.get_json()["material_questions"] == []
     approved = client.post(base + "/approve", json={"expected_revision": 2})
     assert approved.status_code == 200
-    assert approved.get_json()["generation_available"] is False
+    assert approved.get_json()["generation_available"] is True
     state = routes.mongo.db.contexts.find_one({"_id": context_id})["policy_input"]
     assert state["approval"]["answer_snapshot"] == state["revisions"][-1]["answers"]
     assert state["approval"]["request"]["approved_context"]["snapshot_hash"] == approved.get_json()["snapshot_hash"]
@@ -62,9 +65,13 @@ def test_opt_in_answers_approval_invalidation_and_generation_gate(client, contex
     assert client.get(base).get_json()["approval_status"] == "approved"
 
     monkeypatch.setattr(routes, "get_system_status", lambda: {"status": "ready"})
+    monkeypatch.setattr(routes, "start_pipeline_job_worker", lambda _job: None)
+    routes.mongo.db.contexts.update_one({"_id": context_id}, {
+        "$set": {"security_context.analysis.missing_information": []},
+    })
     generation = client.post(f"/context/{context_id}/generate_policy", headers={"Accept": "application/json"})
-    assert generation.status_code == 409
-    assert generation.get_json()["error_code"] == "policy_request_ingress_not_available"
+    assert generation.status_code == 202
+    assert generation.get_json()["status"] == "accepted"
 
     edit = client.post(base + "/answers", json={
         "expected_revision": 2,
@@ -81,6 +88,29 @@ def test_opt_in_answers_approval_invalidation_and_generation_gate(client, contex
     generation = client.post(f"/context/{context_id}/generate_policy", headers={"Accept": "application/json"})
     assert generation.status_code == 409
     assert generation.get_json()["error_code"] == "policy_input_not_approved"
+
+
+def test_approved_oversize_input_is_not_advertised_or_queued(client, context_id, monkeypatch):
+    base = _url(context_id)
+    answers = structured_answers(example_answers(EXAMPLES[0]))
+    large_values = [f"synthetic-{index}-" + ("x" * 390) for index in range(24)]
+    for field in ("existing_controls", "known_gaps"):
+        answers[f"business_facts.{field}"] = {
+            "value": large_values, "confidence": "confirmed",
+        }
+    assert client.post(base + "/answers", json={"expected_revision": 0, "answers": answers}).status_code == 200
+    approved = client.post(base + "/approve", json={"expected_revision": 1})
+    assert approved.status_code == 200
+    assert approved.get_json()["generation_available"] is False
+    assert approved.get_json()["generation_blocker"] == "policy_input_too_large"
+    reviewed = client.get(base).get_json()
+    assert reviewed["approval_status"] == "approved"
+    assert reviewed["generation_available"] is False
+    assert reviewed["generation_blocker"] == "policy_input_too_large"
+    monkeypatch.setattr(routes, "start_pipeline_job_worker", lambda _job: pytest.fail("worker queued"))
+    generation = client.post(f"/context/{context_id}/generate_policy", headers={"Accept": "application/json"})
+    assert generation.status_code == 413
+    assert generation.get_json()["error_code"] == "policy_input_too_large"
 
 
 def test_stale_revision_invalid_input_and_tenant_boundary(client, context_id):

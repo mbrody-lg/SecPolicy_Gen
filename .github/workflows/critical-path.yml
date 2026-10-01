@@ -8,7 +8,9 @@ on:
     paths:
       - ".github/workflows/critical-path.yml"
       - "context-agent/**"
+      - "contracts/**"
       - "policy-agent/**"
+      - "tests/integration/**"
       - "validator-agent/**"
       - "infrastructure/docker-compose.yml"
       - "infrastructure/docker-compose.critical-path.yml"

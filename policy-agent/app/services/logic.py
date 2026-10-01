@@ -11,7 +11,7 @@ from pathlib import Path
 from time import perf_counter
 
 import yaml
-from flask import current_app
+from flask import current_app, g, has_request_context
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from app import CORRELATION_ID_HEADER, get_request_correlation_id, mongo
@@ -28,6 +28,9 @@ from app.rag.context import build_retrieval_context
 from app.rag.planner import build_retrieval_plan
 from app.rag.sources import load_rag_source_manifest
 from app.workload_token import TENANT_PATTERN
+from contracts.policy_request_v1 import (
+    PolicyRequestError, format_policy_request_v1_1_prompt, validate_policy_request_v1_1,
+)
 
 
 POLICY_GENERATION_REQUIRED_FIELDS = ["context_id", "refined_prompt", "language", "model_version"]
@@ -895,11 +898,25 @@ def get_readiness_status() -> tuple[dict, int]:
     }, 503
 
 
-def validate_generation_payload(payload: dict | None) -> dict:
+def validate_generation_payload(payload: dict | None, *, organization_id: str | None = None) -> dict:
     """Validate the generate-policy request contract and normalize fields."""
     correlation_id = _get_correlation_id(payload)
     data = _ensure_payload_object(payload, correlation_id)
-    _reject_unintegrated_policy_request(data, correlation_id)
+    if "policy_request" not in data:
+        _reject_unintegrated_policy_request(data, correlation_id)
+    else:
+        _reject_unintegrated_policy_request(
+            {key: value for key, value in data.items() if key != "policy_request"},
+            correlation_id,
+        )
+        allowed = set(POLICY_GENERATION_REQUIRED_FIELDS) | {"correlation_id", "policy_request", "business_context"}
+        extra = set(data) - allowed
+        if extra:
+            raise PipelineStepError(
+                stage="contract_validation", message="Unknown canonical transport field.",
+                error_type="contract_error", error_code="unknown_field", status_code=400,
+                details={"field": "request"}, correlation_id=correlation_id,
+            )
     missing = _missing_fields(data, POLICY_GENERATION_REQUIRED_FIELDS)
     if missing:
         raise PipelineStepError(
@@ -940,10 +957,44 @@ def validate_generation_payload(payload: dict | None) -> dict:
         "correlation_id": correlation_id,
     }
     if "business_context" in data:
+        if "policy_request" in data:
+            raise PipelineStepError(
+                stage="contract_validation", message="Canonical input cannot include legacy business_context.",
+                error_type="contract_error", error_code="conflicting_policy_request", status_code=400,
+                details={"field": "business_context"}, correlation_id=correlation_id,
+            )
         normalized["business_context"] = _validate_business_context(
             data["business_context"],
             correlation_id=correlation_id,
         )
+    if "policy_request" in data:
+        principal = getattr(g, "service_principal", None) if has_request_context() else None
+        verified_tenant = principal.get("tenant_id") if isinstance(principal, dict) else None
+        verified_context = principal.get("context_id") if isinstance(principal, dict) else None
+        if organization_id is not None and verified_tenant is not None and organization_id != verified_tenant:
+            raise PipelineStepError(
+                stage="contract_validation", message="Tenant identity does not match.",
+                error_type="contract_error", error_code="context_mismatch", status_code=403,
+                correlation_id=correlation_id,
+            )
+        try:
+            canonical = validate_policy_request_v1_1(
+                data["policy_request"], expected_context_id=verified_context or normalized["context_id"],
+                expected_tenant_id=verified_tenant or organization_id,
+            )
+        except PolicyRequestError as exc:
+            raise PipelineStepError(
+                stage="contract_validation", message="Invalid canonical policy request.",
+                error_type="contract_error", error_code=exc.code, status_code=400,
+                details={"field": "policy_request"}, correlation_id=correlation_id,
+            ) from None
+        if normalized["language"] != canonical["policy_intent"]["language"]["value"]:
+            raise PipelineStepError(
+                stage="contract_validation", message="Language does not match canonical request.",
+                error_type="contract_error", error_code="conflicting_policy_request", status_code=400,
+                details={"field": "language"}, correlation_id=correlation_id,
+            )
+        normalized["policy_request"] = canonical
     return normalized
 
 
@@ -1219,6 +1270,7 @@ def run_with_agent(
     context_id: str,
     model_version: str,
     business_context: dict | None = None,
+    policy_request: dict | None = None,
 ) -> dict:
     """Run full policy-agent role pipeline for initial policy generation."""
     config = load_policy_config()
@@ -1231,6 +1283,7 @@ def run_with_agent(
                 "refined_prompt": refined_prompt,
                 "language": business_context.get("language", "") if business_context else "",
                 "business_context": business_context or {},
+                "policy_request": policy_request,
             }
         ),
         load_rag_source_manifest(),
@@ -1247,10 +1300,26 @@ def run_with_agent(
         model_version=model_version,
     )
     result = _validate_agent_result(
-        agent.run(prompt=refined_prompt, context_id=context_id, retrieval_plan=retrieval_plan),
+        agent.run(
+            prompt=_canonical_generation_prompt(refined_prompt, policy_request),
+            context_id=context_id, retrieval_plan=retrieval_plan,
+        ),
         config,
     )
     return result
+
+
+def _canonical_generation_prompt(refined_prompt: str, policy_request: dict | None) -> str:
+    if policy_request is None:
+        return refined_prompt
+    try:
+        return format_policy_request_v1_1_prompt(refined_prompt, policy_request)
+    except PolicyRequestError:
+        raise PipelineStepError(
+            stage="contract_validation", message="Canonical generation input is too large.",
+            error_type="contract_error", error_code="too_large", status_code=400,
+            details={"field": "policy_request"},
+        ) from None
 
 
 def update_with_agent(prompt: str, context_id: str | None = None, model_version: str | None = None) -> dict:
@@ -1283,9 +1352,12 @@ def generate_policy_payload(
     """Validate payload, run generation flow, and optionally persist the response."""
     if persist:
         organization_id = _require_organization_id(organization_id)
-    data = validate_generation_payload(payload)
+    data = validate_generation_payload(payload, organization_id=organization_id)
     correlation_id = data["correlation_id"]
     started_perf = perf_counter()
+
+    if "policy_request" in data:
+        _canonical_generation_prompt(data["refined_prompt"], data["policy_request"])
 
     if persist:
         try:
@@ -1307,6 +1379,7 @@ def generate_policy_payload(
             context_id=data["context_id"],
             model_version=data["model_version"],
             business_context={**data.get("business_context", {}), "language": data["language"]},
+            **({"policy_request": data["policy_request"]} if "policy_request" in data else {}),
         )
     except FileNotFoundError as exc:
         logger.exception(
@@ -1389,6 +1462,16 @@ def generate_policy_payload(
             "collection": "policies" if persist else None,
         },
     }
+    if "policy_request" in data:
+        approved = data["policy_request"]["approved_context"]
+        result["policy_input_binding"] = {
+            "contract": data["policy_request"]["contract"],
+            "version": data["policy_request"]["version"],
+            "context_id": data["context_id"],
+            "tenant_id": approved["tenant_id"],
+            "plan_revision_id": approved["plan_revision_id"],
+            "snapshot_hash": approved["snapshot_hash"],
+        }
     if persist:
         result["organization_id"] = organization_id
         result["generation_guard"] = True

@@ -1,5 +1,6 @@
 """Service helpers for context prompting and policy pipeline orchestration."""
 
+from copy import deepcopy
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -33,6 +34,7 @@ from app.policy_handoff_contract import (
     POLICY_HANDOFF_CONTEXT_VERSION,
     validate_policy_handoff_context as _validate_policy_handoff_context,
 )
+from contracts.policy_request_v1 import PolicyRequestError, format_policy_request_v1_1_prompt
 
 logger = logging.getLogger(__name__)
 MAX_PIPELINE_DIAGNOSTIC_HOPS = 25
@@ -2350,9 +2352,22 @@ def _get_correlation_id(payload: dict | None = None, context_id: str | None = No
     return None
 
 
+def _current_policy_input_request(context: dict, *, tenant_id: str) -> dict | None:
+    """Return only the Context-owned request still approved for this snapshot."""
+    try:
+        handoff = policy_handoff_context_from_context_record(context)
+        if not approved_request_is_current(context, handoff, tenant_id=tenant_id):
+            return None
+        request = context["policy_input"]["approval"]["request"]
+        return deepcopy(request)
+    except (SecurityContextValidationError, KeyError, TypeError, ValueError):
+        return None
+
+
 def _dependency_headers(
     correlation_id: str | None, *, audience: str, scope: str, path: str,
     context_id: str | None = None,
+    snapshot_hash: str | None = None, plan_revision_id: str | None = None,
 ) -> dict:
     """Sign outbound authority using the verified request or worker tenant."""
     from app.workload_token import CONTEXT_BOUND_SCOPES, TENANT_PATTERN, mint_token
@@ -2379,16 +2394,39 @@ def _dependency_headers(
                 error_type="contract_error", error_code="invalid_context_id",
                 status_code=400, correlation_id=correlation_id,
             )
-        if not mongo.db.contexts.find_one(
+        context = mongo.db.contexts.find_one(
             {"_id": object_id, "organization_id": tenant_id},
-        ):
+        )
+        if not context:
             raise PipelineStepError(
                 stage="workload_authentication", message="Context not found.",
                 error_type="authorization_error", error_code="context_not_found",
                 status_code=404, correlation_id=correlation_id,
             )
+        if scope == "policy:generate" and context.get("policy_input") and not (
+            snapshot_hash and plan_revision_id
+        ):
+            raise PipelineStepError(
+                stage="workload_authentication", message="Policy input requires current approval.",
+                error_type="workflow_error", error_code="policy_input_not_approved",
+                status_code=409, correlation_id=correlation_id,
+            )
+        if snapshot_hash is not None or plan_revision_id is not None:
+            if scope != "policy:generate" or not snapshot_hash or not plan_revision_id:
+                raise ValueError("Snapshot attestation is limited to policy generation.")
+            approved = _current_policy_input_request(context, tenant_id=tenant_id)
+            approved_context = (approved or {}).get("approved_context", {})
+            if (approved_context.get("snapshot_hash") != snapshot_hash
+                    or approved_context.get("plan_revision_id") != plan_revision_id):
+                raise PipelineStepError(
+                    stage="workload_authentication", message="Policy input requires current approval.",
+                    error_type="workflow_error", error_code="policy_input_not_approved",
+                    status_code=409, correlation_id=correlation_id,
+                )
     elif context_id is not None:
         raise ValueError("This workload scope does not accept a context ID.")
+    elif snapshot_hash is not None or plan_revision_id is not None:
+        raise ValueError("Snapshot attestation requires a context-bound scope.")
     token = mint_token(
         key=current_app.config["WORKLOAD_CONTEXT_SIGNING_KEY"],
         kid=current_app.config["WORKLOAD_CONTEXT_SIGNING_KID"],
@@ -2398,6 +2436,8 @@ def _dependency_headers(
         tenant_id=tenant_id,
         path=path,
         context_id=context_id,
+        snapshot_hash=snapshot_hash,
+        plan_revision_id=plan_revision_id,
     )
     headers = {}
     if correlation_id:
@@ -2576,25 +2616,16 @@ def get_context_and_prompt(context_id: str) -> dict:
             correlation_id=correlation_id,
         )
 
+    approved_request = None
     if context.get("policy_input"):
-        try:
-            handoff = policy_handoff_context_from_context_record(context)
-            current = approved_request_is_current(
-                context, handoff, tenant_id=getattr(g, "organization_id", "") or "",
+        approved_request = _current_policy_input_request(context, tenant_id=organization_id)
+        if approved_request is None:
+            raise PipelineStepError(
+                stage="context_fetch", message="Policy input requires current approval.",
+                error_type="workflow_error", error_code="policy_input_not_approved",
+                status_code=409, details={"context_id": context_id},
+                correlation_id=correlation_id,
             )
-        except (SecurityContextValidationError, KeyError, TypeError, ValueError):
-            current = False
-        raise PipelineStepError(
-            stage="context_fetch",
-            message=("PolicyRequest 1.1 ingress is not enabled." if current
-                     else "Policy input requires current approval."),
-            error_type="workflow_error",
-            error_code=("policy_request_ingress_not_available" if current
-                        else "policy_input_not_approved"),
-            status_code=409,
-            details={"context_id": context_id},
-            correlation_id=correlation_id,
-        )
 
     if context.get("status") != "context_ready_for_policy":
         raise PipelineStepError(
@@ -2668,16 +2699,29 @@ def get_context_and_prompt(context_id: str) -> dict:
             correlation_id=correlation_id,
         )
 
-    return {
+    payload = {
         "context_id": context_id,
         "refined_prompt": refined_prompt,
-        "language": context.get("language", "en"),
+        "language": (approved_request["policy_intent"]["language"]["value"]
+                     if approved_request else context.get("language", "en")),
         "model_version": str(context.get("version", "0.1.0")),
-        "business_context": business_context_from_context_record(context),
-        "policy_handoff_context": policy_handoff_context,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
         "correlation_id": correlation_id,
     }
+    if approved_request:
+        try:
+            format_policy_request_v1_1_prompt(refined_prompt, approved_request)
+        except PolicyRequestError:
+            raise PipelineStepError(
+                stage="context_fetch", message="Approved policy input is too large for generation.",
+                error_type="contract_error", error_code="policy_input_too_large",
+                status_code=413, correlation_id=correlation_id,
+            ) from None
+        payload["policy_request"] = approved_request
+    else:
+        payload["generated_at"] = datetime.now(timezone.utc).isoformat()
+        payload["business_context"] = business_context_from_context_record(context)
+        payload["policy_handoff_context"] = policy_handoff_context
+    return payload
 
 
 def call_policy_agent(context_payload: dict) -> dict:
@@ -2699,6 +2743,15 @@ def call_policy_agent(context_payload: dict) -> dict:
         timeout_seconds=timeout_seconds,
     )
     try:
+        policy_request = context_payload.get("policy_request")
+        approved_context = policy_request.get("approved_context") if isinstance(policy_request, dict) else None
+        if policy_request is not None and not isinstance(approved_context, dict):
+            raise PipelineStepError(
+                stage="workload_authentication", message="Invalid approved policy input.",
+                error_type="contract_error", error_code="invalid_policy_request",
+                status_code=400, correlation_id=correlation_id,
+            )
+        approved_context = approved_context or {}
         response = requests.post(
             f"{policy_agent_url}/generate_policy",
             json=context_payload,
@@ -2708,6 +2761,8 @@ def call_policy_agent(context_payload: dict) -> dict:
                 scope="policy:generate",
                 path="/generate_policy",
                 context_id=context_payload.get("context_id"),
+                snapshot_hash=approved_context.get("snapshot_hash"),
+                plan_revision_id=approved_context.get("plan_revision_id"),
             ),
             timeout=timeout_seconds,
         )
